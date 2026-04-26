@@ -1,88 +1,98 @@
 import type { ApiPhoto, LibraryPayload } from "./types";
 
+async function parseError(res: Response, fallback: string): Promise<string> {
+  const contentType = res.headers.get("Content-Type") || "";
+  if (contentType.includes("application/json")) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    return body.error ?? fallback;
+  }
+  const text = await res.text().catch(() => "");
+  return text || fallback;
+}
+
+async function requestJson<T>(input: RequestInfo | URL, init: RequestInit | undefined, fallback: string): Promise<T> {
+  const res = await fetch(input, init);
+  if (!res.ok) {
+    throw new Error(await parseError(res, fallback));
+  }
+  return (await res.json()) as T;
+}
+
+async function requestBlob(input: RequestInfo | URL, init: RequestInit | undefined, fallback: string): Promise<Blob> {
+  const res = await fetch(input, init);
+  if (!res.ok) {
+    throw new Error(await parseError(res, fallback));
+  }
+  return res.blob();
+}
+
 export async function uploadPhotos(files: FileList): Promise<ApiPhoto[]> {
   const formData = new FormData();
   for (const file of Array.from(files)) {
     formData.append("files", file);
   }
 
-  const res = await fetch("/upload", {
+  const data = await requestJson<ApiPhoto[]>("/api/photos/upload", {
     method: "POST",
     body: formData
-  });
+  }, "Upload failed");
 
-  const data = (await res.json()) as ApiPhoto[] | { error?: string };
-  if (!res.ok || !Array.isArray(data)) {
-    const message = Array.isArray(data) ? "Upload failed" : (data.error ?? "Upload failed");
-    throw new Error(message);
+  if (!Array.isArray(data)) {
+    throw new Error("Upload failed");
   }
-
   return data;
 }
 
 export async function fetchLibrary(): Promise<LibraryPayload> {
-  const res = await fetch("/library");
-  const data = (await res.json()) as LibraryPayload | { error?: string };
-  if (!res.ok || !data || !("folders" in data) || !("photos" in data)) {
+  const data = await requestJson<LibraryPayload>("/api/library", undefined, "Failed to load library");
+  if (!data || !("folders" in data) || !("photos" in data)) {
     throw new Error("Failed to load library");
   }
   return data;
 }
 
 export async function refreshLibrary(): Promise<LibraryPayload> {
-  const res = await fetch("/refresh", {
+  const data = await requestJson<LibraryPayload>("/api/library/refresh", {
     method: "POST"
-  });
-  const data = (await res.json()) as LibraryPayload | { error?: string };
-  if (!res.ok || !data || !("folders" in data) || !("photos" in data)) {
+  }, "Failed to refresh library");
+  if (!data || !("folders" in data) || !("photos" in data)) {
     throw new Error("Failed to refresh library");
   }
   return data;
 }
 
 export async function exportPhotos(selectedIds: string[]): Promise<Blob> {
-  const res = await fetch("/export", {
+  return requestBlob("/api/photos/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ selected_ids: selectedIds })
-  });
-
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? "Export failed");
-  }
-
-  return res.blob();
+  }, "Export failed");
 }
 
 export async function updatePhotoDecision(photoId: string, decision: "accepted" | "rejected" | null): Promise<ApiPhoto> {
-  const res = await fetch("/decision", {
-    method: "POST",
+  const data = await requestJson<ApiPhoto>(`/api/photos/${photoId}/decision`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ photo_id: photoId, decision })
-  });
+    body: JSON.stringify({ decision })
+  }, "Failed to update decision");
 
-  const data = (await res.json()) as ApiPhoto | { error?: string };
-  if (!res.ok || !data || !("id" in data)) {
-    const message = data && "error" in data ? (data.error ?? "Failed to update decision") : "Failed to update decision";
-    throw new Error(message);
+  if (!data || !("id" in data)) {
+    throw new Error("Failed to update decision");
   }
-
   return data;
 }
 
 export async function updatePhotoScore(photoId: string, manualScore: number | null): Promise<ApiPhoto> {
-  const res = await fetch("/score", {
-    method: "POST",
+  const data = await requestJson<ApiPhoto>(`/api/photos/${photoId}/score`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ photo_id: photoId, manual_score: manualScore })
-  });
+    body: JSON.stringify({ manual_score: manualScore })
+  }, "Failed to update score");
 
-  const data = (await res.json()) as ApiPhoto | { error?: string };
-  if (!res.ok || !data || !("id" in data)) {
-    const message = data && "error" in data ? (data.error ?? "Failed to update score") : "Failed to update score";
-    throw new Error(message);
+  if (!data || !("id" in data)) {
+    throw new Error("Failed to update score");
   }
-
   return data;
 }
+
+export const apiInternals = { requestJson, requestBlob, parseError };

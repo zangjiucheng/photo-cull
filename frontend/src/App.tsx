@@ -1,22 +1,18 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { exportPhotos, fetchLibrary, refreshLibrary, updatePhotoDecision, updatePhotoScore, uploadPhotos } from "./api";
-import { normalizeScores } from "./core";
+import { useCallback, useState, type CSSProperties } from "react";
+import { exportPhotos, updatePhotoDecision, updatePhotoScore, uploadPhotos } from "./api";
 import { LibraryBrowser } from "./components/library/LibraryBrowser";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { Button } from "./components/ui/button";
-import type { DecisionFilter, LibraryFolder, Photo, SortMode, StatusTone, ViewMode } from "./types";
+import { useLibrary } from "./hooks/useLibrary";
+import { usePhotoFilters } from "./hooks/usePhotoFilters";
+import { usePhotoSelection } from "./hooks/usePhotoSelection";
+import type { DecisionFilter, LibraryFolder, SortMode, StatusTone, ViewMode } from "./types";
 
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
 }
 
 export default function App() {
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [folders, setFolders] = useState<LibraryFolder[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set());
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [activeFolderPath, setActiveFolderPath] = useState<string>("");
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState(70);
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all");
@@ -24,118 +20,45 @@ export default function App() {
   const [sortMode, setSortMode] = useState<SortMode>("score-desc");
   const [statusText, setStatusText] = useState("Ready");
   const [statusTone, setStatusTone] = useState<StatusTone>("");
-  const [pendingCount, setPendingCount] = useState(0);
-  const [processingCount, setProcessingCount] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
 
-  function updateStatus(text: string, tone: StatusTone = "") {
+  const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
     setStatusTone(tone);
-  }
-
-  async function loadLibrary() {
-    try {
-      const data = await fetchLibrary();
-      applyLibraryPayload(data);
-    } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Failed to load library", "error");
-    }
-  }
-
-  function applyLibraryPayload(data: Awaited<ReturnType<typeof fetchLibrary>>) {
-    const normalized = normalizeScores(data.photos);
-    setPhotos(normalized);
-    setSelectedIds(new Set(normalized.filter((photo) => photo.decision === "accepted").map((photo) => photo.id)));
-    setRejectedIds(new Set(normalized.filter((photo) => photo.decision === "rejected").map((photo) => photo.id)));
-    setFolders(data.folders);
-    setPendingCount(data.summary.pending);
-    setProcessingCount(data.summary.processing);
-    setActiveFolderPath((current) => {
-      if (current && data.folders.some((folder) => folder.path === current)) {
-        return current;
-      }
-      return data.folders[0]?.path || "";
-    });
-    setActiveId((current) => current || normalized[0]?.id || null);
-
-    if (data.summary.processing > 0 || data.summary.pending > 0) {
-      updateStatus(
-        `Scoring in background: ${data.summary.processing} processing, ${data.summary.pending} queued`,
-        "busy"
-      );
-    } else if (data.summary.error > 0) {
-      updateStatus(`Loaded ${normalized.length} photos (${data.summary.error} failed).`, "warn");
-    } else {
-      updateStatus(`Loaded ${normalized.length} photos from uploads.`, "ok");
-    }
-  }
-
-  useEffect(() => {
-    void loadLibrary();
   }, []);
 
-  useEffect(() => {
-    if (pendingCount === 0 && processingCount === 0) {
-      return;
-    }
+  const library = useLibrary(updateStatus);
+  const {
+    photos,
+    folders,
+    activeFolderPath,
+    setActiveFolderPath,
+    activeId,
+    setActiveId,
+    loadLibrary,
+    refresh
+  } = library;
+  const selection = usePhotoSelection(photos, updateStatus);
+  const { selectedIds, rejectedIds, setSelectedIds, setRejectedIds, toggleAccept, toggleReject } = selection;
+  const { activeFolder, folderPhotos, visiblePhotos, activePhoto, childFolders } = usePhotoFilters(photos, folders, {
+    activeFolderPath,
+    search,
+    minScore,
+    decisionFilter,
+    sortMode,
+    selectedIds,
+    rejectedIds,
+    activeId
+  });
 
-    const timer = window.setInterval(() => {
-      void loadLibrary();
-    }, 2000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [pendingCount, processingCount]);
-
-  const activeFolder = useMemo(
-    () => folders.find((folder) => folder.path === activeFolderPath) ?? folders[0] ?? null,
-    [folders, activeFolderPath]
-  );
-
-  const folderPhotos = useMemo(() => {
-    if (!activeFolder) {
-      return [];
-    }
-
-    return photos.filter((photo) => photo.folderPath === activeFolder.path);
-  }, [photos, activeFolder]);
-
-  const visiblePhotos = useMemo(() => {
-    let items = folderPhotos.filter((photo) => {
-      if (photo.aiScore < minScore) return false;
-      if (search && !photo.name.toLowerCase().includes(search.toLowerCase())) return false;
-      if (decisionFilter === "accepted" && !selectedIds.has(photo.id)) return false;
-      if (decisionFilter === "rejected" && !rejectedIds.has(photo.id)) return false;
-      return true;
-    });
-
-    const sorter: Record<SortMode, (a: Photo, b: Photo) => number> = {
-      "score-desc": (a, b) => b.aiScore - a.aiScore,
-      "score-asc": (a, b) => a.aiScore - b.aiScore,
-      "name-asc": (a, b) => a.name.localeCompare(b.name),
-      "name-desc": (a, b) => b.name.localeCompare(a.name),
-      "mtime-desc": (a, b) => b.mtime - a.mtime,
-      "mtime-asc": (a, b) => a.mtime - b.mtime
-    };
-
-    return [...items].sort(sorter[sortMode]);
-  }, [folderPhotos, minScore, search, decisionFilter, selectedIds, rejectedIds, sortMode]);
-
-  const activePhoto = useMemo(
-    () => photos.find((p) => p.id === activeId) ?? visiblePhotos[0] ?? null,
-    [photos, activeId, visiblePhotos]
-  );
-
-  const childFolders = folders.filter((folder) => folder.path.startsWith(activeFolderPath ? `${activeFolderPath}/` : "") && folder.path !== activeFolderPath);
   const keepRate = photos.length ? Math.round((visiblePhotos.length / photos.length) * 100) : 0;
   const rejectedCount = rejectedIds.size;
   const reviewedCount = selectedIds.size + rejectedIds.size;
   const reviewRate = photos.length ? Math.round((reviewedCount / photos.length) * 100) : 0;
   const completedCount = photos.filter((p) => p.status === "done" || p.status === "error").length;
   const processingTotal = photos.length;
-  const processingInFlight = pendingCount + processingCount;
+  const processingInFlight = library.pendingCount + library.processingCount;
   const processingProgress = processingTotal
     ? Math.max(0, Math.min(100, Math.round((completedCount / processingTotal) * 100)))
     : 0;
@@ -156,45 +79,6 @@ export default function App() {
     }
   }
 
-  function setDecisionLocal(id: string, decision: "accepted" | "rejected" | null) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (decision === "accepted") {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
-    setRejectedIds((prev) => {
-      const next = new Set(prev);
-      if (decision === "rejected") {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
-  }
-
-  async function saveDecision(id: string, decision: "accepted" | "rejected" | null) {
-    const previousAccepted = selectedIds.has(id);
-    const previousRejected = rejectedIds.has(id);
-    setDecisionLocal(id, decision);
-    try {
-      await updatePhotoDecision(id, decision);
-    } catch (err) {
-      if (previousAccepted) {
-        setDecisionLocal(id, "accepted");
-      } else if (previousRejected) {
-        setDecisionLocal(id, "rejected");
-      } else {
-        setDecisionLocal(id, null);
-      }
-      updateStatus(err instanceof Error ? err.message : "Failed to save decision", "error");
-    }
-  }
-
   async function saveScoreOverride(id: string, manualScore: number | null) {
     try {
       await updatePhotoScore(id, manualScore);
@@ -204,16 +88,6 @@ export default function App() {
       updateStatus(err instanceof Error ? err.message : "Failed to update score", "error");
       throw err;
     }
-  }
-
-  function toggleAccept(id: string) {
-    const next = selectedIds.has(id) ? null : "accepted";
-    void saveDecision(id, next);
-  }
-
-  function toggleReject(id: string) {
-    const next = rejectedIds.has(id) ? null : "rejected";
-    void saveDecision(id, next);
   }
 
   function onAutoPickByScore() {
@@ -302,8 +176,7 @@ export default function App() {
     updateStatus("Refreshing library and rescanning uploads...", "busy");
     setIsRefreshing(true);
     try {
-      const data = await refreshLibrary();
-      applyLibraryPayload(data);
+      await refresh();
       updateStatus("Refresh complete.", "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Refresh failed", "error");

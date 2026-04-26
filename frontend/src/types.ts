@@ -37,6 +37,7 @@ export interface LibraryPayload {
     processing: number;
     done: number;
     error: number;
+    scoreMode?: string;
   };
 }
 

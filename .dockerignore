@@ -9,11 +9,12 @@ venv/
 .gitignore
 node_modules/
 frontend/node_modules/
-frontend/src/
-frontend/index.html
+frontend/tsconfig.*.tsbuildinfo
 build/
 dist/
 release/
 uploads/
+data/
 ai_culling.db
+*.db
 .DS_Store

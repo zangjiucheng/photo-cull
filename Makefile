@@ -2,20 +2,25 @@
 
 PYTHON ?= python3
 NPM ?= npm
+NPM_CONFIG_CACHE ?= /tmp/ai-culling-npm-cache
 FLASK_HOST ?= 127.0.0.1
 FLASK_PORT ?= 5050
 DOCKER ?= docker
 DOCKER_COMPOSE ?= docker compose
 IMAGE_NAME ?= ai-culling-app
 
-.PHONY: help setup setup-py setup-web build-web kill run-backend dev docker-build docker-up docker-down clean
+.PHONY: help setup setup-ai setup-py setup-web build-web test test-py test-web kill run-backend dev docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
 	@echo "  make setup        - install Python and frontend dependencies"
+	@echo "  make setup-ai     - install optional AI scoring dependencies"
 	@echo "  make setup-py     - install Python dependencies"
 	@echo "  make setup-web    - install frontend dependencies"
 	@echo "  make build-web    - build React TSX frontend to static/dist"
+	@echo "  make test         - run backend and frontend tests"
+	@echo "  make test-py      - run backend tests"
+	@echo "  make test-web     - run frontend tests"
 	@echo "  make kill         - stop any process using FLASK_PORT"
 	@echo "  make run-backend  - run Flask backend on FLASK_HOST:FLASK_PORT"
 	@echo "  make dev          - build frontend then run backend"
@@ -27,13 +32,24 @@ help:
 setup: setup-py setup-web
 
 setup-py:
-	$(PYTHON) -m pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements-dev.txt
+
+setup-ai:
+	$(PYTHON) -m pip install -r requirements-ai.txt
 
 setup-web:
-	cd frontend && $(NPM) install
+	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) install
 
 build-web:
-	cd frontend && $(NPM) run build
+	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) run build
+
+test: test-py test-web
+
+test-py:
+	$(PYTHON) -m pytest
+
+test-web:
+	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) test
 
 kill:
 	@pids=`lsof -ti tcp:$(FLASK_PORT) 2>/dev/null`; \
