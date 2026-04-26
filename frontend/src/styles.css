@@ -593,6 +593,13 @@ body {
   font-size: 0.82rem;
 }
 
+.similar-panel-head .similar-summary {
+  margin-top: 4px;
+  color: #2e6578;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .similar-actions {
   display: flex;
   flex-wrap: wrap;

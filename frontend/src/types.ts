@@ -43,19 +43,59 @@ export interface LibraryPayload {
 
 export interface SimilarGroupPayload {
   id: string;
+  stage: "phash" | "clip" | "mixed";
+  tier: "duplicate" | "similar" | "review";
+  keepPhotoId: string;
   photoIds: string[];
-  maxDistance: number;
+  maxDistance: number | null;
+  maxSimilarity: number | null;
+  matches: Array<{
+    left: string;
+    right: string;
+    method: "phash" | "clip";
+    tier: "duplicate" | "similar" | "review";
+    distance?: number;
+    similarity?: number;
+  }>;
+  candidates: Array<{
+    photoId: string;
+    deleteRecommended: boolean;
+    qualityScore: number;
+    metadata: {
+      width: number;
+      height: number;
+      pixels: number;
+      fileSize: number;
+      takenAt: string | null;
+      hasGps: boolean;
+    };
+  }>;
 }
 
 export interface SimilarPayload {
   groups: SimilarGroupPayload[];
-  threshold: number;
+  stages: {
+    phash: {
+      exactDistance: number;
+      reviewDistance: number;
+    };
+    clip: {
+      status: string;
+      similarity: number;
+      reviewSimilarity: number;
+    };
+  };
 }
 
 export interface SimilarGroup {
   id: string;
+  stage: "phash" | "clip" | "mixed";
+  tier: "duplicate" | "similar" | "review";
+  keepPhotoId: string;
   photos: Photo[];
-  maxDistance: number;
+  maxDistance: number | null;
+  maxSimilarity: number | null;
+  candidates: SimilarGroupPayload["candidates"];
 }
 
 export interface DeletePhotosPayload {

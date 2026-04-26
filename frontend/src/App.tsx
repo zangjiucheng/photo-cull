@@ -26,6 +26,7 @@ export default function App() {
   const [similarDeleteIds, setSimilarDeleteIds] = useState<Set<string>>(new Set());
   const [isFindingSimilar, setIsFindingSimilar] = useState(false);
   const [isDeletingSimilar, setIsDeletingSimilar] = useState(false);
+  const [similarSummary, setSimilarSummary] = useState("");
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -193,20 +194,27 @@ export default function App() {
     updateStatus("Finding similar photos...", "busy");
     setIsFindingSimilar(true);
     try {
-      const payload = await findSimilarPhotos(6);
+      const payload = await findSimilarPhotos(true);
       const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
       const groups = payload.groups
         .map((group) => ({
           id: group.id,
+          stage: group.stage,
+          tier: group.tier,
+          keepPhotoId: group.keepPhotoId,
           maxDistance: group.maxDistance,
+          maxSimilarity: group.maxSimilarity,
+          candidates: group.candidates,
           photos: group.photoIds
             .map((id) => photoMap.get(id))
             .filter((photo): photo is Photo => Boolean(photo))
-            .sort((a, b) => b.aiScore - a.aiScore)
         }))
         .filter((group) => group.photos.length > 1);
       setSimilarGroups(groups);
-      setSimilarDeleteIds(new Set(groups.flatMap((group) => group.photos.slice(1).map((photo) => photo.id))));
+      setSimilarDeleteIds(new Set(groups.flatMap((group) => group.candidates.filter((candidate) => candidate.deleteRecommended).map((candidate) => candidate.photoId))));
+      setSimilarSummary(
+        `pHash <= ${payload.stages.phash.exactDistance} duplicate, ${payload.stages.phash.reviewDistance} review; CLIP ${payload.stages.clip.status}`
+      );
       updateStatus(groups.length ? `Found ${groups.length} similar group(s).` : "No similar groups found.", groups.length ? "ok" : "warn");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to find similar photos", "error");
@@ -245,6 +253,7 @@ export default function App() {
       const result = await deletePhotos([...similarDeleteIds]);
       setSimilarDeleteIds(new Set());
       setSimilarGroups([]);
+      setSimilarSummary("");
       await loadLibrary();
       updateStatus(`Deleted ${result.deletedRecords} photo(s) and ${result.deletedFiles} file(s).`, "ok");
     } catch (err) {
@@ -298,6 +307,7 @@ export default function App() {
           similarDeleteIds={similarDeleteIds}
           isFindingSimilar={isFindingSimilar}
           isDeletingSimilar={isDeletingSimilar}
+          similarSummary={similarSummary}
           onSearchChange={setSearch}
           onMinScoreChange={setMinScore}
           onDecisionFilterChange={setDecisionFilter}

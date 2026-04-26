@@ -95,8 +95,9 @@ export async function updatePhotoScore(photoId: string, manualScore: number | nu
   return data;
 }
 
-export async function findSimilarPhotos(threshold = 8): Promise<SimilarPayload> {
-  return requestJson<SimilarPayload>(`/api/photos/similar?threshold=${threshold}`, undefined, "Failed to find similar photos");
+export async function findSimilarPhotos(includeClip = true): Promise<SimilarPayload> {
+  const flag = includeClip ? "1" : "0";
+  return requestJson<SimilarPayload>(`/api/photos/similar?include_clip=${flag}`, undefined, "Failed to find similar photos");
 }
 
 export async function deletePhotos(photoIds: string[]): Promise<DeletePhotosPayload> {

@@ -22,8 +22,21 @@ describe("api helpers", () => {
 
   it("loads similar groups", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      groups: [{ id: "g1", photoIds: ["a", "b"], maxDistance: 2 }],
-      threshold: 8
+      groups: [{
+        id: "g1",
+        stage: "phash",
+        tier: "duplicate",
+        keepPhotoId: "a",
+        photoIds: ["a", "b"],
+        maxDistance: 2,
+        maxSimilarity: null,
+        matches: [],
+        candidates: []
+      }],
+      stages: {
+        phash: { exactDistance: 5, reviewDistance: 12 },
+        clip: { status: "skipped", similarity: 0.92, reviewSimilarity: 0.85 }
+      }
     }), {
       status: 200,
       headers: { "Content-Type": "application/json" }

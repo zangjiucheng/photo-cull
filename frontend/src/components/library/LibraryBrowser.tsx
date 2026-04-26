@@ -29,6 +29,7 @@ interface LibraryBrowserProps {
   similarDeleteIds: Set<string>;
   isFindingSimilar: boolean;
   isDeletingSimilar: boolean;
+  similarSummary: string;
   onSearchChange: (value: string) => void;
   onMinScoreChange: (value: number) => void;
   onDecisionFilterChange: (value: DecisionFilter) => void;
@@ -184,6 +185,7 @@ export function LibraryBrowser({
   similarDeleteIds,
   isFindingSimilar,
   isDeletingSimilar,
+  similarSummary,
   onSearchChange,
   onMinScoreChange,
   onDecisionFilterChange,
@@ -443,7 +445,8 @@ export function LibraryBrowser({
               <div className="similar-panel-head">
                 <div>
                   <div className="pane-title">Similar Photos</div>
-                  <p>Find near-duplicate frames, keep the best one, then remove the rest.</p>
+                  <p>Stage 1 uses pHash for duplicates. Stage 2 uses CLIP + FAISS when available. Best versions are ranked first.</p>
+                  {similarSummary ? <p className="similar-summary">{similarSummary}</p> : null}
                 </div>
                 <div className="similar-actions">
                   <Button variant="outline" onClick={onFindSimilar} disabled={isFindingSimilar}>
@@ -465,10 +468,13 @@ export function LibraryBrowser({
                       <div className="similar-group-title">
                         <strong>Group {groupIndex + 1}</strong>
                         <span>{group.photos.length} photos · distance {group.maxDistance}</span>
+                        <span>{group.stage} · {group.tier}{group.maxSimilarity ? ` · CLIP ${group.maxSimilarity}` : ""}</span>
                       </div>
                       <div className="similar-strip">
                         {group.photos.map((photo, photoIndex) => {
                           const isChecked = similarDeleteIds.has(photo.id);
+                          const candidate = group.candidates.find((item) => item.photoId === photo.id);
+                          const resolution = candidate ? `${candidate.metadata.width}x${candidate.metadata.height}` : "";
                           return (
                             <article
                               key={photo.id}
@@ -487,7 +493,14 @@ export function LibraryBrowser({
                                 Delete
                               </label>
                               <span className="similar-name" title={photo.name}>{photo.name}</span>
-                              <span className="similar-score">Score {photo.aiScore}</span>
+                              <span className="similar-score">Score {photo.aiScore} · {resolution}</span>
+                              {candidate ? (
+                                <span className="similar-score">
+                                  {Math.round(candidate.metadata.fileSize / 1024)} KB
+                                  {candidate.metadata.hasGps ? " · GPS" : ""}
+                                  {candidate.metadata.takenAt ? ` · ${candidate.metadata.takenAt}` : ""}
+                                </span>
+                              ) : null}
                             </article>
                           );
                         })}

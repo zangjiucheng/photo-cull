@@ -131,12 +131,8 @@ def export():
 
 @bp.route("/photos/similar", methods=["GET"])
 def similar_photos():
-    threshold = request.args.get("threshold", "6")
-    try:
-        threshold_value = int(threshold)
-    except ValueError:
-        return error_response("threshold must be an integer", 400)
-    return jsonify({"groups": similarity.find_similar_groups(threshold_value), "threshold": threshold_value})
+    include_clip = request.args.get("include_clip", "1") not in {"0", "false", "False"}
+    return jsonify(similarity.find_similar_groups(include_clip=include_clip))
 
 
 @bp.route("/photos", methods=["DELETE"])

@@ -9,12 +9,13 @@ DOCKER ?= docker
 DOCKER_COMPOSE ?= docker compose
 IMAGE_NAME ?= ai-culling-app
 
-.PHONY: help setup setup-ai setup-py setup-web build-web test test-py test-web kill run-backend dev docker-build docker-up docker-down clean
+.PHONY: help setup setup-ai setup-faiss setup-py setup-web build-web test test-py test-web kill run-backend dev docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
 	@echo "  make setup        - install Python and frontend dependencies"
 	@echo "  make setup-ai     - install optional AI scoring dependencies"
+	@echo "  make setup-faiss  - install optional FAISS index backend"
 	@echo "  make setup-py     - install Python dependencies"
 	@echo "  make setup-web    - install frontend dependencies"
 	@echo "  make build-web    - build React TSX frontend to static/dist"
@@ -36,6 +37,9 @@ setup-py:
 
 setup-ai:
 	$(PYTHON) -m pip install -r requirements-ai.txt
+
+setup-faiss:
+	$(PYTHON) -m pip install -r requirements-faiss.txt
 
 setup-web:
 	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) install
