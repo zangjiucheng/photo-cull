@@ -1,14 +1,13 @@
 import { useMemo } from "react";
-import type { DecisionFilter, LibraryFolder, Photo, SortMode } from "../types";
+import type { LibraryFolder, Photo, RatingFilter, SortMode } from "../types";
 
 interface FilterState {
   activeFolderPath: string;
   search: string;
   minScore: number;
-  decisionFilter: DecisionFilter;
+  ratingFilter: RatingFilter;
   sortMode: SortMode;
-  selectedIds: Set<string>;
-  rejectedIds: Set<string>;
+  ratings: Map<string, number>;
   activeId: string | null;
 }
 
@@ -29,8 +28,9 @@ export function usePhotoFilters(photos: Photo[], folders: LibraryFolder[], state
     const items = folderPhotos.filter((photo) => {
       if (photo.aiScore < state.minScore) return false;
       if (state.search && !photo.name.toLowerCase().includes(state.search.toLowerCase())) return false;
-      if (state.decisionFilter === "accepted" && !state.selectedIds.has(photo.id)) return false;
-      if (state.decisionFilter === "rejected" && !state.rejectedIds.has(photo.id)) return false;
+      const rating = state.ratings.get(photo.id) ?? photo.rating;
+      if (state.ratingFilter === "unrated" && rating !== null && rating !== undefined) return false;
+      if (state.ratingFilter !== "all" && state.ratingFilter !== "unrated" && rating !== Number(state.ratingFilter)) return false;
       return true;
     });
 
@@ -44,7 +44,7 @@ export function usePhotoFilters(photos: Photo[], folders: LibraryFolder[], state
     };
 
     return [...items].sort(sorter[state.sortMode]);
-  }, [folderPhotos, state.decisionFilter, state.minScore, state.rejectedIds, state.search, state.selectedIds, state.sortMode]);
+  }, [folderPhotos, state.minScore, state.ratingFilter, state.ratings, state.search, state.sortMode]);
 
   const activePhoto = useMemo(
     () => photos.find((p) => p.id === state.activeId) ?? visiblePhotos[0] ?? null,

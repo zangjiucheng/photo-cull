@@ -82,6 +82,19 @@ export async function updatePhotoDecision(photoId: string, decision: "accepted" 
   return data;
 }
 
+export async function updatePhotoRating(photoId: string, rating: number | null): Promise<ApiPhoto> {
+  const data = await requestJson<ApiPhoto>(`/api/photos/${photoId}/rating`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rating })
+  }, "Failed to update rating");
+
+  if (!data || !("id" in data)) {
+    throw new Error("Failed to update rating");
+  }
+  return data;
+}
+
 export async function updatePhotoScore(photoId: string, manualScore: number | null): Promise<ApiPhoto> {
   const data = await requestJson<ApiPhoto>(`/api/photos/${photoId}/score`, {
     method: "PATCH",

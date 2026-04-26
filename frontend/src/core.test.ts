@@ -16,6 +16,7 @@ function photo(overrides: Partial<ApiPhoto>): ApiPhoto {
     mtime: 1,
     size: 100,
     decision: null,
+    rating: null,
     status: "done",
     error: null,
     ...overrides

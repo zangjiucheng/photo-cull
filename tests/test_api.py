@@ -44,16 +44,16 @@ def test_health_and_empty_library(client):
     assert library.get_json()["photos"] == []
 
 
-def test_upload_decision_score_and_export(client, tmp_path):
+def test_upload_rating_score_and_export(client, tmp_path):
     photo = upload_photo(client, tmp_path)
 
     image = client.get(f"/api/photos/{photo['id']}/image")
     assert image.status_code == 200
     assert image.headers["Content-Type"].startswith("image/")
 
-    decision = client.patch(f"/api/photos/{photo['id']}/decision", json={"decision": "accepted"})
-    assert decision.status_code == 200
-    assert decision.get_json()["decision"] == "accepted"
+    rating = client.patch(f"/api/photos/{photo['id']}/rating", json={"rating": 5})
+    assert rating.status_code == 200
+    assert rating.get_json()["rating"] == 5
 
     score = client.patch(f"/api/photos/{photo['id']}/score", json={"manual_score": 88})
     assert score.status_code == 200
@@ -96,8 +96,11 @@ def test_invalid_score_and_missing_photo(client):
     bad_score = client.patch("/api/photos/missing/score", json={"manual_score": 120})
     assert bad_score.status_code == 400
 
-    missing = client.patch("/api/photos/missing/decision", json={"decision": "accepted"})
+    missing = client.patch("/api/photos/missing/rating", json={"rating": 5})
     assert missing.status_code == 404
+
+    invalid_rating = client.patch("/api/photos/missing/rating", json={"rating": 6})
+    assert invalid_rating.status_code == 400
 
 
 def test_empty_export_rejected(client):

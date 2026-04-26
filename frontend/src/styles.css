@@ -1037,6 +1037,40 @@ body {
   gap: 6px;
 }
 
+.star-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.star-rating-compact {
+  gap: 1px;
+}
+
+.star-btn {
+  border: 0;
+  background: transparent;
+  color: #b6c2cf;
+  cursor: pointer;
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 2px;
+}
+
+.star-rating-compact .star-btn {
+  font-size: 1rem;
+}
+
+.star-btn.filled {
+  color: #d99716;
+}
+
+.star-btn:hover,
+.star-btn:focus-visible {
+  color: #b87708;
+  outline: none;
+}
+
 .file-extra {
   margin-top: 8px;
   display: flex;

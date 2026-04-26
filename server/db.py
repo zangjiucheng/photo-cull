@@ -47,6 +47,7 @@ def init_db() -> None:
                 score REAL,
                 manual_score REAL,
                 decision TEXT,
+                rating INTEGER,
                 status TEXT NOT NULL DEFAULT 'pending',
                 error TEXT,
                 created_at REAL NOT NULL,
@@ -61,8 +62,22 @@ def init_db() -> None:
             conn.execute("ALTER TABLE photos ADD COLUMN content_hash TEXT")
         if "manual_score" not in columns:
             conn.execute("ALTER TABLE photos ADD COLUMN manual_score REAL")
+        if "rating" not in columns:
+            conn.execute("ALTER TABLE photos ADD COLUMN rating INTEGER")
+        conn.execute(
+            """
+            UPDATE photos
+            SET rating = CASE
+                WHEN decision = 'accepted' THEN 5
+                WHEN decision = 'rejected' THEN 1
+                ELSE NULL
+            END
+            WHERE rating IS NULL AND decision IN ('accepted', 'rejected')
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_folder_path ON photos(folder_path)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_rating ON photos(rating)")
 
 
 def row_to_photo(row: sqlite3.Row) -> dict[str, Any]:
@@ -79,6 +94,7 @@ def row_to_photo(row: sqlite3.Row) -> dict[str, Any]:
         "mtime": row["mtime"],
         "size": row["size"],
         "decision": row["decision"],
+        "rating": row["rating"],
         "status": row["status"],
         "error": row["error"],
     }
@@ -157,6 +173,16 @@ def update_decision(photo_id: str, decision: str | None) -> bool:
         if row is None:
             return False
         conn.execute("UPDATE photos SET decision = ?, updated_at = ? WHERE id = ?", (decision, now, photo_id))
+    return True
+
+
+def update_rating(photo_id: str, rating: int | None) -> bool:
+    now = time.time()
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        if row is None:
+            return False
+        conn.execute("UPDATE photos SET rating = ?, updated_at = ? WHERE id = ?", (rating, now, photo_id))
     return True
 
 

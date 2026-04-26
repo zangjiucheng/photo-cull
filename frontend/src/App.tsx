@@ -1,12 +1,12 @@
 import { useCallback, useState, type CSSProperties } from "react";
-import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoDecision, updatePhotoScore, uploadPhotos } from "./api";
+import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoRating, updatePhotoScore, uploadPhotos } from "./api";
 import { LibraryBrowser } from "./components/library/LibraryBrowser";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { Button } from "./components/ui/button";
 import { useLibrary } from "./hooks/useLibrary";
 import { usePhotoFilters } from "./hooks/usePhotoFilters";
-import { usePhotoSelection } from "./hooks/usePhotoSelection";
-import type { DecisionFilter, LibraryFolder, Photo, SimilarGroup, SortMode, StatusTone, ViewMode } from "./types";
+import { usePhotoRatings } from "./hooks/usePhotoRatings";
+import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode } from "./types";
 
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
@@ -15,7 +15,7 @@ function formatFolderLabel(folder: LibraryFolder): string {
 export default function App() {
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState(70);
-  const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all");
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortMode, setSortMode] = useState<SortMode>("score-desc");
   const [statusText, setStatusText] = useState("Ready");
@@ -44,23 +44,22 @@ export default function App() {
     loadLibrary,
     refresh
   } = library;
-  const selection = usePhotoSelection(photos, updateStatus);
-  const { selectedIds, rejectedIds, setSelectedIds, setRejectedIds, toggleAccept, toggleReject } = selection;
+  const ratingState = usePhotoRatings(photos, updateStatus);
+  const { ratings, setRatings, ratePhoto } = ratingState;
   const { activeFolder, folderPhotos, visiblePhotos, activePhoto, childFolders } = usePhotoFilters(photos, folders, {
     activeFolderPath,
     search,
     minScore,
-    decisionFilter,
+    ratingFilter,
     sortMode,
-    selectedIds,
-    rejectedIds,
+    ratings,
     activeId
   });
 
   const keepRate = photos.length ? Math.round((visiblePhotos.length / photos.length) * 100) : 0;
-  const rejectedCount = rejectedIds.size;
-  const reviewedCount = selectedIds.size + rejectedIds.size;
-  const reviewRate = photos.length ? Math.round((reviewedCount / photos.length) * 100) : 0;
+  const ratedCount = ratings.size;
+  const exportIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
+  const reviewRate = photos.length ? Math.round((ratedCount / photos.length) * 100) : 0;
   const completedCount = photos.filter((p) => p.status === "done" || p.status === "error").length;
   const processingTotal = photos.length;
   const processingInFlight = library.pendingCount + library.processingCount;
@@ -95,83 +94,67 @@ export default function App() {
     }
   }
 
-  function onAutoPickByScore() {
+  function scoreToRating(score: number) {
+    if (score >= 90) return 5;
+    if (score >= 78) return 4;
+    if (score >= 62) return 3;
+    if (score >= 42) return 2;
+    return 1;
+  }
+
+  function onAutoRateByScore() {
     if (!folderPhotos.length) {
-      updateStatus("Open a folder with photos before running AI Pick.", "warn");
+      updateStatus("Open a folder with photos before running AI Rate.", "warn");
       return;
     }
 
-    const scoreThreshold = minScore;
-    const accepted = new Set(
-      folderPhotos
-        .filter((photo) => photo.status === "done" && photo.aiScore >= scoreThreshold)
-        .map((photo) => photo.id)
-    );
     const targetIds = new Set(folderPhotos.map((photo) => photo.id));
-    const rejected = new Set(folderPhotos.filter((photo) => !accepted.has(photo.id)).map((photo) => photo.id));
+    const nextRatings = new Map(folderPhotos.map((photo) => [photo.id, scoreToRating(photo.aiScore)]));
 
-    const previousSelected = new Set(selectedIds);
-    const previousRejected = new Set(rejectedIds);
+    const previousRatings = new Map(ratings);
 
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
+    setRatings((prev) => {
+      const next = new Map(prev);
       for (const id of targetIds) {
         next.delete(id);
       }
-      for (const id of accepted) {
-        next.add(id);
-      }
-      return next;
-    });
-    setRejectedIds((prev) => {
-      const next = new Set(prev);
-      for (const id of targetIds) {
-        next.delete(id);
-      }
-      for (const id of rejected) {
-        next.add(id);
+      for (const [id, rating] of nextRatings) {
+        next.set(id, rating);
       }
       return next;
     });
 
     void Promise.allSettled(
       folderPhotos.map((photo) =>
-        updatePhotoDecision(photo.id, accepted.has(photo.id) ? "accepted" : "rejected")
+        updatePhotoRating(photo.id, nextRatings.get(photo.id) ?? null)
       )
     ).then((results) => {
       const failed = results.filter((result) => result.status === "rejected").length;
       if (failed > 0) {
-        setSelectedIds(previousSelected);
-        setRejectedIds(previousRejected);
-        updateStatus(`AI Pick failed to save ${failed} decision(s).`, "error");
+        setRatings(previousRatings);
+        updateStatus(`AI Rate failed to save ${failed} rating(s).`, "error");
         return;
       }
-
-      if (accepted.size === 0) {
-        updateStatus(`No photos met score >= ${scoreThreshold}; rejected ${rejected.size} photo(s).`, "warn");
-        return;
-      }
-
-      updateStatus(`AI Pick accepted ${accepted.size} photo(s) and rejected ${rejected.size}.`, "ok");
+      updateStatus(`AI Rate assigned stars to ${folderPhotos.length} photo(s).`, "ok");
     });
   }
 
   async function onExport() {
-    if (!selectedIds.size) {
-      updateStatus("Select photos before exporting.", "warn");
+    if (!exportIds.length) {
+      updateStatus("Rate photos 4 or 5 stars before exporting.", "warn");
       return;
     }
 
     updateStatus("Building ZIP export...", "busy");
     try {
-      const blob = await exportPhotos([...selectedIds]);
+      const blob = await exportPhotos(exportIds);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "selected.zip";
       a.click();
       window.URL.revokeObjectURL(url);
-      updateStatus(`Exported ${selectedIds.size} photos.`, "ok");
+      updateStatus(`Exported ${exportIds.length} 4+ star photo(s).`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Export failed", "error");
     }
@@ -281,7 +264,7 @@ export default function App() {
             onChange={(e) => void onUpload(e.target.files)}
           />
           <Button variant="outline" className="hero-action hero-action-refresh" onClick={() => void onRefresh()} disabled={isRefreshing}>{isRefreshing ? "Refreshing..." : "Refresh"}</Button>
-          <Button variant="default" className="hero-action hero-action-export" onClick={() => void onExport()}>Export Selects</Button>
+          <Button variant="default" className="hero-action hero-action-export" onClick={() => void onExport()}>Export 4+ Stars</Button>
         </div>
       </header>
 
@@ -292,13 +275,13 @@ export default function App() {
           activeFolderPath={activeFolderPath}
           childFolders={childFolders}
           visiblePhotos={visiblePhotos}
-          selectedIds={selectedIds}
+          ratings={ratings}
           activePhotoId={activePhoto?.id ?? null}
           viewMode={viewMode}
           sortMode={sortMode}
           search={search}
           minScore={minScore}
-          decisionFilter={decisionFilter}
+          ratingFilter={ratingFilter}
           statusText={statusText}
           statusTone={statusTone}
           keepRate={keepRate}
@@ -310,15 +293,13 @@ export default function App() {
           similarSummary={similarSummary}
           onSearchChange={setSearch}
           onMinScoreChange={setMinScore}
-          onDecisionFilterChange={setDecisionFilter}
+          onRatingFilterChange={setRatingFilter}
           onSortModeChange={setSortMode}
           onViewModeChange={setViewMode}
           onSelectFolder={setActiveFolderPath}
           onSelectPhoto={setActiveId}
-          rejectedIds={rejectedIds}
-          onToggleAccept={toggleAccept}
-          onToggleReject={toggleReject}
-          onAutoPickByScore={onAutoPickByScore}
+          onRatePhoto={ratePhoto}
+          onAutoRateByScore={onAutoRateByScore}
           onFindSimilar={onFindSimilar}
           onToggleSimilarDelete={onToggleSimilarDelete}
           onDeleteSimilarSelected={onDeleteSimilarSelected}
@@ -327,10 +308,8 @@ export default function App() {
         <aside className="stack">
           <InspectorPanel
             activePhoto={activePhoto}
-            selectedIds={selectedIds}
-            rejectedIds={rejectedIds}
-            onToggleAccept={toggleAccept}
-            onToggleReject={toggleReject}
+            ratings={ratings}
+            onRatePhoto={ratePhoto}
             onSaveScoreOverride={saveScoreOverride}
           />
         </aside>
@@ -343,7 +322,7 @@ export default function App() {
             <strong>Curation Pulse</strong>
           </div>
           <div className="stats-toggle-chip">
-            <span className="stats-summary">Review {reviewRate}%</span>
+            <span className="stats-summary">Rated {reviewRate}%</span>
           </div>
           <span className="stats-caret" aria-hidden="true">{isStatsOpen ? "▾" : "▸"}</span>
         </button>
@@ -352,12 +331,12 @@ export default function App() {
           <div className="stats-body">
             <section className="stats-hero">
               <div className="stats-hero-copy">
-                <span className="stats-eyebrow">Review coverage</span>
+                <span className="stats-eyebrow">Rating coverage</span>
                 <div className="stats-hero-value">
                   <strong>{reviewRate}%</strong>
-                  <span>{reviewedCount}/{photos.length || 0} frames reviewed</span>
+                  <span>{ratedCount}/{photos.length || 0} frames rated</span>
                 </div>
-                <p>{selectedIds.size} accepted · {rejectedCount} rejected across the library.</p>
+                <p>{exportIds.length} photos are 4+ stars and ready for export.</p>
               </div>
               <div
                 className="stats-ring"
@@ -365,7 +344,7 @@ export default function App() {
                 aria-hidden="true"
               >
                 <div className="stats-ring-inner">
-                  <span>Review</span>
+                  <span>Rated</span>
                   <strong>{reviewRate}%</strong>
                 </div>
               </div>
@@ -378,14 +357,14 @@ export default function App() {
                 <small>after filters</small>
               </article>
               <article className="mini-stat">
-                <span>Selected</span>
-                <strong>{selectedIds.size}</strong>
-                <small>keepers marked</small>
+                <span>4+ Stars</span>
+                <strong>{exportIds.length}</strong>
+                <small>export-ready</small>
               </article>
               <article className="mini-stat">
-                <span>Rejected</span>
-                <strong>{rejectedCount}</strong>
-                <small>set aside</small>
+                <span>Rated</span>
+                <strong>{ratedCount}</strong>
+                <small>starred frames</small>
               </article>
               <article className="mini-stat">
                 <span>In Queue</span>

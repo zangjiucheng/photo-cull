@@ -160,6 +160,26 @@ def set_decision(photo_id):
     return jsonify(db.row_to_photo(row))
 
 
+@bp.route("/photos/<photo_id>/rating", methods=["PATCH"])
+def set_rating(photo_id):
+    data = request.get_json(silent=True) or {}
+    rating = data.get("rating")
+    if rating is not None:
+        try:
+            rating = int(rating)
+        except (TypeError, ValueError):
+            return error_response("rating must be an integer from 1 to 5 or null", 400)
+        if rating < 1 or rating > 5:
+            return error_response("rating must be between 1 and 5", 400)
+
+    updated = db.update_rating(photo_id, rating)
+    if not updated:
+        return error_response("Photo not found", 404)
+
+    row = db.fetch_photo(photo_id)
+    return jsonify(db.row_to_photo(row))
+
+
 @bp.route("/photos/<photo_id>/score", methods=["PATCH"])
 def set_score(photo_id):
     data = request.get_json(silent=True) or {}

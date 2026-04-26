@@ -5,19 +5,41 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
 interface InspectorPanelProps {
   activePhoto: Photo | null;
-  selectedIds: Set<string>;
-  rejectedIds: Set<string>;
-  onToggleAccept: (id: string) => void;
-  onToggleReject: (id: string) => void;
+  ratings: Map<string, number>;
+  onRatePhoto: (id: string, rating: number) => void;
   onSaveScoreOverride: (id: string, manualScore: number | null) => Promise<void>;
+}
+
+function StarRating({
+  photo,
+  rating,
+  onRatePhoto
+}: {
+  photo: Photo;
+  rating: number;
+  onRatePhoto: (id: string, rating: number) => void;
+}) {
+  return (
+    <div className="star-rating" aria-label={`Rating ${rating || "unrated"} out of 5`}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={`star-btn ${rating >= star ? "filled" : ""}`.trim()}
+          onClick={() => onRatePhoto(photo.id, star)}
+          aria-label={`Set ${star} star${star === 1 ? "" : "s"}`}
+        >
+          ★
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function InspectorPanel({
   activePhoto,
-  selectedIds,
-  rejectedIds,
-  onToggleAccept,
-  onToggleReject,
+  ratings,
+  onRatePhoto,
   onSaveScoreOverride
 }: InspectorPanelProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -164,15 +186,14 @@ export function InspectorPanel({
                 <div className="tab-body">
                   <div>Strong score profile based on image quality ranking.</div>
                   <div>This frame is {activePhoto.aiScore >= 70 ? "above" : "below"} your current keep threshold.</div>
-                  <div>Mark as Accept or Reject, then filter by decision in the library pane.</div>
+                  <div>Rate from 1 to 5 stars, then filter by rating in the library pane.</div>
                 </div>
                 <div className="inspector-actions">
-                  <Button className="inspector-action" variant={selectedIds.has(activePhoto.id) ? "secondary" : "default"} onClick={() => onToggleAccept(activePhoto.id)}>
-                    {selectedIds.has(activePhoto.id) ? "Accepted" : "Accept"}
-                  </Button>
-                  <Button className="inspector-action" variant={rejectedIds.has(activePhoto.id) ? "destructive" : "outline"} onClick={() => onToggleReject(activePhoto.id)}>
-                    {rejectedIds.has(activePhoto.id) ? "Rejected" : "Reject"}
-                  </Button>
+                  <StarRating
+                    photo={activePhoto}
+                    rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
+                    onRatePhoto={onRatePhoto}
+                  />
                 </div>
               </div>
             </>

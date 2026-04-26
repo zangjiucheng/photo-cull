@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DecisionFilter, LibraryFolder, Photo, SimilarGroup, SortMode, StatusTone, ViewMode } from "../../types";
+import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -13,14 +13,13 @@ interface LibraryBrowserProps {
   activeFolderPath: string;
   childFolders: LibraryFolder[];
   visiblePhotos: Photo[];
-  selectedIds: Set<string>;
-  rejectedIds: Set<string>;
+  ratings: Map<string, number>;
   activePhotoId: string | null;
   viewMode: ViewMode;
   sortMode: SortMode;
   search: string;
   minScore: number;
-  decisionFilter: DecisionFilter;
+  ratingFilter: RatingFilter;
   statusText: string;
   statusTone: StatusTone;
   keepRate: number;
@@ -32,14 +31,13 @@ interface LibraryBrowserProps {
   similarSummary: string;
   onSearchChange: (value: string) => void;
   onMinScoreChange: (value: number) => void;
-  onDecisionFilterChange: (value: DecisionFilter) => void;
+  onRatingFilterChange: (value: RatingFilter) => void;
   onSortModeChange: (value: SortMode) => void;
   onViewModeChange: (value: ViewMode) => void;
   onSelectFolder: (path: string) => void;
   onSelectPhoto: (id: string) => void;
-  onToggleAccept: (id: string) => void;
-  onToggleReject: (id: string) => void;
-  onAutoPickByScore: () => void;
+  onRatePhoto: (id: string, rating: number) => void;
+  onAutoRateByScore: () => void;
   onFindSimilar: () => void;
   onToggleSimilarDelete: (id: string) => void;
   onDeleteSimilarSelected: () => void;
@@ -169,14 +167,13 @@ export function LibraryBrowser({
   activeFolderPath,
   childFolders,
   visiblePhotos,
-  selectedIds,
-  rejectedIds,
+  ratings,
   activePhotoId,
   viewMode,
   sortMode,
   search,
   minScore,
-  decisionFilter,
+  ratingFilter,
   statusText,
   statusTone,
   keepRate,
@@ -188,14 +185,13 @@ export function LibraryBrowser({
   similarSummary,
   onSearchChange,
   onMinScoreChange,
-  onDecisionFilterChange,
+  onRatingFilterChange,
   onSortModeChange,
   onViewModeChange,
   onSelectFolder,
   onSelectPhoto,
-  onToggleAccept,
-  onToggleReject,
-  onAutoPickByScore,
+  onRatePhoto,
+  onAutoRateByScore,
   onFindSimilar,
   onToggleSimilarDelete,
   onDeleteSimilarSelected
@@ -416,19 +412,23 @@ export function LibraryBrowser({
                 <input type="range" min={0} max={100} value={minScore} onChange={(e) => onMinScoreChange(Number(e.target.value))} />
               </label>
               <label className="field field-filter">
-                <span>Decision Filter</span>
+                <span>Rating Filter</span>
                 <Select
-                  value={decisionFilter}
-                  onChange={(e) => onDecisionFilterChange(e.target.value as DecisionFilter)}
+                  value={ratingFilter}
+                  onChange={(e) => onRatingFilterChange(e.target.value as RatingFilter)}
                   className="decision-filter-select"
                 >
                   <option value="all">All</option>
-                  <option value="accepted">Accepted</option>
-                  <option value="rejected">Rejected</option>
+                  <option value="unrated">Unrated</option>
+                  <option value="5">5 Stars</option>
+                  <option value="4">4 Stars</option>
+                  <option value="3">3 Stars</option>
+                  <option value="2">2 Stars</option>
+                  <option value="1">1 Star</option>
                 </Select>
               </label>
               <div className="toolbar-actions">
-                <Button variant="outline" className="toolbar-auto-pick" onClick={onAutoPickByScore}>AI Pick</Button>
+                <Button variant="outline" className="toolbar-auto-pick" onClick={onAutoRateByScore}>AI Rate</Button>
               </div>
             </div>
 
@@ -516,8 +516,7 @@ export function LibraryBrowser({
             <div className={`gallery ${viewMode === "list" ? "list-mode" : ""}`}>
               {!visiblePhotos.length && <div className="empty-gallery">No photos in this folder match the current filters.</div>}
               {visiblePhotos.map((photo) => {
-                const isAccepted = selectedIds.has(photo.id);
-                const isRejected = rejectedIds.has(photo.id);
+                const rating = ratings.get(photo.id) ?? photo.rating ?? 0;
                 const isActive = (activePhotoId ?? null) === photo.id;
                 return (
                   <article
@@ -538,8 +537,7 @@ export function LibraryBrowser({
                     </div>
                     <div className="meta">
                       <div className="badges">
-                        {isAccepted && <Badge variant="success">Accepted</Badge>}
-                        {isRejected && <Badge variant="danger">Rejected</Badge>}
+                        {rating > 0 && <Badge variant="success">{rating} ★</Badge>}
                         <Badge
                           variant={photo.status === "error" ? "danger" : "outline"}
                           className={photo.status === "done" ? scoreTone(photo.aiScore) : ""}
@@ -550,12 +548,22 @@ export function LibraryBrowser({
                       <div className="name" title={photo.name}>{photo.name}</div>
                       <div className="meta-row">
                         <div className="decision-actions">
-                          <Button variant={isAccepted ? "secondary" : "outline"} size="sm" onClick={() => onToggleAccept(photo.id)}>
-                            {isAccepted ? "Accepted" : "Accept"}
-                          </Button>
-                          <Button variant={isRejected ? "destructive" : "outline"} size="sm" onClick={() => onToggleReject(photo.id)}>
-                            {isRejected ? "Rejected" : "Reject"}
-                          </Button>
+                          <div className="star-rating star-rating-compact">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                className={`star-btn ${rating >= star ? "filled" : ""}`.trim()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onRatePhoto(photo.id, star);
+                                }}
+                                aria-label={`Set ${star} star${star === 1 ? "" : "s"} for ${photo.name}`}
+                              >
+                                ★
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                       <div className="file-extra">
