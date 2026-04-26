@@ -1,12 +1,12 @@
 import { useCallback, useState, type CSSProperties } from "react";
-import { exportPhotos, updatePhotoDecision, updatePhotoScore, uploadPhotos } from "./api";
+import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoDecision, updatePhotoScore, uploadPhotos } from "./api";
 import { LibraryBrowser } from "./components/library/LibraryBrowser";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { Button } from "./components/ui/button";
 import { useLibrary } from "./hooks/useLibrary";
 import { usePhotoFilters } from "./hooks/usePhotoFilters";
 import { usePhotoSelection } from "./hooks/usePhotoSelection";
-import type { DecisionFilter, LibraryFolder, SortMode, StatusTone, ViewMode } from "./types";
+import type { DecisionFilter, LibraryFolder, Photo, SimilarGroup, SortMode, StatusTone, ViewMode } from "./types";
 
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
@@ -22,6 +22,10 @@ export default function App() {
   const [statusTone, setStatusTone] = useState<StatusTone>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [similarGroups, setSimilarGroups] = useState<SimilarGroup[]>([]);
+  const [similarDeleteIds, setSimilarDeleteIds] = useState<Set<string>>(new Set());
+  const [isFindingSimilar, setIsFindingSimilar] = useState(false);
+  const [isDeletingSimilar, setIsDeletingSimilar] = useState(false);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -185,6 +189,71 @@ export default function App() {
     }
   }
 
+  async function onFindSimilar() {
+    updateStatus("Finding similar photos...", "busy");
+    setIsFindingSimilar(true);
+    try {
+      const payload = await findSimilarPhotos(6);
+      const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
+      const groups = payload.groups
+        .map((group) => ({
+          id: group.id,
+          maxDistance: group.maxDistance,
+          photos: group.photoIds
+            .map((id) => photoMap.get(id))
+            .filter((photo): photo is Photo => Boolean(photo))
+            .sort((a, b) => b.aiScore - a.aiScore)
+        }))
+        .filter((group) => group.photos.length > 1);
+      setSimilarGroups(groups);
+      setSimilarDeleteIds(new Set(groups.flatMap((group) => group.photos.slice(1).map((photo) => photo.id))));
+      updateStatus(groups.length ? `Found ${groups.length} similar group(s).` : "No similar groups found.", groups.length ? "ok" : "warn");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to find similar photos", "error");
+    } finally {
+      setIsFindingSimilar(false);
+    }
+  }
+
+  function onToggleSimilarDelete(id: string) {
+    setSimilarDeleteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function onDeleteSimilarSelected() {
+    if (!similarDeleteIds.size) {
+      updateStatus("Choose photos to delete first.", "warn");
+      return;
+    }
+
+    const count = similarDeleteIds.size;
+    const confirmed = window.confirm(`Delete ${count} photo(s) from disk and the library? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    updateStatus(`Deleting ${count} photo(s)...`, "busy");
+    setIsDeletingSimilar(true);
+    try {
+      const result = await deletePhotos([...similarDeleteIds]);
+      setSimilarDeleteIds(new Set());
+      setSimilarGroups([]);
+      await loadLibrary();
+      updateStatus(`Deleted ${result.deletedRecords} photo(s) and ${result.deletedFiles} file(s).`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to delete photos", "error");
+    } finally {
+      setIsDeletingSimilar(false);
+    }
+  }
+
   return (
     <div className="shell">
       <header className="hero">
@@ -225,6 +294,10 @@ export default function App() {
           statusTone={statusTone}
           keepRate={keepRate}
           folderPhotosCount={folderPhotos.length}
+          similarGroups={similarGroups}
+          similarDeleteIds={similarDeleteIds}
+          isFindingSimilar={isFindingSimilar}
+          isDeletingSimilar={isDeletingSimilar}
           onSearchChange={setSearch}
           onMinScoreChange={setMinScore}
           onDecisionFilterChange={setDecisionFilter}
@@ -236,6 +309,9 @@ export default function App() {
           onToggleAccept={toggleAccept}
           onToggleReject={toggleReject}
           onAutoPickByScore={onAutoPickByScore}
+          onFindSimilar={onFindSimilar}
+          onToggleSimilarDelete={onToggleSimilarDelete}
+          onDeleteSimilarSelected={onDeleteSimilarSelected}
         />
 
         <aside className="stack">
@@ -247,13 +323,6 @@ export default function App() {
             onToggleReject={toggleReject}
             onSaveScoreOverride={saveScoreOverride}
           />
-
-          <section className="card smart">
-            <h2>Smart Actions</h2>
-            <div className="smart-item">AI Pick selects strong frames and rejects the rest of the current view.</div>
-            <div className="smart-item">Hide weak shots below your quality threshold.</div>
-            <div className="smart-item">Export only selected keepers as ZIP.</div>
-          </section>
         </aside>
       </main>
 

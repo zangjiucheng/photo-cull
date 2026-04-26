@@ -41,6 +41,30 @@ export interface LibraryPayload {
   };
 }
 
+export interface SimilarGroupPayload {
+  id: string;
+  photoIds: string[];
+  maxDistance: number;
+}
+
+export interface SimilarPayload {
+  groups: SimilarGroupPayload[];
+  threshold: number;
+}
+
+export interface SimilarGroup {
+  id: string;
+  photos: Photo[];
+  maxDistance: number;
+}
+
+export interface DeletePhotosPayload {
+  deletedIds: string[];
+  missingIds: string[];
+  deletedFiles: number;
+  deletedRecords: number;
+}
+
 export type ViewMode = "grid" | "list";
 export type DecisionFilter = "all" | "accepted" | "rejected";
 export type StatusTone = "" | "ok" | "warn" | "error" | "busy";

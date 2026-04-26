@@ -64,6 +64,31 @@ def test_upload_decision_score_and_export(client, tmp_path):
     assert export.headers["Content-Type"].startswith("application/zip")
 
 
+def test_similar_detection_and_delete(client, tmp_path):
+    first_path = image_file(tmp_path)
+    second_path = tmp_path / "sample-copy.jpg"
+    Image.new("RGB", (8, 8), "blue").save(second_path)
+
+    with first_path.open("rb") as first, second_path.open("rb") as second:
+        upload = client.post(
+            "/api/photos/upload",
+            data={"files": [(first, "sample.jpg"), (second, "sample-copy.jpg")]},
+            content_type="multipart/form-data",
+        )
+    assert upload.status_code == 200
+    photos = upload.get_json()
+
+    similar = client.get("/api/photos/similar?threshold=0")
+    assert similar.status_code == 200
+    groups = similar.get_json()["groups"]
+    assert any(set(group["photoIds"]) == {photo["id"] for photo in photos} for group in groups)
+
+    delete = client.delete("/api/photos", json={"photo_ids": [photos[1]["id"]]})
+    assert delete.status_code == 200
+    assert delete.get_json()["deletedRecords"] == 1
+    assert client.get(f"/api/photos/{photos[1]['id']}/image").status_code == 404
+
+
 def test_invalid_score_and_missing_photo(client):
     bad_score = client.patch("/api/photos/missing/score", json={"manual_score": 120})
     assert bad_score.status_code == 400

@@ -5,7 +5,7 @@ import os
 from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from . import db, scoring, storage
+from . import db, scoring, similarity, storage
 
 
 bp = Blueprint("api", __name__)
@@ -127,6 +127,26 @@ def export():
 
     mem = storage.build_export_zip([str(photo_id) for photo_id in selected_ids])
     return send_file(mem, download_name="selected.zip", as_attachment=True)
+
+
+@bp.route("/photos/similar", methods=["GET"])
+def similar_photos():
+    threshold = request.args.get("threshold", "6")
+    try:
+        threshold_value = int(threshold)
+    except ValueError:
+        return error_response("threshold must be an integer", 400)
+    return jsonify({"groups": similarity.find_similar_groups(threshold_value), "threshold": threshold_value})
+
+
+@bp.route("/photos", methods=["DELETE"])
+def delete_photos():
+    data = request.get_json(silent=True) or {}
+    photo_ids = data.get("photo_ids", [])
+    if not isinstance(photo_ids, list) or not photo_ids:
+        return error_response("photo_ids must be a non-empty list", 400)
+    result = storage.delete_photo_files([str(photo_id) for photo_id in photo_ids])
+    return jsonify(result)
 
 
 @bp.route("/photos/<photo_id>/decision", methods=["PATCH"])

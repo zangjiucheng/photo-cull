@@ -1,4 +1,4 @@
-import type { ApiPhoto, LibraryPayload } from "./types";
+import type { ApiPhoto, DeletePhotosPayload, LibraryPayload, SimilarPayload } from "./types";
 
 async function parseError(res: Response, fallback: string): Promise<string> {
   const contentType = res.headers.get("Content-Type") || "";
@@ -93,6 +93,18 @@ export async function updatePhotoScore(photoId: string, manualScore: number | nu
     throw new Error("Failed to update score");
   }
   return data;
+}
+
+export async function findSimilarPhotos(threshold = 8): Promise<SimilarPayload> {
+  return requestJson<SimilarPayload>(`/api/photos/similar?threshold=${threshold}`, undefined, "Failed to find similar photos");
+}
+
+export async function deletePhotos(photoIds: string[]): Promise<DeletePhotosPayload> {
+  return requestJson<DeletePhotosPayload>("/api/photos", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_ids: photoIds })
+  }, "Failed to delete photos");
 }
 
 export const apiInternals = { requestJson, requestBlob, parseError };

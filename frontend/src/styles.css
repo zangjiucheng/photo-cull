@@ -569,6 +569,156 @@ body {
   padding: 11px;
 }
 
+.similar-panel {
+  border: 1px solid #d3e1ef;
+  border-radius: 16px;
+  padding: 12px;
+  background: linear-gradient(180deg, #ffffff, #f7fbff);
+}
+
+.similar-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.similar-panel-head .pane-title {
+  margin-bottom: 4px;
+}
+
+.similar-panel-head p {
+  margin: 0;
+  color: #667b91;
+  font-size: 0.82rem;
+}
+
+.similar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.similar-empty {
+  margin-top: 10px;
+  border: 1px dashed #cbd9e8;
+  border-radius: 12px;
+  padding: 14px;
+  color: #6d8095;
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+.similar-groups {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.similar-group {
+  border: 1px solid #d7e3f0;
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px;
+}
+
+.similar-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.similar-group-title strong {
+  color: #223952;
+  font-size: 0.9rem;
+}
+
+.similar-group-title span {
+  color: #708398;
+  font-size: 0.76rem;
+}
+
+.similar-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+}
+
+.similar-thumb {
+  border: 1px solid #d9e4ef;
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+}
+
+.similar-thumb.marked {
+  border-color: #e3989f;
+  background: #fff7f7;
+}
+
+.similar-preview {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.similar-preview img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #eef3f7;
+  display: block;
+}
+
+.similar-rank,
+.similar-score,
+.similar-name {
+  display: block;
+  min-width: 0;
+}
+
+.similar-rank {
+  color: #1d6c61;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.similar-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #9d222c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.similar-name {
+  color: #263c55;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.similar-score {
+  color: #708398;
+  font-size: 0.74rem;
+}
+
 .keep-row {
   display: flex;
   justify-content: space-between;

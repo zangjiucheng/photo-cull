@@ -215,3 +215,30 @@ def build_export_zip(selected_ids: list[str]) -> io.BytesIO:
                 zip_file.write(path, row["name"])
     mem.seek(0)
     return mem
+
+
+def delete_photo_files(photo_ids: list[str]) -> dict:
+    deleted_ids = []
+    missing_ids = []
+    deleted_files = 0
+
+    for photo_id in photo_ids:
+        row = db.fetch_photo(photo_id)
+        if not row:
+            missing_ids.append(photo_id)
+            continue
+
+        path = resolve_disk_path(row["path"])
+        if os.path.exists(path):
+            os.remove(path)
+            deleted_files += 1
+        deleted_ids.append(photo_id)
+
+    removed_records = db.delete_photos(deleted_ids)
+    scoring.discard_jobs(deleted_ids)
+    return {
+        "deletedIds": deleted_ids,
+        "missingIds": missing_ids,
+        "deletedFiles": deleted_files,
+        "deletedRecords": removed_records,
+    }

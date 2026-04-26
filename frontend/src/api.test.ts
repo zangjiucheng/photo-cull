@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals } from "./api";
+import { apiInternals, deletePhotos, findSimilarPhotos } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -17,6 +17,38 @@ describe("api helpers", () => {
 
     const blob = await apiInternals.requestBlob("/download", undefined, "Download failed");
     expect(await blob.text()).toBe("zip-data");
+    vi.unstubAllGlobals();
+  });
+
+  it("loads similar groups", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      groups: [{ id: "g1", photoIds: ["a", "b"], maxDistance: 2 }],
+      threshold: 8
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    })));
+
+    const payload = await findSimilarPhotos();
+    expect(payload.groups[0].photoIds).toEqual(["a", "b"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("deletes photos by id", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      deletedIds: ["a"],
+      missingIds: [],
+      deletedFiles: 1,
+      deletedRecords: 1
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await deletePhotos(["a"]);
+    expect(payload.deletedRecords).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/photos", expect.objectContaining({ method: "DELETE" }));
     vi.unstubAllGlobals();
   });
 });

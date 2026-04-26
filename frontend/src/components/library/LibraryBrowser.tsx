@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DecisionFilter, LibraryFolder, Photo, SortMode, StatusTone, ViewMode } from "../../types";
+import type { DecisionFilter, LibraryFolder, Photo, SimilarGroup, SortMode, StatusTone, ViewMode } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -25,6 +25,10 @@ interface LibraryBrowserProps {
   statusTone: StatusTone;
   keepRate: number;
   folderPhotosCount: number;
+  similarGroups: SimilarGroup[];
+  similarDeleteIds: Set<string>;
+  isFindingSimilar: boolean;
+  isDeletingSimilar: boolean;
   onSearchChange: (value: string) => void;
   onMinScoreChange: (value: number) => void;
   onDecisionFilterChange: (value: DecisionFilter) => void;
@@ -35,6 +39,9 @@ interface LibraryBrowserProps {
   onToggleAccept: (id: string) => void;
   onToggleReject: (id: string) => void;
   onAutoPickByScore: () => void;
+  onFindSimilar: () => void;
+  onToggleSimilarDelete: (id: string) => void;
+  onDeleteSimilarSelected: () => void;
 }
 
 interface FolderTreeNode {
@@ -173,6 +180,10 @@ export function LibraryBrowser({
   statusTone,
   keepRate,
   folderPhotosCount,
+  similarGroups,
+  similarDeleteIds,
+  isFindingSimilar,
+  isDeletingSimilar,
   onSearchChange,
   onMinScoreChange,
   onDecisionFilterChange,
@@ -182,7 +193,10 @@ export function LibraryBrowser({
   onSelectPhoto,
   onToggleAccept,
   onToggleReject,
-  onAutoPickByScore
+  onAutoPickByScore,
+  onFindSimilar,
+  onToggleSimilarDelete,
+  onDeleteSimilarSelected
 }: LibraryBrowserProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
     try {
@@ -424,6 +438,67 @@ export function LibraryBrowser({
               <div className="progress"><span style={{ width: `${keepRate}%` }} /></div>
               <p>Current folder filtered with your settings.</p>
             </div>
+
+            <section className="similar-panel">
+              <div className="similar-panel-head">
+                <div>
+                  <div className="pane-title">Similar Photos</div>
+                  <p>Find near-duplicate frames, keep the best one, then remove the rest.</p>
+                </div>
+                <div className="similar-actions">
+                  <Button variant="outline" onClick={onFindSimilar} disabled={isFindingSimilar}>
+                    {isFindingSimilar ? "Finding..." : "Find Similar"}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={onDeleteSimilarSelected}
+                    disabled={isDeletingSimilar || similarDeleteIds.size === 0}
+                  >
+                    {isDeletingSimilar ? "Deleting..." : `Delete ${similarDeleteIds.size}`}
+                  </Button>
+                </div>
+              </div>
+              {similarGroups.length ? (
+                <div className="similar-groups">
+                  {similarGroups.map((group, groupIndex) => (
+                    <article className="similar-group" key={group.id}>
+                      <div className="similar-group-title">
+                        <strong>Group {groupIndex + 1}</strong>
+                        <span>{group.photos.length} photos · distance {group.maxDistance}</span>
+                      </div>
+                      <div className="similar-strip">
+                        {group.photos.map((photo, photoIndex) => {
+                          const isChecked = similarDeleteIds.has(photo.id);
+                          return (
+                            <article
+                              key={photo.id}
+                              className={`similar-thumb ${isChecked ? "marked" : ""}`.trim()}
+                            >
+                              <button className="similar-preview" type="button" onClick={() => onSelectPhoto(photo.id)}>
+                                <img src={photo.url} alt={photo.name} loading="lazy" />
+                              </button>
+                              <span className="similar-rank">{photoIndex === 0 ? "Keep" : "Similar"}</span>
+                              <label className="similar-delete">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => onToggleSimilarDelete(photo.id)}
+                                />
+                                Delete
+                              </label>
+                              <span className="similar-name" title={photo.name}>{photo.name}</span>
+                              <span className="similar-score">Score {photo.aiScore}</span>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="similar-empty">No similar groups detected yet.</div>
+              )}
+            </section>
 
             <div className={`gallery ${viewMode === "list" ? "list-mode" : ""}`}>
               {!visiblePhotos.length && <div className="empty-gallery">No photos in this folder match the current filters.</div>}
