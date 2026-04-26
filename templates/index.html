@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Photo Culling</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: "Avenir Next", "Segoe UI", sans-serif;
+            background: #f5f7fa;
+            color: #1f2937;
+            display: grid;
+            place-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .card {
+            max-width: 760px;
+            width: 100%;
+            background: #fff;
+            border: 1px solid #dde5ee;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 12px 28px rgba(26, 41, 61, 0.08);
+        }
+
+        h1 {
+            margin: 0 0 10px;
+        }
+
+        p {
+            margin: 8px 0;
+            color: #5b6c80;
+            line-height: 1.6;
+        }
+
+        pre {
+            margin: 14px 0 0;
+            background: #f1f5fb;
+            border: 1px solid #d4deea;
+            border-radius: 10px;
+            padding: 12px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Frontend Not Built</h1>
+        <p>The app is now served from the React TypeScript build output at <code>static/dist</code>.</p>
+        <p>Build the frontend first, then refresh this page:</p>
+        <pre>cd frontend
+npm install
+npm run build</pre>
+        <p>After build completes, Flask will automatically serve <code>static/dist/index.html</code>.</p>
+    </div>
+</body>
+</html>
