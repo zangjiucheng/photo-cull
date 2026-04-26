@@ -1,12 +1,17 @@
-import { useCallback, useState, type CSSProperties } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoRating, updatePhotoScore, uploadPhotos } from "./api";
-import { LibraryBrowser } from "./components/library/LibraryBrowser";
+import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
-import { Button } from "./components/ui/button";
+import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
+import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
+import { ExportWorkspace } from "./components/workspaces/ExportWorkspace";
+import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
+import { StatsWorkspace } from "./components/workspaces/StatsWorkspace";
+import { WorkspaceShell } from "./components/workspaces/WorkspaceShell";
 import { useLibrary } from "./hooks/useLibrary";
 import { usePhotoFilters } from "./hooks/usePhotoFilters";
 import { usePhotoRatings } from "./hooks/usePhotoRatings";
-import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode } from "./types";
+import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
@@ -18,10 +23,11 @@ export default function App() {
   const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortMode, setSortMode] = useState<SortMode>("score-desc");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("browse");
   const [statusText, setStatusText] = useState("Ready");
   const [statusTone, setStatusTone] = useState<StatusTone>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [exportQueueIds, setExportQueueIds] = useState<Set<string>>(new Set());
   const [similarGroups, setSimilarGroups] = useState<SimilarGroup[]>([]);
   const [similarDeleteIds, setSimilarDeleteIds] = useState<Set<string>>(new Set());
   const [isFindingSimilar, setIsFindingSimilar] = useState(false);
@@ -56,9 +62,10 @@ export default function App() {
     activeId
   });
 
-  const keepRate = photos.length ? Math.round((visiblePhotos.length / photos.length) * 100) : 0;
+  const keepRate = folderPhotos.length ? Math.round((visiblePhotos.length / folderPhotos.length) * 100) : 0;
   const ratedCount = ratings.size;
-  const exportIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
+  const fourPlusIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
+  const exportQueueList = useMemo(() => Array.from(exportQueueIds), [exportQueueIds]);
   const reviewRate = photos.length ? Math.round((ratedCount / photos.length) * 100) : 0;
   const completedCount = photos.filter((p) => p.status === "done" || p.status === "error").length;
   const processingTotal = photos.length;
@@ -66,6 +73,45 @@ export default function App() {
   const processingProgress = processingTotal
     ? Math.max(0, Math.min(100, Math.round((completedCount / processingTotal) * 100)))
     : 0;
+
+  function toggleExportQueue(id: string) {
+    setExportQueueIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function addToExportQueue(id: string) {
+    setExportQueueIds((prev) => new Set(prev).add(id));
+  }
+
+  function addVisibleToQueue() {
+    if (!visiblePhotos.length) {
+      updateStatus("No visible photos to add.", "warn");
+      return;
+    }
+    setExportQueueIds((prev) => {
+      const next = new Set(prev);
+      for (const photo of visiblePhotos) {
+        next.add(photo.id);
+      }
+      return next;
+    });
+    updateStatus(`Added ${visiblePhotos.length} visible photo(s) to export queue.`, "ok");
+  }
+
+  function removeFromExportQueue(id: string) {
+    setExportQueueIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
 
   async function onUpload(files: FileList | null) {
     if (!files || files.length === 0) {
@@ -140,21 +186,21 @@ export default function App() {
   }
 
   async function onExport() {
-    if (!exportIds.length) {
-      updateStatus("Rate photos 4 or 5 stars before exporting.", "warn");
+    if (!exportQueueList.length) {
+      updateStatus("Add photos to the export queue before exporting.", "warn");
       return;
     }
 
     updateStatus("Building ZIP export...", "busy");
     try {
-      const blob = await exportPhotos(exportIds);
+      const blob = await exportPhotos(exportQueueList);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "selected.zip";
       a.click();
       window.URL.revokeObjectURL(url);
-      updateStatus(`Exported ${exportIds.length} 4+ star photo(s).`, "ok");
+      updateStatus(`Exported ${exportQueueList.length} queued photo(s).`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Export failed", "error");
     }
@@ -177,7 +223,7 @@ export default function App() {
     updateStatus("Finding similar photos...", "busy");
     setIsFindingSimilar(true);
     try {
-      const payload = await findSimilarPhotos(true);
+      const payload = await findSimilarPhotos({ includeClip: true, scope: "current", folderPath: activeFolderPath });
       const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
       const groups = payload.groups
         .map((group) => ({
@@ -246,166 +292,126 @@ export default function App() {
     }
   }
 
+  const commonBrowseProps = {
+    ratings,
+    activePhotoId: activePhoto?.id ?? null,
+    viewMode,
+    sortMode,
+    search,
+    minScore,
+    ratingFilter,
+    exportQueueIds,
+    onSearchChange: setSearch,
+    onMinScoreChange: setMinScore,
+    onRatingFilterChange: setRatingFilter,
+    onSortModeChange: setSortMode,
+    onViewModeChange: setViewMode,
+    onSelectPhoto: setActiveId,
+    onRatePhoto: ratePhoto,
+    onAutoRateByScore,
+    onToggleExportQueue: toggleExportQueue
+  };
+
+  let workspace = (
+    <BrowseWorkspace
+      {...commonBrowseProps}
+      photos={visiblePhotos}
+      folderPhotosCount={folderPhotos.length}
+      keepRate={keepRate}
+      onAddVisibleToQueue={addVisibleToQueue}
+    />
+  );
+
+  if (activeTab === "review") {
+    workspace = (
+      <ReviewWorkspace
+        activePhoto={activePhoto}
+        folderPhotos={folderPhotos}
+        ratings={ratings}
+        exportQueueIds={exportQueueIds}
+        onSelectPhoto={setActiveId}
+        onRatePhoto={ratePhoto}
+        onAutoRateByScore={onAutoRateByScore}
+        onToggleExportQueue={toggleExportQueue}
+      />
+    );
+  } else if (activeTab === "duplicates") {
+    workspace = (
+      <DuplicatesWorkspace
+        similarGroups={similarGroups}
+        similarDeleteIds={similarDeleteIds}
+        isFindingSimilar={isFindingSimilar}
+        isDeletingSimilar={isDeletingSimilar}
+        similarSummary={similarSummary}
+        activeFolderPath={activeFolderPath}
+        onFindSimilar={onFindSimilar}
+        onSelectPhoto={setActiveId}
+        onToggleSimilarDelete={onToggleSimilarDelete}
+        onDeleteSimilarSelected={onDeleteSimilarSelected}
+        onAddToExportQueue={addToExportQueue}
+      />
+    );
+  } else if (activeTab === "export") {
+    workspace = (
+      <ExportWorkspace
+        photos={photos}
+        queuedIds={exportQueueList}
+        onRemove={removeFromExportQueue}
+        onClear={() => setExportQueueIds(new Set())}
+        onExport={onExport}
+        onSelectPhoto={setActiveId}
+      />
+    );
+  } else if (activeTab === "stats") {
+    workspace = (
+      <StatsWorkspace
+        activeFolder={activeFolder}
+        totalPhotos={photos.length}
+        visibleCount={visiblePhotos.length}
+        folderPhotosCount={folderPhotos.length}
+        ratedCount={ratedCount}
+        exportQueueCount={exportQueueList.length}
+        fourPlusCount={fourPlusIds.length}
+        processingInFlight={processingInFlight}
+        completedCount={completedCount}
+        processingTotal={processingTotal}
+        keepRate={keepRate}
+        reviewRate={reviewRate}
+        processingProgress={processingProgress}
+      />
+    );
+  }
+
   return (
-    <div className="shell">
-      <header className="hero">
-        <div>
-          <h1>AI Photo Culling</h1>
-          <p>Finder-style folder browsing with score-based color labels and multiple sort modes.</p>
-        </div>
-        <div className="hero-actions">
-          <label className="hero-action hero-action-upload" htmlFor="fileInput">Upload Photos</label>
-          <input
-            id="fileInput"
-            type="file"
-            multiple
-            accept="image/*"
-            hidden
-            onChange={(e) => void onUpload(e.target.files)}
-          />
-          <Button variant="outline" className="hero-action hero-action-refresh" onClick={() => void onRefresh()} disabled={isRefreshing}>{isRefreshing ? "Refreshing..." : "Refresh"}</Button>
-          <Button variant="default" className="hero-action hero-action-export" onClick={() => void onExport()}>Export 4+ Stars</Button>
-        </div>
-      </header>
-
-      <main className="layout">
-        <LibraryBrowser
+    <WorkspaceShell
+      activeTab={activeTab}
+      statusText={statusText}
+      statusTone={statusTone}
+      currentPath={activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}
+      exportQueueCount={exportQueueList.length}
+      isRefreshing={isRefreshing}
+      onTabChange={setActiveTab}
+      onUpload={(files) => void onUpload(files)}
+      onRefresh={() => void onRefresh()}
+      onExportQueue={() => void onExport()}
+      sidebar={
+        <FolderNavigator
           folders={folders}
-          activeFolder={activeFolder}
           activeFolderPath={activeFolderPath}
-          visiblePhotos={visiblePhotos}
-          ratings={ratings}
-          activePhotoId={activePhoto?.id ?? null}
-          viewMode={viewMode}
-          sortMode={sortMode}
-          search={search}
-          minScore={minScore}
-          ratingFilter={ratingFilter}
-          statusText={statusText}
-          statusTone={statusTone}
-          keepRate={keepRate}
-          folderPhotosCount={folderPhotos.length}
-          similarGroups={similarGroups}
-          similarDeleteIds={similarDeleteIds}
-          isFindingSimilar={isFindingSimilar}
-          isDeletingSimilar={isDeletingSimilar}
-          similarSummary={similarSummary}
-          onSearchChange={setSearch}
-          onMinScoreChange={setMinScore}
-          onRatingFilterChange={setRatingFilter}
-          onSortModeChange={setSortMode}
-          onViewModeChange={setViewMode}
+          visibleCount={visiblePhotos.length}
           onSelectFolder={setActiveFolderPath}
-          onSelectPhoto={setActiveId}
-          onRatePhoto={ratePhoto}
-          onAutoRateByScore={onAutoRateByScore}
-          onFindSimilar={onFindSimilar}
-          onToggleSimilarDelete={onToggleSimilarDelete}
-          onDeleteSimilarSelected={onDeleteSimilarSelected}
         />
-
-        <aside className="stack">
-          <InspectorPanel
-            activePhoto={activePhoto}
-            ratings={ratings}
-            onRatePhoto={ratePhoto}
-            onSaveScoreOverride={saveScoreOverride}
-          />
-        </aside>
-      </main>
-
-      <aside className={`card filters stats-dock ${isStatsOpen ? "open" : "collapsed"}`.trim()}>
-        <button className="stats-toggle" onClick={() => setIsStatsOpen((prev) => !prev)}>
-          <div className="stats-toggle-copy">
-            <span className="stats-eyebrow">Live Stats</span>
-            <strong>Curation Pulse</strong>
-          </div>
-          <div className="stats-toggle-chip">
-            <span className="stats-summary">Rated {reviewRate}%</span>
-          </div>
-          <span className="stats-caret" aria-hidden="true">{isStatsOpen ? "▾" : "▸"}</span>
-        </button>
-
-        {isStatsOpen ? (
-          <div className="stats-body">
-            <section className="stats-hero">
-              <div className="stats-hero-copy">
-                <span className="stats-eyebrow">Rating coverage</span>
-                <div className="stats-hero-value">
-                  <strong>{reviewRate}%</strong>
-                  <span>{ratedCount}/{photos.length || 0} frames rated</span>
-                </div>
-                <p>{exportIds.length} photos are 4+ stars and ready for export.</p>
-              </div>
-              <div
-                className="stats-ring"
-                style={{ "--ring-value": reviewRate * 3.6 } as CSSProperties}
-                aria-hidden="true"
-              >
-                <div className="stats-ring-inner">
-                  <span>Rated</span>
-                  <strong>{reviewRate}%</strong>
-                </div>
-              </div>
-            </section>
-
-            <div className="stats-grid">
-              <article className="mini-stat mini-stat-accent">
-                <span>Visible Now</span>
-                <strong>{visiblePhotos.length}</strong>
-                <small>after filters</small>
-              </article>
-              <article className="mini-stat">
-                <span>4+ Stars</span>
-                <strong>{exportIds.length}</strong>
-                <small>export-ready</small>
-              </article>
-              <article className="mini-stat">
-                <span>Rated</span>
-                <strong>{ratedCount}</strong>
-                <small>starred frames</small>
-              </article>
-              <article className="mini-stat">
-                <span>In Queue</span>
-                <strong>{processingInFlight}</strong>
-                <small>still scoring</small>
-              </article>
-            </div>
-
-            <section className="stats-panel">
-              <div className="stats-panel-head">
-                <div>
-                  <span className="stats-eyebrow">Current Folder</span>
-                  <strong>{activeFolder ? formatFolderLabel(activeFolder) : "Root"}</strong>
-                </div>
-                <span className="stats-panel-chip">{keepRate}% keep rate</span>
-              </div>
-              <div className="stats-progress-group">
-                <div className="progress-head">
-                  <span>Filter retention</span>
-                  <span>{visiblePhotos.length}/{photos.length || 0}</span>
-                </div>
-                <div className="progress progress-retention">
-                  <span style={{ width: `${keepRate}%` }} />
-                </div>
-              </div>
-              <div className="stats-progress-group">
-                <div className="progress-head">
-                  <span>Background scoring</span>
-                  <span>{processingProgress}%</span>
-                </div>
-                <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={processingProgress}>
-                  <span style={{ width: `${processingProgress}%` }} />
-                </div>
-              </div>
-              <div className="progress-meta">
-                <span>{completedCount}/{processingTotal} completed</span>
-                <span>{processingInFlight} in queue</span>
-              </div>
-            </section>
-          </div>
-        ) : null}
-      </aside>
-    </div>
+      }
+      inspector={
+        <InspectorPanel
+          activePhoto={activePhoto}
+          ratings={ratings}
+          onRatePhoto={ratePhoto}
+          onSaveScoreOverride={saveScoreOverride}
+        />
+      }
+    >
+      {workspace}
+    </WorkspaceShell>
   );
 }

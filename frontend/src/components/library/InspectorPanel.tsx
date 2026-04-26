@@ -19,13 +19,19 @@ function StarRating({
   rating: number;
   onRatePhoto: (id: string, rating: number) => void;
 }) {
+  const [hoverRating, setHoverRating] = useState(0);
+  const previewRating = hoverRating || rating;
+
   return (
-    <div className="star-rating" aria-label={`Rating ${rating || "unrated"} out of 5`}>
+    <div className="star-rating" aria-label={`Rating ${rating || "unrated"} out of 5`} onMouseLeave={() => setHoverRating(0)}>
       {[1, 2, 3, 4, 5].map((star) => (
         <button
           key={star}
           type="button"
-          className={`star-btn ${rating >= star ? "filled" : ""}`.trim()}
+          className={`star-btn ${previewRating >= star ? "filled" : ""}`.trim()}
+          onMouseEnter={() => setHoverRating(star)}
+          onFocus={() => setHoverRating(star)}
+          onBlur={() => setHoverRating(0)}
           onClick={() => onRatePhoto(photo.id, star)}
           aria-label={`Set ${star} star${star === 1 ? "" : "s"}`}
         >

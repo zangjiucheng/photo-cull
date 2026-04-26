@@ -78,13 +78,20 @@ def test_similar_detection_and_delete(client, tmp_path):
     assert upload.status_code == 200
     photos = upload.get_json()
 
-    similar = client.get("/api/photos/similar?include_clip=0")
+    similar = client.get("/api/photos/similar?include_clip=0&scope=current&folder_path=")
     assert similar.status_code == 200
     payload = similar.get_json()
     groups = payload["groups"]
     assert payload["stages"]["phash"]["exactDistance"] == 5
     assert any(set(group["photoIds"]) == {photo["id"] for photo in photos} for group in groups)
     assert groups[0]["keepPhotoId"] in {photo["id"] for photo in photos}
+
+    library_scope = client.get("/api/photos/similar?include_clip=0&scope=library")
+    assert library_scope.status_code == 200
+    assert library_scope.get_json()["groups"]
+
+    invalid_scope = client.get("/api/photos/similar?scope=bad")
+    assert invalid_scope.status_code == 400
 
     delete = client.delete("/api/photos", json={"photo_ids": [photos[1]["id"]]})
     assert delete.status_code == 200

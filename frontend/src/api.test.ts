@@ -42,8 +42,9 @@ describe("api helpers", () => {
       headers: { "Content-Type": "application/json" }
     })));
 
-    const payload = await findSimilarPhotos();
+    const payload = await findSimilarPhotos({ scope: "current", folderPath: "shoot-a", includeClip: false });
     expect(payload.groups[0].photoIds).toEqual(["a", "b"]);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/photos/similar?include_clip=0&scope=current&folder_path=shoot-a");
     vi.unstubAllGlobals();
   });
 

@@ -1,4 +1,4 @@
-import type { ApiPhoto, DeletePhotosPayload, LibraryPayload, SimilarPayload } from "./types";
+import type { ApiPhoto, DeletePhotosPayload, LibraryPayload, SimilarPayload, SimilarityScope } from "./types";
 
 async function parseError(res: Response, fallback: string): Promise<string> {
   const contentType = res.headers.get("Content-Type") || "";
@@ -108,9 +108,18 @@ export async function updatePhotoScore(photoId: string, manualScore: number | nu
   return data;
 }
 
-export async function findSimilarPhotos(includeClip = true): Promise<SimilarPayload> {
-  const flag = includeClip ? "1" : "0";
-  return requestJson<SimilarPayload>(`/api/photos/similar?include_clip=${flag}`, undefined, "Failed to find similar photos");
+export async function findSimilarPhotos(options: {
+  includeClip?: boolean;
+  scope?: SimilarityScope;
+  folderPath?: string;
+} = {}): Promise<SimilarPayload> {
+  const params = new URLSearchParams();
+  params.set("include_clip", options.includeClip === false ? "0" : "1");
+  params.set("scope", options.scope ?? "library");
+  if (options.folderPath !== undefined) {
+    params.set("folder_path", options.folderPath);
+  }
+  return requestJson<SimilarPayload>(`/api/photos/similar?${params.toString()}`, undefined, "Failed to find similar photos");
 }
 
 export async function deletePhotos(photoIds: string[]): Promise<DeletePhotosPayload> {

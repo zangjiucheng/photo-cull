@@ -33,3 +33,7 @@ static/dist/
 
 # VS Code
 .vscode/
+
+# Playwright CLI
+.playwright-cli
+output/

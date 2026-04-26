@@ -132,7 +132,11 @@ def export():
 @bp.route("/photos/similar", methods=["GET"])
 def similar_photos():
     include_clip = request.args.get("include_clip", "1") not in {"0", "false", "False"}
-    return jsonify(similarity.find_similar_groups(include_clip=include_clip))
+    scope = request.args.get("scope", "library")
+    if scope not in {"current", "library"}:
+        return error_response("scope must be current or library", 400)
+    folder_path = request.args.get("folder_path", "") if scope == "current" else None
+    return jsonify(similarity.find_similar_groups(include_clip=include_clip, folder_path=folder_path))
 
 
 @bp.route("/photos", methods=["DELETE"])

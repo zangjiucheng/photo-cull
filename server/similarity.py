@@ -109,9 +109,11 @@ def best_version_key(candidate: PhotoCandidate) -> tuple:
     )
 
 
-def load_candidates() -> list[PhotoCandidate]:
+def load_candidates(folder_path: str | None = None) -> list[PhotoCandidate]:
     candidates = []
     for row in db.list_photos():
+        if folder_path is not None and row["folder_path"] != folder_path:
+            continue
         path = storage.resolve_disk_path(row["path"])
         if not os.path.exists(path):
             continue
@@ -319,8 +321,8 @@ def build_groups(candidates: list[PhotoCandidate], matches: list[dict]) -> list[
     return groups
 
 
-def find_similar_groups(include_clip: bool = True) -> dict:
-    candidates = load_candidates()
+def find_similar_groups(include_clip: bool = True, folder_path: str | None = None) -> dict:
+    candidates = load_candidates(folder_path=folder_path)
     matches = phash_matches(candidates)
     clip_status = "skipped"
     if include_clip:
