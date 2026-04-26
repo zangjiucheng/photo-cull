@@ -46,7 +46,7 @@ export default function App() {
   } = library;
   const ratingState = usePhotoRatings(photos, updateStatus);
   const { ratings, setRatings, ratePhoto } = ratingState;
-  const { activeFolder, folderPhotos, visiblePhotos, activePhoto, childFolders } = usePhotoFilters(photos, folders, {
+  const { activeFolder, folderPhotos, visiblePhotos, activePhoto } = usePhotoFilters(photos, folders, {
     activeFolderPath,
     search,
     minScore,
@@ -273,7 +273,6 @@ export default function App() {
           folders={folders}
           activeFolder={activeFolder}
           activeFolderPath={activeFolderPath}
-          childFolders={childFolders}
           visiblePhotos={visiblePhotos}
           ratings={ratings}
           activePhotoId={activePhoto?.id ?? null}

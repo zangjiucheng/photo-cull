@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -11,7 +11,6 @@ interface LibraryBrowserProps {
   folders: LibraryFolder[];
   activeFolder: LibraryFolder | null;
   activeFolderPath: string;
-  childFolders: LibraryFolder[];
   visiblePhotos: Photo[];
   ratings: Map<string, number>;
   activePhotoId: string | null;
@@ -165,7 +164,6 @@ export function LibraryBrowser({
   folders,
   activeFolder,
   activeFolderPath,
-  childFolders,
   visiblePhotos,
   ratings,
   activePhotoId,
@@ -196,113 +194,40 @@ export function LibraryBrowser({
   onToggleSimilarDelete,
   onDeleteSimilarSelected
 }: LibraryBrowserProps) {
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
-    try {
-      const raw = window.localStorage.getItem("folderTreeExpanded");
-      if (!raw) {
-        return new Set();
-      }
-      const parsed = JSON.parse(raw) as string[];
-      return new Set(parsed);
-    } catch {
-      return new Set();
-    }
-  });
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const folderColumns = useMemo(() => {
+    function findNode(nodes: FolderTreeNode[], path: string): FolderTreeNode | null {
+      for (const node of nodes) {
+        if (node.path === path) {
+          return node;
+        }
+        const child = findNode(node.children, path);
+        if (child) {
+          return child;
+        }
+      }
+      return null;
+    }
 
-  useEffect(() => {
+    const columns: Array<{ title: string; nodes: FolderTreeNode[]; selectedPath: string }> = [
+      { title: "Library", nodes: folderTree, selectedPath: activeFolderPath.split("/")[0] || "" }
+    ];
     if (!activeFolderPath) {
-      return;
+      return columns;
     }
 
     const parts = activeFolderPath.split("/");
-    const next = new Set(expandedPaths);
-    let acc = "";
-    for (const part of parts) {
-      acc = acc ? `${acc}/${part}` : part;
-      next.add(acc);
-    }
-    setExpandedPaths(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFolderPath]);
-
-  useEffect(() => {
-    window.localStorage.setItem("folderTreeExpanded", JSON.stringify([...expandedPaths]));
-  }, [expandedPaths]);
-
-  function toggleExpand(path: string) {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
+    let currentPath = "";
+    for (let index = 0; index < parts.length; index += 1) {
+      currentPath = currentPath ? `${currentPath}/${parts[index]}` : parts[index];
+      const node = findNode(folderTree, currentPath);
+      if (node && node.children.length) {
+        const nextSelectedPath = parts[index + 1] ? `${currentPath}/${parts[index + 1]}` : "";
+        columns.push({ title: node.name, nodes: node.children, selectedPath: nextSelectedPath });
       }
-      return next;
-    });
-  }
-
-  function renderTree(nodes: FolderTreeNode[], depth = 0): JSX.Element[] {
-    const result: JSX.Element[] = [];
-
-    for (const node of nodes) {
-      const isExpanded = expandedPaths.has(node.path);
-      const hasChildren = node.children.length > 0;
-      const isActive = node.path === activeFolderPath;
-
-      result.push(
-        <div key={node.path}>
-          <button
-            className={`folder-item tree-item ${isActive ? "active" : ""}`.trim()}
-            style={{ paddingLeft: `${10 + depth * 16}px` }}
-            onClick={() => onSelectFolder(node.path)}
-          >
-            <div className="folder-item-content">
-              <span
-                className={`tree-toggle ${hasChildren ? "is-visible" : ""}`.trim()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (hasChildren) {
-                    toggleExpand(node.path);
-                  }
-                }}
-              >
-                {hasChildren ? (isExpanded ? "▾" : "▸") : ""}
-              </span>
-              <span
-                className={`folder-icon ${hasChildren ? (isExpanded ? "open" : "closed") : "leaf"}`.trim()}
-                aria-hidden="true"
-              />
-              <div>
-                <div className="folder-name">{node.name}</div>
-                <div className="folder-meta">{node.count} item(s)</div>
-              </div>
-            </div>
-            <div className="folder-score">{node.bestScore}</div>
-          </button>
-          {hasChildren && isExpanded ? renderTree(node.children, depth + 1) : null}
-          {node.path === activeFolderPath
-            ? visiblePhotos.map((photo) => {
-              const isPhotoActive = activePhotoId === photo.id;
-              return (
-                <button
-                  key={`file-${photo.id}`}
-                  className={`file-item ${isPhotoActive ? "active" : ""}`.trim()}
-                  style={{ paddingLeft: `${26 + depth * 16}px` }}
-                  onClick={() => onSelectPhoto(photo.id)}
-                >
-                  <span className="file-icon" aria-hidden="true" />
-                  <span className="file-name" title={photo.name}>{photo.name}</span>
-                </button>
-              );
-            })
-            : null}
-        </div>
-      );
     }
-
-    return result;
-  }
+    return columns;
+  }, [activeFolderPath, folderTree]);
 
   return (
     <Card className="library-card">
@@ -386,9 +311,37 @@ export function LibraryBrowser({
                 })
                 : null}
             </div>
-            <ScrollArea className="folder-list">
-              {folderTree.length ? renderTree(folderTree, 0) : <div className="folder-empty">No folders with images.</div>}
-            </ScrollArea>
+            <div className="finder-columns" role="tree" aria-label="Folder columns">
+              {folderColumns.map((column, columnIndex) => (
+                <section className="finder-column" key={`${column.title}-${columnIndex}`}>
+                  <div className="finder-column-title">{column.title}</div>
+                  <ScrollArea className="finder-column-scroll">
+                    {column.nodes.length ? column.nodes.map((node) => {
+                      const isActive = node.path === activeFolderPath;
+                      const isSelectedInColumn = node.path === column.selectedPath;
+                      const hasChildren = node.children.length > 0;
+                      return (
+                        <button
+                          key={node.path}
+                          className={`finder-folder ${isActive || isSelectedInColumn ? "active" : ""}`.trim()}
+                          onClick={() => onSelectFolder(node.path)}
+                          role="treeitem"
+                          aria-selected={isActive}
+                        >
+                          <span className={`folder-icon ${hasChildren ? "closed" : "leaf"}`.trim()} aria-hidden="true" />
+                          <span className="finder-folder-copy">
+                            <span className="folder-name">{node.name}</span>
+                            <span className="folder-meta">{node.count} item(s)</span>
+                          </span>
+                          <span className="folder-score">{node.bestScore}</span>
+                          <span className="finder-chevron" aria-hidden="true">{hasChildren ? "›" : ""}</span>
+                        </button>
+                      );
+                    }) : <div className="folder-empty">No folders here.</div>}
+                  </ScrollArea>
+                </section>
+              ))}
+            </div>
           </div>
 
           <div className="gallery-pane">
@@ -575,20 +528,6 @@ export function LibraryBrowser({
                 );
               })}
             </div>
-
-            {childFolders.length > 0 && (
-              <div className="subfolder-strip">
-                <div className="pane-title">Subfolders</div>
-                <div className="subfolder-row">
-                  {childFolders.map((folder) => (
-                    <button key={folder.path} className="subfolder-card" onClick={() => onSelectFolder(folder.path)}>
-                      <div className="subfolder-name">{folder.name}</div>
-                      <div className="subfolder-meta">{folder.count} image(s)</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </CardContent>
