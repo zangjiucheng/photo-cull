@@ -189,11 +189,6 @@ export function InspectorPanel({
                     {activePhoto.status === "error" && (activePhoto.error || "Scoring failed.")}
                   </div>
                 )}
-                <div className="tab-body">
-                  <div>Strong score profile based on image quality ranking.</div>
-                  <div>This frame is {activePhoto.aiScore >= 70 ? "above" : "below"} your current keep threshold.</div>
-                  <div>Rate from 1 to 5 stars, then filter by rating in the library pane.</div>
-                </div>
                 <div className="inspector-actions">
                   <StarRating
                     photo={activePhoto}

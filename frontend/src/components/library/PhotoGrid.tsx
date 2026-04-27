@@ -1,6 +1,7 @@
 import type { Photo, ViewMode } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { useState } from "react";
 
 interface PhotoGridProps {
   photos: Photo[];
@@ -42,11 +43,14 @@ export function PhotoGrid({
   onRatePhoto,
   onToggleExportQueue
 }: PhotoGridProps) {
+  const [hoverRating, setHoverRating] = useState<{ photoId: string; rating: number } | null>(null);
+
   return (
     <div className={`gallery bridge-gallery ${viewMode === "list" ? "list-mode" : ""}`}>
       {!photos.length && <div className="empty-gallery">No photos match the current folder and filters.</div>}
       {photos.map((photo) => {
         const rating = ratings.get(photo.id) ?? photo.rating ?? 0;
+        const previewRating = hoverRating?.photoId === photo.id ? hoverRating.rating : rating;
         const isActive = activePhotoId === photo.id;
         const isQueued = exportQueueIds.has(photo.id);
         return (
@@ -76,12 +80,15 @@ export function PhotoGrid({
               </div>
               <div className="name" title={photo.name}>{photo.name}</div>
               <div className="meta-row">
-                <div className="star-rating star-rating-compact">
+                <div className="star-rating star-rating-compact" onMouseLeave={() => setHoverRating(null)}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
                       key={star}
                       type="button"
-                      className={`star-btn ${rating >= star ? "filled" : ""}`.trim()}
+                      className={`star-btn ${previewRating >= star ? "filled" : ""}`.trim()}
+                      onMouseEnter={() => setHoverRating({ photoId: photo.id, rating: star })}
+                      onFocus={() => setHoverRating({ photoId: photo.id, rating: star })}
+                      onBlur={() => setHoverRating(null)}
                       onClick={(event) => {
                         event.stopPropagation();
                         onRatePhoto(photo.id, star);

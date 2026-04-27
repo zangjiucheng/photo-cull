@@ -36,11 +36,7 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
         </div>
         <button className="link-button" onClick={props.onAddVisibleToQueue}>Add Visible to Queue</button>
       </div>
-      <FilterBar {...props} />
-      <div className="keep-rate compact-keep-rate">
-        <div className="keep-row"><span>Filter retention</span><span>{props.photos.length}/{props.folderPhotosCount}</span></div>
-        <div className="progress"><span style={{ width: `${props.keepRate}%` }} /></div>
-      </div>
+      <FilterBar {...props} visibleCount={props.photos.length} totalCount={props.folderPhotosCount} />
       <div className="browse-content-scroll">
         <PhotoGrid
           photos={props.photos}

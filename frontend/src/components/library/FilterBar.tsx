@@ -6,6 +6,9 @@ import { Select } from "../ui/select";
 interface FilterBarProps {
   search: string;
   minScore: number;
+  visibleCount: number;
+  totalCount: number;
+  keepRate: number;
   ratingFilter: RatingFilter;
   sortMode: SortMode;
   viewMode: ViewMode;
@@ -20,6 +23,9 @@ interface FilterBarProps {
 export function FilterBar({
   search,
   minScore,
+  visibleCount,
+  totalCount,
+  keepRate,
   ratingFilter,
   sortMode,
   viewMode,
@@ -63,6 +69,11 @@ export function FilterBar({
         <button className={`view-switch-btn ${viewMode === "list" ? "active" : ""}`.trim()} onClick={() => onViewModeChange("list")} role="tab" aria-selected={viewMode === "list"}>List</button>
       </div>
       <Button variant="outline" className="toolbar-auto-pick" onClick={onAutoRateByScore}>AI Rate</Button>
+      <div className="filter-retention-inline" aria-label="Filter retention">
+        <span>Retention</span>
+        <strong>{keepRate}%</strong>
+        <small>{visibleCount}/{totalCount}</small>
+      </div>
     </div>
   );
 }
