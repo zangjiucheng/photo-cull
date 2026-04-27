@@ -27,15 +27,38 @@ def get_config() -> AppConfig:
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_config.db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
 def init_db() -> None:
     with connect() as conn:
+        photos_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(photos)").fetchall()
+        }
+        has_workspace_schema = bool(photos_columns) and "workspace_id" in photos_columns
+        if photos_columns and not has_workspace_schema:
+            conn.execute("DROP TABLE IF EXISTS photos")
+            conn.execute("DROP TABLE IF EXISTS excluded_photos")
+            conn.execute("DROP TABLE IF EXISTS workspaces")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_path TEXT NOT NULL UNIQUE,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                last_scanned_at REAL
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS photos (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
                 name TEXT NOT NULL,
                 path TEXT NOT NULL,
                 relative_path TEXT NOT NULL,
@@ -46,43 +69,47 @@ def init_db() -> None:
                 content_hash TEXT,
                 score REAL,
                 manual_score REAL,
-                decision TEXT,
                 rating INTEGER,
                 status TEXT NOT NULL DEFAULT 'pending',
                 error TEXT,
                 created_at REAL NOT NULL,
-                updated_at REAL NOT NULL
+                updated_at REAL NOT NULL,
+                UNIQUE(workspace_id, relative_path)
             )
             """
         )
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
-        if "decision" not in columns:
-            conn.execute("ALTER TABLE photos ADD COLUMN decision TEXT")
-        if "content_hash" not in columns:
-            conn.execute("ALTER TABLE photos ADD COLUMN content_hash TEXT")
-        if "manual_score" not in columns:
-            conn.execute("ALTER TABLE photos ADD COLUMN manual_score REAL")
-        if "rating" not in columns:
-            conn.execute("ALTER TABLE photos ADD COLUMN rating INTEGER")
         conn.execute(
             """
-            UPDATE photos
-            SET rating = CASE
-                WHEN decision = 'accepted' THEN 5
-                WHEN decision = 'rejected' THEN 1
-                ELSE NULL
-            END
-            WHERE rating IS NULL AND decision IN ('accepted', 'rejected')
+            CREATE TABLE IF NOT EXISTS excluded_photos (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                relative_path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                excluded_at REAL NOT NULL,
+                PRIMARY KEY(workspace_id, relative_path)
+            )
             """
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_folder_path ON photos(folder_path)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_rating ON photos(rating)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_folder ON photos(workspace_id, folder_path)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_status ON photos(workspace_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_rating ON photos(workspace_id, rating)")
+
+
+def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "rootPath": row["root_path"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "lastScannedAt": row["last_scanned_at"],
+    }
 
 
 def row_to_photo(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
+        "workspaceId": row["workspace_id"],
         "name": row["name"],
         "score": row["score"],
         "manualScore": row["manual_score"],
@@ -93,11 +120,65 @@ def row_to_photo(row: sqlite3.Row) -> dict[str, Any]:
         "relativePath": row["relative_path"],
         "mtime": row["mtime"],
         "size": row["size"],
-        "decision": row["decision"],
+        "decision": None,
         "rating": row["rating"],
         "status": row["status"],
         "error": row["error"],
     }
+
+
+def fetch_workspace(workspace_id: str) -> sqlite3.Row | None:
+    with connect() as conn:
+        return conn.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+
+
+def fetch_workspace_by_root(root_path: str) -> sqlite3.Row | None:
+    with connect() as conn:
+        return conn.execute("SELECT * FROM workspaces WHERE root_path = ?", (root_path,)).fetchone()
+
+
+def list_workspaces() -> list[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute("SELECT * FROM workspaces ORDER BY updated_at DESC, name ASC").fetchall()
+
+
+def upsert_workspace(workspace_id: str, name: str, root_path: str) -> sqlite3.Row:
+    now = time.time()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM workspaces WHERE root_path = ?", (root_path,)).fetchone()
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO workspaces (id, name, root_path, created_at, updated_at, last_scanned_at)
+                VALUES (?, ?, ?, ?, ?, NULL)
+                """,
+                (workspace_id, name, root_path, now, now),
+            )
+            return conn.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+
+        conn.execute(
+            "UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
+            (name or row["name"], now, row["id"]),
+        )
+        return conn.execute("SELECT * FROM workspaces WHERE id = ?", (row["id"],)).fetchone()
+
+
+def mark_workspace_scanned(workspace_id: str) -> None:
+    now = time.time()
+    with connect() as conn:
+        conn.execute(
+            "UPDATE workspaces SET last_scanned_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, workspace_id),
+        )
+
+
+def delete_workspace(workspace_id: str) -> bool:
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+    return True
 
 
 def fetch_photo(photo_id: str) -> sqlite3.Row | None:
@@ -105,13 +186,36 @@ def fetch_photo(photo_id: str) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
 
 
-def list_photos() -> list[sqlite3.Row]:
+def list_photos(workspace_id: str | None = None) -> list[sqlite3.Row]:
     with connect() as conn:
-        return conn.execute("SELECT * FROM photos ORDER BY relative_path ASC").fetchall()
+        if workspace_id is None:
+            return conn.execute("SELECT * FROM photos ORDER BY workspace_id ASC, relative_path ASC").fetchall()
+        return conn.execute(
+            "SELECT * FROM photos WHERE workspace_id = ? ORDER BY relative_path ASC",
+            (workspace_id,),
+        ).fetchall()
+
+
+def list_excluded(workspace_id: str) -> list[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM excluded_photos WHERE workspace_id = ? ORDER BY relative_path ASC",
+            (workspace_id,),
+        ).fetchall()
+
+
+def is_excluded(workspace_id: str, relative_path: str) -> bool:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM excluded_photos WHERE workspace_id = ? AND relative_path = ?",
+            (workspace_id, relative_path),
+        ).fetchone()
+    return row is not None
 
 
 def insert_or_update_photo(
     photo_id: str,
+    workspace_id: str,
     name: str,
     path: str,
     relative_path: str,
@@ -131,12 +235,25 @@ def insert_or_update_photo(
             conn.execute(
                 """
                 INSERT INTO photos (
-                    id, name, path, relative_path, folder, folder_path, mtime, size,
-                    content_hash, score, decision, status, error, created_at, updated_at
+                    id, workspace_id, name, path, relative_path, folder, folder_path,
+                    mtime, size, content_hash, score, status, error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, ?, ?)
                 """,
-                (photo_id, name, path, relative_path, folder, folder_path, mtime, size, content_hash, now, now),
+                (
+                    photo_id,
+                    workspace_id,
+                    name,
+                    path,
+                    relative_path,
+                    folder,
+                    folder_path,
+                    mtime,
+                    size,
+                    content_hash,
+                    now,
+                    now,
+                ),
             )
             return "inserted"
 
@@ -167,13 +284,7 @@ def insert_or_update_photo(
 
 
 def update_decision(photo_id: str, decision: str | None) -> bool:
-    now = time.time()
-    with connect() as conn:
-        row = conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
-        if row is None:
-            return False
-        conn.execute("UPDATE photos SET decision = ?, updated_at = ? WHERE id = ?", (decision, now, photo_id))
-    return True
+    return fetch_photo(photo_id) is not None
 
 
 def update_rating(photo_id: str, rating: int | None) -> bool:
@@ -223,6 +334,36 @@ def mark_error(photo_id: str, message: object) -> None:
         )
 
 
+def exclude_photos(photo_ids: Iterable[str]) -> dict[str, Any]:
+    ids = list(photo_ids)
+    excluded_ids: list[str] = []
+    missing_ids: list[str] = []
+    now = time.time()
+    with connect() as conn:
+        for photo_id in ids:
+            row = conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
+            if row is None:
+                missing_ids.append(photo_id)
+                continue
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO excluded_photos
+                    (workspace_id, relative_path, name, path, excluded_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (row["workspace_id"], row["relative_path"], row["name"], row["path"], now),
+            )
+            conn.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
+            excluded_ids.append(photo_id)
+    return {
+        "excludedIds": excluded_ids,
+        "deletedIds": excluded_ids,
+        "missingIds": missing_ids,
+        "deletedFiles": 0,
+        "deletedRecords": len(excluded_ids),
+    }
+
+
 def delete_photos(photo_ids: Iterable[str]) -> int:
     ids = list(photo_ids)
     if not ids:
@@ -230,6 +371,26 @@ def delete_photos(photo_ids: Iterable[str]) -> int:
     with connect() as conn:
         conn.executemany("DELETE FROM photos WHERE id = ?", [(photo_id,) for photo_id in ids])
     return len(ids)
+
+
+def restore_excluded(workspace_id: str, relative_paths: Iterable[str] | None = None) -> list[str]:
+    restored: list[str] = []
+    with connect() as conn:
+        if relative_paths is None:
+            rows = conn.execute(
+                "SELECT relative_path FROM excluded_photos WHERE workspace_id = ?",
+                (workspace_id,),
+            ).fetchall()
+        else:
+            paths = list(relative_paths)
+            rows = [{"relative_path": path} for path in paths]
+        for row in rows:
+            conn.execute(
+                "DELETE FROM excluded_photos WHERE workspace_id = ? AND relative_path = ?",
+                (workspace_id, row["relative_path"]),
+            )
+            restored.append(row["relative_path"])
+    return restored
 
 
 def count_photos_by_status(status: str | None = None) -> int:

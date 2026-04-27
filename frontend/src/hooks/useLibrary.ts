@@ -1,32 +1,79 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchLibrary, refreshLibrary } from "../api";
+import { fetchWorkspaceLibrary, openWorkspace, refreshLibrary, restorePhotos } from "../api";
 import { normalizeScores } from "../core";
-import type { LibraryFolder, LibraryPayload, Photo, StatusTone } from "../types";
+import type { LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
+
+const ACTIVE_WORKSPACE_KEY = "ai-culling-active-workspace";
 
 export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => void) {
+  const [workspaces, setWorkspaces] = useState<PhotoWorkspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() => (
+    window.localStorage.getItem(ACTIVE_WORKSPACE_KEY)
+  ));
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [processingCount, setProcessingCount] = useState(0);
-  const [activeFolderPath, setActiveFolderPath] = useState("");
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [excludedCount, setExcludedCount] = useState(0);
+  const [activeFolderByWorkspace, setActiveFolderByWorkspace] = useState<Record<string, string>>({});
+  const [activeIdByWorkspace, setActiveIdByWorkspace] = useState<Record<string, string | null>>({});
+
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
+  const activeFolderPath = activeWorkspaceId ? activeFolderByWorkspace[activeWorkspaceId] ?? "" : "";
+  const activeId = activeWorkspaceId ? activeIdByWorkspace[activeWorkspaceId] ?? null : null;
+
+  const setActiveWorkspaceId = useCallback((workspaceId: string | null) => {
+    setActiveWorkspaceIdState(workspaceId);
+    if (workspaceId) {
+      window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+    }
+  }, []);
+
+  const setActiveFolderPath = useCallback((folderPath: string) => {
+    if (!activeWorkspaceId) return;
+    setActiveFolderByWorkspace((current) => ({ ...current, [activeWorkspaceId]: folderPath }));
+  }, [activeWorkspaceId]);
+
+  const setActiveId = useCallback((photoId: string | null) => {
+    if (!activeWorkspaceId) return;
+    setActiveIdByWorkspace((current) => ({ ...current, [activeWorkspaceId]: photoId }));
+  }, [activeWorkspaceId]);
 
   const applyLibraryPayload = useCallback((data: LibraryPayload) => {
     const normalized = normalizeScores(data.photos);
+    const nextWorkspaceId = data.activeWorkspace?.id ?? data.workspaces[0]?.id ?? null;
+
+    setWorkspaces(data.workspaces);
     setPhotos(normalized);
     setFolders(data.folders);
     setPendingCount(data.summary.pending);
     setProcessingCount(data.summary.processing);
-    setActiveFolderPath((current) => {
-      if (current && data.folders.some((folder) => folder.path === current)) {
-        return current;
-      }
-      return data.folders[0]?.path || "";
-    });
-    setActiveId((current) => current || normalized[0]?.id || null);
+    setExcludedCount(data.summary.excluded ?? 0);
+    setActiveWorkspaceId(nextWorkspaceId);
+
+    if (nextWorkspaceId) {
+      setActiveFolderByWorkspace((current) => {
+        const currentFolder = current[nextWorkspaceId] ?? "";
+        if (currentFolder === "" || data.folders.some((folder) => folder.path === currentFolder)) {
+          return current;
+        }
+        return { ...current, [nextWorkspaceId]: data.folders[0]?.path || "" };
+      });
+      setActiveIdByWorkspace((current) => {
+        const currentId = current[nextWorkspaceId];
+        if (currentId && normalized.some((photo) => photo.id === currentId)) {
+          return current;
+        }
+        return { ...current, [nextWorkspaceId]: normalized[0]?.id || null };
+      });
+    }
 
     const scoreMode = data.summary.scoreMode ? ` using ${data.summary.scoreMode}` : "";
-    if (data.summary.processing > 0 || data.summary.pending > 0) {
+    if (!nextWorkspaceId) {
+      updateStatus("Open a folder to create a workspace.", "warn");
+    } else if (data.summary.processing > 0 || data.summary.pending > 0) {
       updateStatus(
         `Scoring in background${scoreMode}: ${data.summary.processing} processing, ${data.summary.pending} queued`,
         "busy"
@@ -34,22 +81,43 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     } else if (data.summary.error > 0) {
       updateStatus(`Loaded ${normalized.length} photos (${data.summary.error} failed).`, "warn");
     } else {
-      updateStatus(`Loaded ${normalized.length} photos from uploads${scoreMode}.`, "ok");
+      updateStatus(`Loaded ${normalized.length} photos${scoreMode}.`, "ok");
     }
-  }, [updateStatus]);
+  }, [setActiveWorkspaceId, updateStatus]);
 
-  const loadLibrary = useCallback(async () => {
+  const loadLibrary = useCallback(async (workspaceId = activeWorkspaceId) => {
     try {
-      applyLibraryPayload(await fetchLibrary());
+      applyLibraryPayload(await fetchWorkspaceLibrary(workspaceId));
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to load library", "error");
     }
-  }, [applyLibraryPayload, updateStatus]);
+  }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
   const refresh = useCallback(async () => {
-    const data = await refreshLibrary();
+    if (!activeWorkspaceId) {
+      updateStatus("Open a folder before refreshing.", "warn");
+      return;
+    }
+    const data = await refreshLibrary(activeWorkspaceId);
     applyLibraryPayload(data);
-  }, [applyLibraryPayload]);
+  }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
+
+  const openFolderWorkspace = useCallback(async (rootPath: string) => {
+    const workspace = await openWorkspace(rootPath);
+    setActiveWorkspaceId(workspace.id);
+    await loadLibrary(workspace.id);
+    return workspace;
+  }, [loadLibrary, setActiveWorkspaceId]);
+
+  const restoreRemoved = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      updateStatus("Open a workspace before restoring removed photos.", "warn");
+      return;
+    }
+    const result = await restorePhotos(activeWorkspaceId);
+    await loadLibrary(activeWorkspaceId);
+    updateStatus(`Restored ${result.restored} removed photo(s).`, result.restored ? "ok" : "warn");
+  }, [activeWorkspaceId, loadLibrary, updateStatus]);
 
   useEffect(() => {
     void loadLibrary();
@@ -68,15 +136,22 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   }, [loadLibrary, pendingCount, processingCount]);
 
   return {
+    workspaces,
+    activeWorkspace,
+    activeWorkspaceId,
+    setActiveWorkspaceId,
     photos,
     folders,
     pendingCount,
     processingCount,
+    excludedCount,
     activeFolderPath,
     setActiveFolderPath,
     activeId,
     setActiveId,
     loadLibrary,
-    refresh
+    refresh,
+    openFolderWorkspace,
+    restoreRemoved
   };
 }

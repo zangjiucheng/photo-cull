@@ -1,4 +1,4 @@
-import type { ApiPhoto, DeletePhotosPayload, LibraryPayload, SimilarPayload, SimilarityScope } from "./types";
+import type { ApiPhoto, DeletePhotosPayload, LibraryPayload, PhotoWorkspace, SimilarPayload, SimilarityScope } from "./types";
 
 async function parseError(res: Response, fallback: string): Promise<string> {
   const contentType = res.headers.get("Content-Type") || "";
@@ -44,21 +44,51 @@ export async function uploadPhotos(files: FileList): Promise<ApiPhoto[]> {
 }
 
 export async function fetchLibrary(): Promise<LibraryPayload> {
-  const data = await requestJson<LibraryPayload>("/api/library", undefined, "Failed to load library");
+  return fetchWorkspaceLibrary(null);
+}
+
+export async function fetchWorkspaceLibrary(workspaceId: string | null): Promise<LibraryPayload> {
+  const url = workspaceId ? `/api/library?workspace_id=${encodeURIComponent(workspaceId)}` : "/api/library";
+  const data = await requestJson<LibraryPayload>(url, undefined, "Failed to load library");
   if (!data || !("folders" in data) || !("photos" in data)) {
     throw new Error("Failed to load library");
   }
   return data;
 }
 
-export async function refreshLibrary(): Promise<LibraryPayload> {
-  const data = await requestJson<LibraryPayload>("/api/library/refresh", {
+export async function refreshLibrary(workspaceId: string): Promise<LibraryPayload> {
+  const data = await requestJson<LibraryPayload>(`/api/workspaces/${encodeURIComponent(workspaceId)}/refresh`, {
     method: "POST"
   }, "Failed to refresh library");
   if (!data || !("folders" in data) || !("photos" in data)) {
     throw new Error("Failed to refresh library");
   }
   return data;
+}
+
+export async function fetchWorkspaces(): Promise<PhotoWorkspace[]> {
+  const data = await requestJson<{ workspaces: PhotoWorkspace[] }>("/api/workspaces", undefined, "Failed to load workspaces");
+  return Array.isArray(data.workspaces) ? data.workspaces : [];
+}
+
+export async function openWorkspace(rootPath: string): Promise<PhotoWorkspace> {
+  const data = await requestJson<PhotoWorkspace>("/api/workspaces", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root_path: rootPath })
+  }, "Failed to open folder");
+  if (!data || !("id" in data)) {
+    throw new Error("Failed to open folder");
+  }
+  return data;
+}
+
+export async function restorePhotos(workspaceId: string, relativePaths?: string[]): Promise<{ restored: number; restoredPaths: string[] }> {
+  return requestJson<{ restored: number; restoredPaths: string[] }>("/api/photos/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: workspaceId, relative_paths: relativePaths })
+  }, "Failed to restore photos");
 }
 
 export async function exportPhotos(selectedIds: string[]): Promise<Blob> {
@@ -109,11 +139,13 @@ export async function updatePhotoScore(photoId: string, manualScore: number | nu
 }
 
 export async function findSimilarPhotos(options: {
+  workspaceId: string;
   includeClip?: boolean;
   scope?: SimilarityScope;
   folderPath?: string;
-} = {}): Promise<SimilarPayload> {
+}): Promise<SimilarPayload> {
   const params = new URLSearchParams();
+  params.set("workspace_id", options.workspaceId);
   params.set("include_clip", options.includeClip === false ? "0" : "1");
   params.set("scope", options.scope ?? "library");
   if (options.folderPath !== undefined) {

@@ -9,26 +9,20 @@ DOCKER ?= docker
 DOCKER_COMPOSE ?= docker compose
 IMAGE_NAME ?= ai-culling-app
 
-.PHONY: help setup setup-ai setup-faiss setup-py setup-web build-web test test-py test-web kill run-backend dev docker-build docker-up docker-down clean
+.PHONY: help setup setup-py setup-web setup-ai setup-faiss test test-py test-web build-web run-backend dev dev-desktop dev-web kill docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
-	@echo "  make setup        - install Python and frontend dependencies"
-	@echo "  make setup-ai     - install optional AI scoring dependencies"
-	@echo "  make setup-faiss  - install optional FAISS index backend"
-	@echo "  make setup-py     - install Python dependencies"
-	@echo "  make setup-web    - install frontend dependencies"
-	@echo "  make build-web    - build React TSX frontend to static/dist"
-	@echo "  make test         - run backend and frontend tests"
-	@echo "  make test-py      - run backend tests"
-	@echo "  make test-web     - run frontend tests"
-	@echo "  make kill         - stop any process using FLASK_PORT"
-	@echo "  make run-backend  - run Flask backend on FLASK_HOST:FLASK_PORT"
-	@echo "  make dev          - build frontend then run backend"
-	@echo "  make docker-build - build Docker image"
-	@echo "  make docker-up    - run app with docker compose"
-	@echo "  make docker-down  - stop docker compose services"
-	@echo "  make clean        - remove build artifacts"
+	@echo "  make setup          install Python, web, and Electron dependencies"
+	@echo "  make dev            run the Electron desktop app (default development flow)"
+	@echo "  make dev-web        build web assets and run Flask for browser debugging"
+	@echo "  make test           run backend and frontend tests"
+	@echo "  make build-web      build React frontend into static/dist"
+	@echo "  make setup-ai       install optional AI scoring dependencies"
+	@echo "  make setup-faiss    install optional FAISS similarity backend"
+	@echo "  make docker-build   build Docker image"
+	@echo "  make docker-up      run app with docker compose"
+	@echo "  make clean          remove generated build/cache artifacts"
 
 setup: setup-py setup-web
 
@@ -67,7 +61,12 @@ kill:
 run-backend:
 	FLASK_HOST=$(FLASK_HOST) FLASK_PORT=$(FLASK_PORT) $(PYTHON) app.py
 
-dev: build-web kill run-backend
+dev: dev-desktop
+
+dev-desktop: build-web kill
+	cd frontend && env -u ELECTRON_RUN_AS_NODE FLASK_HOST=$(FLASK_HOST) FLASK_PORT=$(FLASK_PORT) PYTHON=$(PYTHON) BACKEND_ENTRY=app.py $(NPM) --cache $(NPM_CONFIG_CACHE) run electron:dev
+
+dev-web: build-web kill run-backend
 
 docker-build:
 	$(DOCKER) build -f docker/Dockerfile -t $(IMAGE_NAME) .
@@ -80,7 +79,7 @@ docker-down:
 
 clean:
 	rm -rf static/dist
-	rm -rf build dist
-	rm -rf release
+	rm -rf build dist release
+	rm -rf frontend/dist
 	rm -rf __pycache__
 	find . -name "*.pyc" -delete

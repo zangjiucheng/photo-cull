@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoRating, updatePhotoScore, uploadPhotos } from "./api";
+import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -27,7 +27,7 @@ export default function App() {
   const [statusText, setStatusText] = useState("Ready");
   const [statusTone, setStatusTone] = useState<StatusTone>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [exportQueueIds, setExportQueueIds] = useState<Set<string>>(new Set());
+  const [exportQueues, setExportQueues] = useState<Record<string, string[]>>({});
   const [similarGroups, setSimilarGroups] = useState<SimilarGroup[]>([]);
   const [similarDeleteIds, setSimilarDeleteIds] = useState<Set<string>>(new Set());
   const [isFindingSimilar, setIsFindingSimilar] = useState(false);
@@ -48,7 +48,13 @@ export default function App() {
     activeId,
     setActiveId,
     loadLibrary,
-    refresh
+    refresh,
+    activeWorkspace,
+    activeWorkspaceId,
+    setActiveWorkspaceId,
+    openFolderWorkspace,
+    restoreRemoved,
+    excludedCount
   } = library;
   const ratingState = usePhotoRatings(photos, updateStatus);
   const { ratings, setRatings, ratePhoto } = ratingState;
@@ -65,6 +71,7 @@ export default function App() {
   const keepRate = folderPhotos.length ? Math.round((visiblePhotos.length / folderPhotos.length) * 100) : 0;
   const ratedCount = ratings.size;
   const fourPlusIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
+  const exportQueueIds = useMemo(() => new Set(activeWorkspaceId ? exportQueues[activeWorkspaceId] ?? [] : []), [activeWorkspaceId, exportQueues]);
   const exportQueueList = useMemo(() => Array.from(exportQueueIds), [exportQueueIds]);
   const reviewRate = photos.length ? Math.round((ratedCount / photos.length) * 100) : 0;
   const completedCount = photos.filter((p) => p.status === "done" || p.status === "error").length;
@@ -75,19 +82,21 @@ export default function App() {
     : 0;
 
   function toggleExportQueue(id: string) {
-    setExportQueueIds((prev) => {
-      const next = new Set(prev);
+    if (!activeWorkspaceId) return;
+    setExportQueues((prev) => {
+      const next = new Set(prev[activeWorkspaceId] ?? []);
       if (next.has(id)) {
         next.delete(id);
       } else {
         next.add(id);
       }
-      return next;
+      return { ...prev, [activeWorkspaceId]: Array.from(next) };
     });
   }
 
   function addToExportQueue(id: string) {
-    setExportQueueIds((prev) => new Set(prev).add(id));
+    if (!activeWorkspaceId) return;
+    setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: Array.from(new Set([...(prev[activeWorkspaceId] ?? []), id])) }));
   }
 
   function addVisibleToQueue() {
@@ -95,44 +104,47 @@ export default function App() {
       updateStatus("No visible photos to add.", "warn");
       return;
     }
-    setExportQueueIds((prev) => {
-      const next = new Set(prev);
+    if (!activeWorkspaceId) return;
+    setExportQueues((prev) => {
+      const next = new Set(prev[activeWorkspaceId] ?? []);
       for (const photo of visiblePhotos) {
         next.add(photo.id);
       }
-      return next;
+      return { ...prev, [activeWorkspaceId]: Array.from(next) };
     });
     updateStatus(`Added ${visiblePhotos.length} visible photo(s) to export queue.`, "ok");
   }
 
   function removeFromExportQueue(id: string) {
-    setExportQueueIds((prev) => {
-      const next = new Set(prev);
+    if (!activeWorkspaceId) return;
+    setExportQueues((prev) => {
+      const next = new Set(prev[activeWorkspaceId] ?? []);
       next.delete(id);
-      return next;
+      return { ...prev, [activeWorkspaceId]: Array.from(next) };
     });
   }
 
-  async function onUpload(files: FileList | null) {
-    if (!files || files.length === 0) {
-      updateStatus("Choose at least one image before upload.", "warn");
-      return;
-    }
-
-    updateStatus("Uploading and scoring photos...", "busy");
+  async function onOpenFolder() {
+    updateStatus("Opening folder...", "busy");
     try {
-      await uploadPhotos(files);
-      await loadLibrary();
-      updateStatus("Library refreshed from uploads.", "ok");
+      const selectedPath = window.aiCulling?.openFolder
+        ? await window.aiCulling.openFolder()
+        : window.prompt("Enter a folder path on this machine");
+      if (!selectedPath) {
+        updateStatus("Open folder cancelled.", "warn");
+        return;
+      }
+      const workspace = await openFolderWorkspace(selectedPath);
+      updateStatus(`Opened ${workspace.name}.`, "ok");
     } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Upload failed", "error");
+      updateStatus(err instanceof Error ? err.message : "Failed to open folder", "error");
     }
   }
 
   async function saveScoreOverride(id: string, manualScore: number | null) {
     try {
       await updatePhotoScore(id, manualScore);
-      await loadLibrary();
+      await loadLibrary(activeWorkspaceId);
       updateStatus(manualScore === null ? "Manual score removed." : `Manual score set to ${manualScore}.`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to update score", "error");
@@ -207,7 +219,7 @@ export default function App() {
   }
 
   async function onRefresh() {
-    updateStatus("Refreshing library and rescanning uploads...", "busy");
+    updateStatus("Refreshing active workspace...", "busy");
     setIsRefreshing(true);
     try {
       await refresh();
@@ -220,10 +232,14 @@ export default function App() {
   }
 
   async function onFindSimilar() {
+    if (!activeWorkspaceId) {
+      updateStatus("Open a workspace before finding similar photos.", "warn");
+      return;
+    }
     updateStatus("Finding similar photos...", "busy");
     setIsFindingSimilar(true);
     try {
-      const payload = await findSimilarPhotos({ includeClip: true, scope: "current", folderPath: activeFolderPath });
+      const payload = await findSimilarPhotos({ workspaceId: activeWorkspaceId, includeClip: true, scope: "current", folderPath: activeFolderPath });
       const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
       const groups = payload.groups
         .map((group) => ({
@@ -271,20 +287,20 @@ export default function App() {
     }
 
     const count = similarDeleteIds.size;
-    const confirmed = window.confirm(`Delete ${count} photo(s) from disk and the library? This cannot be undone.`);
+    const confirmed = window.confirm(`Remove ${count} photo(s) from this workspace? Original files will stay on disk.`);
     if (!confirmed) {
       return;
     }
 
-    updateStatus(`Deleting ${count} photo(s)...`, "busy");
+    updateStatus(`Removing ${count} photo(s) from this workspace...`, "busy");
     setIsDeletingSimilar(true);
     try {
       const result = await deletePhotos([...similarDeleteIds]);
       setSimilarDeleteIds(new Set());
       setSimilarGroups([]);
       setSimilarSummary("");
-      await loadLibrary();
-      updateStatus(`Deleted ${result.deletedRecords} photo(s) and ${result.deletedFiles} file(s).`, "ok");
+      await loadLibrary(activeWorkspaceId);
+      updateStatus(`Removed ${result.deletedRecords} photo(s) from this workspace.`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to delete photos", "error");
     } finally {
@@ -357,7 +373,10 @@ export default function App() {
         photos={photos}
         queuedIds={exportQueueList}
         onRemove={removeFromExportQueue}
-        onClear={() => setExportQueueIds(new Set())}
+        onClear={() => {
+          if (!activeWorkspaceId) return;
+          setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: [] }));
+        }}
         onExport={onExport}
         onSelectPhoto={setActiveId}
       />
@@ -387,13 +406,21 @@ export default function App() {
       activeTab={activeTab}
       statusText={statusText}
       statusTone={statusTone}
-      currentPath={activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}
+      currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
+      workspaces={library.workspaces}
+      activeWorkspaceId={activeWorkspaceId}
+      excludedCount={excludedCount}
       exportQueueCount={exportQueueList.length}
       isRefreshing={isRefreshing}
       onTabChange={setActiveTab}
-      onUpload={(files) => void onUpload(files)}
+      onOpenFolder={() => void onOpenFolder()}
+      onWorkspaceChange={(workspaceId) => {
+        setActiveWorkspaceId(workspaceId);
+        void loadLibrary(workspaceId);
+      }}
       onRefresh={() => void onRefresh()}
       onExportQueue={() => void onExport()}
+      onRestoreRemoved={() => void restoreRemoved()}
       sidebar={
         <FolderNavigator
           folders={folders}

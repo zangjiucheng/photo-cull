@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals, deletePhotos, findSimilarPhotos } from "./api";
+import { apiInternals, deletePhotos, findSimilarPhotos, openWorkspace, restorePhotos } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -42,9 +42,9 @@ describe("api helpers", () => {
       headers: { "Content-Type": "application/json" }
     })));
 
-    const payload = await findSimilarPhotos({ scope: "current", folderPath: "shoot-a", includeClip: false });
+    const payload = await findSimilarPhotos({ workspaceId: "ws1", scope: "current", folderPath: "shoot-a", includeClip: false });
     expect(payload.groups[0].photoIds).toEqual(["a", "b"]);
-    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/photos/similar?include_clip=0&scope=current&folder_path=shoot-a");
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/photos/similar?workspace_id=ws1&include_clip=0&scope=current&folder_path=shoot-a");
     vi.unstubAllGlobals();
   });
 
@@ -52,7 +52,7 @@ describe("api helpers", () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       deletedIds: ["a"],
       missingIds: [],
-      deletedFiles: 1,
+      deletedFiles: 0,
       deletedRecords: 1
     }), {
       status: 200,
@@ -63,6 +63,45 @@ describe("api helpers", () => {
     const payload = await deletePhotos(["a"]);
     expect(payload.deletedRecords).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/photos", expect.objectContaining({ method: "DELETE" }));
+    vi.unstubAllGlobals();
+  });
+
+  it("opens a folder workspace", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      id: "ws1",
+      name: "Shoot",
+      rootPath: "/photos/Shoot",
+      createdAt: 1,
+      updatedAt: 1,
+      lastScannedAt: 1
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const workspace = await openWorkspace("/photos/Shoot");
+    expect(workspace.id).toBe("ws1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspaces", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ root_path: "/photos/Shoot" })
+    }));
+    vi.unstubAllGlobals();
+  });
+
+  it("restores removed photos for a workspace", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      restored: 1,
+      restoredPaths: ["a.jpg"]
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const restored = await restorePhotos("ws1");
+    expect(restored.restored).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/photos/restore", expect.objectContaining({ method: "POST" }));
     vi.unstubAllGlobals();
   });
 });

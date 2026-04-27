@@ -67,17 +67,58 @@ def health():
     )
 
 
+@bp.route("/workspaces", methods=["GET"])
+def workspaces():
+    return jsonify({"workspaces": storage.list_workspaces()})
+
+
+@bp.route("/workspaces", methods=["POST"])
+def create_workspace():
+    data = request.get_json(silent=True) or {}
+    root_path = data.get("root_path")
+    name = data.get("name")
+    try:
+        workspace = storage.create_workspace(str(root_path or ""), str(name) if name else None)
+    except storage.InvalidWorkspaceError as exc:
+        return error_response(str(exc), 400)
+    return jsonify(workspace)
+
+
+@bp.route("/workspaces/<workspace_id>", methods=["DELETE"])
+def remove_workspace(workspace_id):
+    if not storage.delete_workspace(workspace_id):
+        return error_response("Workspace not found", 404)
+    return jsonify({"deleted": True, "workspaceId": workspace_id})
+
+
+@bp.route("/workspaces/<workspace_id>/refresh", methods=["POST"])
+def refresh_workspace(workspace_id):
+    try:
+        storage.scan_workspace(workspace_id, force_gc=True)
+    except storage.InvalidWorkspaceError as exc:
+        return error_response(str(exc), 404)
+    return jsonify(storage.build_library_payload(workspace_id))
+
+
 @bp.route("/library", methods=["GET"])
 def library():
-    storage.ensure_initial_scan()
-    storage.maybe_run_gc(force=False)
-    return jsonify(storage.build_library_payload())
+    workspace_id = request.args.get("workspace_id")
+    if workspace_id:
+        storage.maybe_run_gc(workspace_id, force=False)
+    return jsonify(storage.build_library_payload(workspace_id))
 
 
 @bp.route("/library/refresh", methods=["POST"])
 def refresh_library():
-    storage.scan_upload_folder(force_gc=True)
-    return jsonify(storage.build_library_payload())
+    data = request.get_json(silent=True) or {}
+    workspace_id = data.get("workspace_id") or request.args.get("workspace_id")
+    if not workspace_id:
+        return error_response("workspace_id is required", 400)
+    try:
+        storage.scan_workspace(str(workspace_id), force_gc=True)
+    except storage.InvalidWorkspaceError as exc:
+        return error_response(str(exc), 404)
+    return jsonify(storage.build_library_payload(str(workspace_id)))
 
 
 @bp.route("/photos/upload", methods=["POST"])
@@ -135,8 +176,11 @@ def similar_photos():
     scope = request.args.get("scope", "library")
     if scope not in {"current", "library"}:
         return error_response("scope must be current or library", 400)
+    workspace_id = request.args.get("workspace_id")
+    if not workspace_id:
+        return error_response("workspace_id is required", 400)
     folder_path = request.args.get("folder_path", "") if scope == "current" else None
-    return jsonify(similarity.find_similar_groups(include_clip=include_clip, folder_path=folder_path))
+    return jsonify(similarity.find_similar_groups(include_clip=include_clip, folder_path=folder_path, workspace_id=workspace_id))
 
 
 @bp.route("/photos", methods=["DELETE"])
@@ -145,7 +189,23 @@ def delete_photos():
     photo_ids = data.get("photo_ids", [])
     if not isinstance(photo_ids, list) or not photo_ids:
         return error_response("photo_ids must be a non-empty list", 400)
-    result = storage.delete_photo_files([str(photo_id) for photo_id in photo_ids])
+    result = storage.exclude_photo_files([str(photo_id) for photo_id in photo_ids])
+    return jsonify(result)
+
+
+@bp.route("/photos/restore", methods=["POST"])
+def restore_photos():
+    data = request.get_json(silent=True) or {}
+    workspace_id = data.get("workspace_id")
+    relative_paths = data.get("relative_paths")
+    if not workspace_id:
+        return error_response("workspace_id is required", 400)
+    if relative_paths is not None and not isinstance(relative_paths, list):
+        return error_response("relative_paths must be a list", 400)
+    try:
+        result = storage.restore_excluded(str(workspace_id), [str(path) for path in relative_paths] if relative_paths else None)
+    except storage.InvalidWorkspaceError as exc:
+        return error_response(str(exc), 404)
     return jsonify(result)
 
 

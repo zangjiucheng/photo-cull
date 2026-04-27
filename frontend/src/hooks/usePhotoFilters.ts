@@ -21,6 +21,9 @@ export function usePhotoFilters(photos: Photo[], folders: LibraryFolder[], state
     if (!activeFolder) {
       return [];
     }
+    if (activeFolder.path === "") {
+      return photos;
+    }
     return photos.filter((photo) => photo.folderPath === activeFolder.path);
   }, [photos, activeFolder]);
 

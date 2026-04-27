@@ -1,5 +1,6 @@
 export interface ApiPhoto {
   id: string;
+  workspaceId: string;
   name: string;
   score: number | null;
   manualScore: number | null;
@@ -30,7 +31,18 @@ export interface LibraryFolder {
   mtime: number;
 }
 
+export interface PhotoWorkspace {
+  id: string;
+  name: string;
+  rootPath: string;
+  createdAt: number;
+  updatedAt: number;
+  lastScannedAt: number | null;
+}
+
 export interface LibraryPayload {
+  activeWorkspace: PhotoWorkspace | null;
+  workspaces: PhotoWorkspace[];
   folders: LibraryFolder[];
   photos: ApiPhoto[];
   summary: {
@@ -39,6 +51,7 @@ export interface LibraryPayload {
     done: number;
     error: number;
     scoreMode?: string;
+    excluded?: number;
   };
 }
 
@@ -100,6 +113,7 @@ export interface SimilarGroup {
 }
 
 export interface DeletePhotosPayload {
+  excludedIds?: string[];
   deletedIds: string[];
   missingIds: string[];
   deletedFiles: number;
@@ -110,7 +124,8 @@ export type ViewMode = "grid" | "list";
 export type RatingFilter = "all" | "unrated" | "1" | "2" | "3" | "4" | "5";
 export type StatusTone = "" | "ok" | "warn" | "error" | "busy";
 export type SortMode = "score-desc" | "score-asc" | "name-asc" | "name-desc" | "mtime-desc" | "mtime-asc";
-export type WorkspaceTab = "browse" | "review" | "duplicates" | "export" | "stats";
+export type ToolTab = "browse" | "review" | "duplicates" | "export" | "stats";
+export type WorkspaceTab = ToolTab;
 export type SimilarityScope = "current" | "library";
 
 export interface ExportQueueState {

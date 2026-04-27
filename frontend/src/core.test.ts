@@ -5,6 +5,7 @@ import type { ApiPhoto } from "./types";
 function photo(overrides: Partial<ApiPhoto>): ApiPhoto {
   return {
     id: "id",
+    workspaceId: "ws1",
     name: "IMG_0001.jpg",
     score: 10,
     manualScore: null,

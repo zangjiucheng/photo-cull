@@ -34,16 +34,19 @@ def test_validate_image_file_rejects_invalid_file(tmp_path):
         storage.validate_image_file(str(bad))
 
 
-def test_index_uploaded_file_inserts_and_reuses_record(tmp_path):
+def test_index_workspace_file_inserts_and_reuses_record(tmp_path):
     config = configure_tmp(tmp_path)
-    image_path = Path(config.upload_folder) / "set" / "photo.jpg"
+    workspace_root = tmp_path / "source"
+    workspace_root.mkdir()
+    workspace = storage.create_workspace(str(workspace_root))
+    image_path = workspace_root / "set" / "photo.jpg"
     make_image(image_path)
 
-    record, state = storage.index_uploaded_file(str(image_path))
+    record, state = storage.index_workspace_file(workspace["id"], str(image_path))
     assert state == "inserted"
     assert record is not None
     assert record["folderPath"] == "set"
 
-    record_again, state_again = storage.index_uploaded_file(str(image_path))
+    record_again, state_again = storage.index_workspace_file(workspace["id"], str(image_path))
     assert state_again == "pending"
     assert record_again["id"] == record["id"]
