@@ -1,12 +1,14 @@
 import { useMemo } from "react";
-import type { LibraryFolder } from "../../types";
+import type { LibraryFolder, Photo } from "../../types";
 import { ScrollArea } from "../ui/scroll-area";
 
 interface FolderNavigatorProps {
   folders: LibraryFolder[];
+  photos: Photo[];
   activeFolderPath: string;
-  visibleCount: number;
+  activePhotoId: string | null;
   onSelectFolder: (path: string) => void;
+  onSelectPhoto: (id: string) => void;
 }
 
 interface FolderTreeNode {
@@ -87,35 +89,37 @@ function findNode(nodes: FolderTreeNode[], path: string): FolderTreeNode | null 
   return null;
 }
 
-export function FolderNavigator({ folders, activeFolderPath, visibleCount, onSelectFolder }: FolderNavigatorProps) {
-  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
-  const columns = useMemo(() => {
-    const result: Array<{ title: string; nodes: FolderTreeNode[]; selectedPath: string }> = [
-      { title: "Library", nodes: folderTree, selectedPath: activeFolderPath.split("/")[0] || "" }
-    ];
-    if (!activeFolderPath) return result;
+function currentFolderName(activeFolderPath: string): string {
+  if (!activeFolderPath) return "All Photos";
+  const parts = activeFolderPath.split("/").filter(Boolean);
+  return parts[parts.length - 1] || "All Photos";
+}
 
-    const parts = activeFolderPath.split("/");
-    let currentPath = "";
-    for (let index = 0; index < parts.length; index += 1) {
-      currentPath = currentPath ? `${currentPath}/${parts[index]}` : parts[index];
-      const node = findNode(folderTree, currentPath);
-      if (node?.children.length) {
-        const selectedPath = parts[index + 1] ? `${currentPath}/${parts[index + 1]}` : "";
-        result.push({ title: node.name, nodes: node.children, selectedPath });
-      }
-    }
-    return result;
-  }, [activeFolderPath, folderTree]);
+function fileStatusLabel(photo: Photo): string {
+  if (photo.status === "pending") return "Queued";
+  if (photo.status === "processing") return "Scoring";
+  if (photo.status === "error") return "Error";
+  return photo.rating ? `${photo.rating} star${photo.rating === 1 ? "" : "s"}` : "Photo";
+}
+
+export function FolderNavigator({
+  folders,
+  photos,
+  activeFolderPath,
+  activePhotoId,
+  onSelectFolder,
+  onSelectPhoto
+}: FolderNavigatorProps) {
+  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const childFolders = useMemo(() => findNode(folderTree, activeFolderPath)?.children ?? [], [activeFolderPath, folderTree]);
 
   return (
     <div className="folder-navigator">
       <div className="side-panel-head">
         <div>
           <span className="panel-kicker">Folders</span>
-          <strong>{folders.length} locations</strong>
+          <strong>{currentFolderName(activeFolderPath)}</strong>
         </div>
-        <span>{visibleCount}</span>
       </div>
       <div className="folder-path-row" role="navigation" aria-label="Folder path">
         <button className={`path-link ${activeFolderPath === "" ? "active" : ""}`.trim()} onClick={() => onSelectFolder("")}>
@@ -133,36 +137,53 @@ export function FolderNavigator({ folders, activeFolderPath, visibleCount, onSel
           );
         })}
       </div>
-      <div className="finder-columns bridge-finder-columns" role="tree" aria-label="Folder columns">
-        {columns.map((column, columnIndex) => (
-          <section className="finder-column" key={`${column.title}-${columnIndex}`}>
-            <div className="finder-column-title">{column.title}</div>
-            <ScrollArea className="finder-column-scroll">
-              {column.nodes.map((node) => {
-                const hasChildren = node.children.length > 0;
-                const isActive = node.path === activeFolderPath || node.path === column.selectedPath;
+      <section className="folder-browser-panel">
+        <div className="folder-browser-head">
+          <span>Library</span>
+          <span>{childFolders.length + photos.length} item(s)</span>
+        </div>
+        <ScrollArea className="folder-grid-scroll">
+          {childFolders.length || photos.length ? (
+            <div className="folder-item-grid" role="list" aria-label="Folders and files">
+              {childFolders.map((folder) => (
+                <button
+                  key={folder.path}
+                  className="folder-browser-tile folder-tile"
+                  onClick={() => onSelectFolder(folder.path)}
+                  role="listitem"
+                >
+                  <span className="folder-tile-thumb" aria-hidden="true">
+                    <span className="folder-tile-tab" />
+                    <span className="folder-tile-body" />
+                  </span>
+                  <span className="folder-file-name" title={folder.name}>{folder.name}</span>
+                  <span className="folder-file-meta">{folder.count} item(s)</span>
+                </button>
+              ))}
+              {photos.map((photo) => {
+                const isActive = activePhotoId === photo.id;
                 return (
                   <button
-                    key={node.path}
-                    className={`finder-folder ${isActive ? "active" : ""}`.trim()}
-                    onClick={() => onSelectFolder(node.path)}
-                    role="treeitem"
-                    aria-selected={node.path === activeFolderPath}
+                    key={photo.id}
+                    className={`folder-browser-tile folder-file-tile ${isActive ? "active" : ""}`.trim()}
+                    onClick={() => onSelectPhoto(photo.id)}
+                    aria-current={isActive ? "true" : undefined}
+                    role="listitem"
                   >
-                    <span className={`folder-icon ${hasChildren ? "closed" : "leaf"}`.trim()} aria-hidden="true" />
-                    <span className="finder-folder-copy">
-                      <span className="folder-name">{node.name}</span>
-                      <span className="folder-meta">{node.count} item(s)</span>
+                    <span className="folder-file-thumb">
+                      <img src={photo.url} alt="" loading="lazy" />
                     </span>
-                    <span className="folder-score">{node.bestScore}</span>
-                    <span className="finder-chevron" aria-hidden="true">{hasChildren ? ">" : ""}</span>
+                    <span className="folder-file-name" title={photo.name}>{photo.name}</span>
+                    <span className="folder-file-meta">{fileStatusLabel(photo)}</span>
                   </button>
                 );
               })}
-            </ScrollArea>
-          </section>
-        ))}
-      </div>
+            </div>
+          ) : (
+            <div className="folder-file-empty">No files in this folder.</div>
+          )}
+        </ScrollArea>
+      </section>
     </div>
   );
 }

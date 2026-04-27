@@ -493,9 +493,11 @@ export default function App() {
           {workspaceControls}
           <FolderNavigator
             folders={folders}
+            photos={folderPhotos}
             activeFolderPath={activeFolderPath}
-            visibleCount={visiblePhotos.length}
+            activePhotoId={activePhoto?.id ?? null}
             onSelectFolder={setActiveFolderPath}
+            onSelectPhoto={setActiveId}
           />
         </>
       }
