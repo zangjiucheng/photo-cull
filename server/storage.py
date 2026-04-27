@@ -363,7 +363,7 @@ def build_library_payload(workspace_id: str | None = None) -> dict:
 def build_export_zip(selected_ids: list[str]) -> io.BytesIO:
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w") as zip_file:
-        for photo_id in selected_ids:
+        for photo_id in dict.fromkeys(selected_ids):
             row = db.fetch_photo(photo_id)
             if not row:
                 continue

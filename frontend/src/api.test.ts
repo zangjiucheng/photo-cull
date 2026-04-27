@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals, deletePhotos, findSimilarPhotos, openWorkspace, restorePhotos } from "./api";
+import { apiInternals, deletePhotos, exportPhotos, findSimilarPhotos, openWorkspace, restorePhotos } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -17,6 +17,19 @@ describe("api helpers", () => {
 
     const blob = await apiInternals.requestBlob("/download", undefined, "Download failed");
     expect(await blob.text()).toBe("zip-data");
+    vi.unstubAllGlobals();
+  });
+
+  it("deduplicates export photo ids", async () => {
+    const fetchMock = vi.fn(async () => new Response("zip-data", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const blob = await exportPhotos(["a", "a", "b"]);
+    expect(await blob.text()).toBe("zip-data");
+    expect(fetchMock).toHaveBeenCalledWith("/api/photos/export", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ selected_ids: ["a", "b"] })
+    }));
     vi.unstubAllGlobals();
   });
 

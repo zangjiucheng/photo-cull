@@ -2645,12 +2645,15 @@ body {
 .inspector-actions {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .inspector-actions .inspector-action {
   margin-top: 0;
+}
+
+.inspector-queue-button {
+  width: 100%;
 }
 
 .inspector-lightbox {

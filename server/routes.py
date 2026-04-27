@@ -164,7 +164,8 @@ def export():
     if not isinstance(selected_ids, list) or not selected_ids:
         return error_response("No photos selected", 400)
 
-    mem = storage.build_export_zip([str(photo_id) for photo_id in selected_ids])
+    unique_ids = list(dict.fromkeys(str(photo_id) for photo_id in selected_ids))
+    mem = storage.build_export_zip(unique_ids)
     return send_file(mem, download_name="selected.zip", as_attachment=True)
 
 

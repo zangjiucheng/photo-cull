@@ -1,4 +1,5 @@
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from PIL import Image
@@ -241,3 +242,18 @@ def test_invalid_score_and_missing_photo(client):
 def test_empty_export_rejected(client):
     response = client.post("/api/photos/export", json={"selected_ids": []})
     assert response.status_code == 400
+
+
+def test_export_deduplicates_selected_ids(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "sample.jpg")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+
+    response = client.post("/api/photos/export", json={"selected_ids": [photo["id"], photo["id"]]})
+
+    assert response.status_code == 200
+    archive_path = tmp_path / "selected.zip"
+    archive_path.write_bytes(response.data)
+    with ZipFile(archive_path) as archive:
+        assert archive.namelist() == ["sample.jpg"]

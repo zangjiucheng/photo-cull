@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 interface InspectorPanelProps {
   activePhoto: Photo | null;
   ratings: Map<string, number>;
+  exportQueueIds: Set<string>;
   onRatePhoto: (id: string, rating: number) => void;
+  onToggleExportQueue: (id: string) => void;
   onSaveScoreOverride: (id: string, manualScore: number | null) => Promise<void>;
 }
 
@@ -45,7 +47,9 @@ function StarRating({
 export function InspectorPanel({
   activePhoto,
   ratings,
+  exportQueueIds,
   onRatePhoto,
+  onToggleExportQueue,
   onSaveScoreOverride
 }: InspectorPanelProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -195,6 +199,13 @@ export function InspectorPanel({
                     rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
                     onRatePhoto={onRatePhoto}
                   />
+                  <Button
+                    className="inspector-queue-button"
+                    variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
+                    onClick={() => onToggleExportQueue(activePhoto.id)}
+                  >
+                    {exportQueueIds.has(activePhoto.id) ? "In Queue" : "Add Queue"}
+                  </Button>
                 </div>
               </div>
             </>

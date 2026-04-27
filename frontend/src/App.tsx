@@ -510,7 +510,9 @@ export default function App() {
         <InspectorPanel
           activePhoto={activePhoto}
           ratings={ratings}
+          exportQueueIds={exportQueueIds}
           onRatePhoto={ratePhoto}
+          onToggleExportQueue={toggleExportQueue}
           onSaveScoreOverride={saveScoreOverride}
         />
       }

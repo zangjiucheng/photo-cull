@@ -92,10 +92,11 @@ export async function restorePhotos(workspaceId: string, relativePaths?: string[
 }
 
 export async function exportPhotos(selectedIds: string[]): Promise<Blob> {
+  const uniqueIds = Array.from(new Set(selectedIds));
   return requestBlob("/api/photos/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected_ids: selectedIds })
+    body: JSON.stringify({ selected_ids: uniqueIds })
   }, "Export failed");
 }
 
