@@ -131,6 +131,53 @@ def test_refresh_detects_new_and_missing_files(client, tmp_path):
     assert names == {"second.jpg"}
 
 
+def test_refresh_preserves_photo_state_after_move(client, tmp_path):
+    source = tmp_path / "source"
+    first_path = make_image(source / "set" / "sample.jpg")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+
+    rating = client.patch(f"/api/photos/{photo['id']}/rating", json={"rating": 4})
+    assert rating.status_code == 200
+    score = client.patch(f"/api/photos/{photo['id']}/score", json={"manual_score": 91})
+    assert score.status_code == 200
+
+    moved_path = source / "renamed" / "sample.jpg"
+    moved_path.parent.mkdir()
+    first_path.rename(moved_path)
+
+    refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
+    assert refresh.status_code == 200
+    photos = refresh.get_json()["photos"]
+    assert len(photos) == 1
+    moved = photos[0]
+    assert moved["relativePath"] == "renamed/sample.jpg"
+    assert moved["path"] == str(moved_path)
+    assert moved["rating"] == 4
+    assert moved["manualScore"] == 91
+    assert moved["id"] != photo["id"]
+
+
+def test_refresh_keeps_moved_removed_photo_hidden(client, tmp_path):
+    source = tmp_path / "source"
+    first_path = make_image(source / "set" / "sample.jpg")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+
+    delete = client.delete("/api/photos", json={"photo_ids": [photo["id"]]})
+    assert delete.status_code == 200
+
+    moved_path = source / "renamed" / "sample.jpg"
+    moved_path.parent.mkdir()
+    first_path.rename(moved_path)
+
+    refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
+    assert refresh.status_code == 200
+    payload = refresh.get_json()
+    assert payload["photos"] == []
+    assert payload["summary"]["excluded"] == 1
+
+
 def test_remove_keeps_source_file_hidden_and_restore_returns_it(client, tmp_path):
     source = tmp_path / "source"
     image_path = make_image(source / "sample.jpg")

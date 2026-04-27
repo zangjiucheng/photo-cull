@@ -1,7 +1,10 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+
+app.setName("AI Photo Culling");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const backendHost = process.env.FLASK_HOST || "127.0.0.1";
@@ -11,6 +14,29 @@ const backendEntry = process.env.BACKEND_ENTRY
   ? path.resolve(repoRoot, process.env.BACKEND_ENTRY)
   : path.join(repoRoot, "app.py");
 let backendProcess = null;
+
+function prepareDbPath() {
+  if (process.env.DB_PATH) {
+    return process.env.DB_PATH;
+  }
+
+  const dbPath = path.join(app.getPath("userData"), "ai_culling.db");
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  if (!fs.existsSync(dbPath)) {
+    const legacyPaths = [
+      path.join(repoRoot, "data", "ai_culling.db"),
+      path.join(repoRoot, "ai_culling.db"),
+    ];
+    const legacyPath = legacyPaths.find((candidate) => fs.existsSync(candidate));
+    if (legacyPath) {
+      fs.renameSync(legacyPath, dbPath);
+    }
+  }
+
+  process.env.DB_PATH = dbPath;
+  return dbPath;
+}
 
 function waitForPort(host, port, timeoutMs = 15000) {
   const startedAt = Date.now();
@@ -34,12 +60,14 @@ function waitForPort(host, port, timeoutMs = 15000) {
 }
 
 function startBackend() {
+  const dbPath = prepareDbPath();
   backendProcess = spawn(pythonBin, [backendEntry], {
     cwd: repoRoot,
     env: {
       ...process.env,
       FLASK_HOST: backendHost,
       FLASK_PORT: String(backendPort),
+      DB_PATH: dbPath,
     },
     stdio: "inherit",
   });

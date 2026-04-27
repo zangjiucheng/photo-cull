@@ -103,8 +103,6 @@ def refresh_workspace(workspace_id):
 @bp.route("/library", methods=["GET"])
 def library():
     workspace_id = request.args.get("workspace_id")
-    if workspace_id:
-        storage.maybe_run_gc(workspace_id, force=False)
     return jsonify(storage.build_library_payload(workspace_id))
 
 

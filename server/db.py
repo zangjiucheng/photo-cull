@@ -85,14 +85,23 @@ def init_db() -> None:
                 relative_path TEXT NOT NULL,
                 name TEXT NOT NULL,
                 path TEXT NOT NULL,
+                content_hash TEXT,
                 excluded_at REAL NOT NULL,
                 PRIMARY KEY(workspace_id, relative_path)
             )
             """
         )
+        excluded_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(excluded_photos)").fetchall()
+        }
+        if "content_hash" not in excluded_columns:
+            conn.execute("ALTER TABLE excluded_photos ADD COLUMN content_hash TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_folder ON photos(workspace_id, folder_path)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_status ON photos(workspace_id, status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_rating ON photos(workspace_id, rating)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_hash ON photos(workspace_id, content_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_excluded_workspace_hash ON excluded_photos(workspace_id, content_hash)")
 
 
 def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
@@ -211,6 +220,65 @@ def is_excluded(workspace_id: str, relative_path: str) -> bool:
             (workspace_id, relative_path),
         ).fetchone()
     return row is not None
+
+
+def fetch_photo_by_relative_path(workspace_id: str, relative_path: str) -> sqlite3.Row | None:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM photos WHERE workspace_id = ? AND relative_path = ?",
+            (workspace_id, relative_path),
+        ).fetchone()
+
+
+def move_photo_record(
+    old_photo_id: str,
+    new_photo_id: str,
+    name: str,
+    path: str,
+    relative_path: str,
+    folder: str,
+    folder_path: str,
+    mtime: float,
+    size: int,
+    content_hash: str,
+) -> bool:
+    now = time.time()
+    with connect() as conn:
+        old_row = conn.execute("SELECT * FROM photos WHERE id = ?", (old_photo_id,)).fetchone()
+        if old_row is None:
+            return False
+        if old_photo_id != new_photo_id:
+            conflict = conn.execute("SELECT id FROM photos WHERE id = ?", (new_photo_id,)).fetchone()
+            if conflict is not None:
+                return False
+        relative_conflict = conn.execute(
+            "SELECT id FROM photos WHERE workspace_id = ? AND relative_path = ? AND id != ?",
+            (old_row["workspace_id"], relative_path, old_photo_id),
+        ).fetchone()
+        if relative_conflict is not None:
+            return False
+        conn.execute(
+            """
+            UPDATE photos
+            SET id = ?, name = ?, path = ?, relative_path = ?, folder = ?, folder_path = ?,
+                mtime = ?, size = ?, content_hash = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                new_photo_id,
+                name,
+                path,
+                relative_path,
+                folder,
+                folder_path,
+                mtime,
+                size,
+                content_hash,
+                now,
+                old_photo_id,
+            ),
+        )
+    return True
 
 
 def insert_or_update_photo(
@@ -348,10 +416,10 @@ def exclude_photos(photo_ids: Iterable[str]) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO excluded_photos
-                    (workspace_id, relative_path, name, path, excluded_at)
-                VALUES (?, ?, ?, ?, ?)
+                    (workspace_id, relative_path, name, path, content_hash, excluded_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (row["workspace_id"], row["relative_path"], row["name"], row["path"], now),
+                (row["workspace_id"], row["relative_path"], row["name"], row["path"], row["content_hash"], now),
             )
             conn.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
             excluded_ids.append(photo_id)
@@ -371,6 +439,52 @@ def delete_photos(photo_ids: Iterable[str]) -> int:
     with connect() as conn:
         conn.executemany("DELETE FROM photos WHERE id = ?", [(photo_id,) for photo_id in ids])
     return len(ids)
+
+
+def update_excluded_hash(workspace_id: str, relative_path: str, content_hash: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE excluded_photos
+            SET content_hash = ?
+            WHERE workspace_id = ? AND relative_path = ? AND content_hash IS NULL
+            """,
+            (content_hash, workspace_id, relative_path),
+        )
+
+
+def move_excluded_photo(
+    workspace_id: str,
+    old_relative_path: str,
+    new_relative_path: str,
+    name: str,
+    path: str,
+    content_hash: str,
+) -> bool:
+    now = time.time()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM excluded_photos WHERE workspace_id = ? AND relative_path = ?",
+            (workspace_id, old_relative_path),
+        ).fetchone()
+        if row is None:
+            return False
+        if old_relative_path != new_relative_path:
+            conflict = conn.execute(
+                "SELECT 1 FROM excluded_photos WHERE workspace_id = ? AND relative_path = ?",
+                (workspace_id, new_relative_path),
+            ).fetchone()
+            if conflict is not None:
+                return False
+        conn.execute(
+            """
+            UPDATE excluded_photos
+            SET relative_path = ?, name = ?, path = ?, content_hash = ?, excluded_at = ?
+            WHERE workspace_id = ? AND relative_path = ?
+            """,
+            (new_relative_path, name, path, content_hash, now, workspace_id, old_relative_path),
+        )
+    return True
 
 
 def restore_excluded(workspace_id: str, relative_paths: Iterable[str] | None = None) -> list[str]:

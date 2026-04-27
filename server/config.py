@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import os
+import platform
+import shutil
 from dataclasses import dataclass
+from dataclasses import field
+from pathlib import Path
 
 
 def resolve_db_path() -> str:
@@ -9,20 +13,56 @@ def resolve_db_path() -> str:
     if configured:
         return configured
 
-    default_data_path = os.path.join("data", "ai_culling.db")
-    legacy_path = "ai_culling.db"
-    if os.path.exists(legacy_path) and not os.path.exists(default_data_path):
-        return legacy_path
-    return default_data_path
+    app_data_dir = os.getenv("AI_CULLING_APP_SUPPORT")
+    if not app_data_dir:
+        system = platform.system()
+        if system == "Darwin":
+            app_data_dir = str(Path.home() / "Library" / "Application Support" / "AI Photo Culling")
+        elif system == "Windows":
+            app_data_dir = os.path.join(os.getenv("APPDATA", str(Path.home())), "AI Photo Culling")
+        else:
+            app_data_dir = os.path.join(os.getenv("XDG_DATA_HOME", str(Path.home() / ".local" / "share")), "ai-photo-culling")
+    return os.path.join(app_data_dir, "ai_culling.db")
+
+
+def migrate_legacy_db(db_path: str, base_dir: str | os.PathLike[str] | None = None) -> str | None:
+    if os.path.exists(db_path):
+        return None
+
+    root = Path(base_dir or os.getcwd())
+    legacy_paths = [root / "data" / "ai_culling.db", root / "ai_culling.db"]
+    legacy_path = next((path for path in legacy_paths if path.exists()), None)
+    if legacy_path is None:
+        return None
+
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    shutil.move(str(legacy_path), db_path)
+    return str(legacy_path)
+
+
+def resolve_upload_folder() -> str:
+    return os.getenv("UPLOAD_FOLDER", "uploads")
+
+
+def resolve_gc_interval_seconds() -> int:
+    return int(os.getenv("GC_INTERVAL_SECONDS", "300"))
+
+
+def resolve_max_content_length() -> int:
+    return int(os.getenv("MAX_CONTENT_LENGTH", str(100 * 1024 * 1024)))
+
+
+def resolve_score_workers() -> int:
+    return int(os.getenv("SCORE_WORKERS", "2"))
 
 
 @dataclass(frozen=True)
 class AppConfig:
-    upload_folder: str = os.getenv("UPLOAD_FOLDER", "uploads")
-    db_path: str = resolve_db_path()
-    gc_interval_seconds: int = int(os.getenv("GC_INTERVAL_SECONDS", "300"))
-    max_content_length: int = int(os.getenv("MAX_CONTENT_LENGTH", str(100 * 1024 * 1024)))
-    score_workers: int = int(os.getenv("SCORE_WORKERS", "2"))
+    upload_folder: str = field(default_factory=resolve_upload_folder)
+    db_path: str = field(default_factory=resolve_db_path)
+    gc_interval_seconds: int = field(default_factory=resolve_gc_interval_seconds)
+    max_content_length: int = field(default_factory=resolve_max_content_length)
+    score_workers: int = field(default_factory=resolve_score_workers)
 
 
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}

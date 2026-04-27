@@ -115,7 +115,38 @@ def delete_workspace(workspace_id: str) -> bool:
     return db.delete_workspace(workspace_id)
 
 
-def index_workspace_file(workspace_id: str, path: str) -> tuple[dict | None, str]:
+def _match_missing_by_hash(rows, content_hash: str, filename: str, matched_keys: set[str], key_field: str):
+    candidates = [
+        row for row in rows
+        if row["content_hash"] == content_hash and row[key_field] not in matched_keys
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (row["name"] != filename, row["relative_path"]))
+    return candidates[0]
+
+
+def _backfill_excluded_hashes(rows) -> None:
+    for row in rows:
+        if row["content_hash"]:
+            continue
+        path = resolve_disk_path(row["path"])
+        if not os.path.exists(path):
+            continue
+        try:
+            db.update_excluded_hash(row["workspace_id"], row["relative_path"], compute_content_hash(path))
+        except OSError:
+            continue
+
+
+def index_workspace_file(
+    workspace_id: str,
+    path: str,
+    moved_photo_candidates=None,
+    matched_photo_ids: set[str] | None = None,
+    moved_excluded_candidates=None,
+    matched_excluded_paths: set[str] | None = None,
+) -> tuple[dict | None, str]:
     workspace = db.fetch_workspace(workspace_id)
     if workspace is None:
         raise InvalidWorkspaceError("Workspace not found")
@@ -134,6 +165,38 @@ def index_workspace_file(workspace_id: str, path: str) -> tuple[dict | None, str
     stat = os.stat(resolved_path)
     content_hash = compute_content_hash(resolved_path)
     photo_id = make_photo_id(workspace_id, relative_path)
+
+    if moved_excluded_candidates is not None and matched_excluded_paths is not None:
+        excluded_match = _match_missing_by_hash(moved_excluded_candidates, content_hash, filename, matched_excluded_paths, "relative_path")
+        if excluded_match and db.move_excluded_photo(
+            workspace_id=workspace_id,
+            old_relative_path=excluded_match["relative_path"],
+            new_relative_path=relative_path,
+            name=filename,
+            path=resolved_path,
+            content_hash=content_hash,
+        ):
+            matched_excluded_paths.add(excluded_match["relative_path"])
+            return None, "excluded"
+
+    exact_photo = db.fetch_photo_by_relative_path(workspace_id, relative_path)
+    if exact_photo is None and moved_photo_candidates is not None and matched_photo_ids is not None:
+        photo_match = _match_missing_by_hash(moved_photo_candidates, content_hash, filename, matched_photo_ids, "id")
+        if photo_match and db.move_photo_record(
+            old_photo_id=photo_match["id"],
+            new_photo_id=photo_id,
+            name=filename,
+            path=resolved_path,
+            relative_path=relative_path,
+            folder=folder_name(relative_folder),
+            folder_path=relative_folder,
+            mtime=stat.st_mtime,
+            size=stat.st_size,
+            content_hash=content_hash,
+        ):
+            matched_photo_ids.add(photo_match["id"])
+            row = db.fetch_photo(photo_id)
+            return (db.row_to_photo(row) if row else None), "moved"
 
     state = db.insert_or_update_photo(
         photo_id=photo_id,
@@ -189,6 +252,11 @@ def gc_missing_photos(workspace_id: str | None = None) -> int:
     return removed
 
 
+def collect_missing_photo_ids(workspace_id: str | None = None) -> list[str]:
+    rows = db.list_photos(workspace_id)
+    return [row["id"] for row in rows if not os.path.exists(resolve_disk_path(row["path"]))]
+
+
 def maybe_run_gc(workspace_id: str | None = None, force: bool = False) -> int:
     global _last_gc_at
     now = time.time()
@@ -204,7 +272,20 @@ def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
     if workspace is None:
         raise InvalidWorkspaceError("Workspace not found")
 
-    maybe_run_gc(workspace_id, force=force_gc)
+    photo_rows = db.list_photos(workspace_id)
+    moved_photo_candidates = [
+        row for row in photo_rows
+        if row["content_hash"] and not os.path.exists(resolve_disk_path(row["path"]))
+    ]
+    excluded_rows = db.list_excluded(workspace_id)
+    _backfill_excluded_hashes(excluded_rows)
+    excluded_rows = db.list_excluded(workspace_id)
+    moved_excluded_candidates = [
+        row for row in excluded_rows
+        if row["content_hash"] and not os.path.exists(resolve_disk_path(row["path"]))
+    ]
+    matched_photo_ids: set[str] = set()
+    matched_excluded_paths: set[str] = set()
     root_path = workspace["root_path"]
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [dirname for dirname in dirs if not dirname.startswith(".")]
@@ -213,11 +294,23 @@ def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
                 continue
             path = os.path.join(root, file_name)
             try:
-                record, state = index_workspace_file(workspace_id, path)
+                record, state = index_workspace_file(
+                    workspace_id,
+                    path,
+                    moved_photo_candidates=moved_photo_candidates,
+                    matched_photo_ids=matched_photo_ids,
+                    moved_excluded_candidates=moved_excluded_candidates,
+                    matched_excluded_paths=matched_excluded_paths,
+                )
             except InvalidImageError:
                 continue
             if record and state in {"inserted", "pending"}:
                 scoring.enqueue_scoring(record["id"], record["path"])
+    missing_ids = collect_missing_photo_ids(workspace_id)
+    if missing_ids:
+        removed = db.delete_photos(missing_ids)
+        if removed:
+            scoring.discard_jobs(missing_ids)
     db.mark_workspace_scanned(workspace_id)
 
 

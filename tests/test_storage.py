@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from server.config import AppConfig
+from server.config import AppConfig, migrate_legacy_db, resolve_db_path
 from server import db, storage
 
 
@@ -50,3 +50,25 @@ def test_index_workspace_file_inserts_and_reuses_record(tmp_path):
     record_again, state_again = storage.index_workspace_file(workspace["id"], str(image_path))
     assert state_again == "pending"
     assert record_again["id"] == record["id"]
+
+
+def test_default_db_path_uses_application_support(monkeypatch, tmp_path):
+    monkeypatch.delenv("DB_PATH", raising=False)
+    monkeypatch.delenv("AI_CULLING_APP_SUPPORT", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("server.config.platform.system", lambda: "Darwin")
+
+    assert resolve_db_path() == str(tmp_path / "Library" / "Application Support" / "AI Photo Culling" / "ai_culling.db")
+
+
+def test_migrate_legacy_db_moves_repo_database(tmp_path):
+    target = tmp_path / "Application Support" / "AI Photo Culling" / "ai_culling.db"
+    legacy = tmp_path / "repo" / "data" / "ai_culling.db"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy-db")
+
+    moved_from = migrate_legacy_db(str(target), base_dir=tmp_path / "repo")
+
+    assert moved_from == str(legacy)
+    assert target.read_bytes() == b"legacy-db"
+    assert not legacy.exists()
