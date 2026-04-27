@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import type { StatusTone, WorkspaceTab } from "../../types";
-import { Badge } from "../ui/badge";
+import type { WorkspaceTab } from "../../types";
 import { Button } from "../ui/button";
 
 const tabs: Array<{ id: WorkspaceTab; label: string }> = [
@@ -13,11 +12,16 @@ const tabs: Array<{ id: WorkspaceTab; label: string }> = [
 
 interface WorkspaceShellProps {
   activeTab: WorkspaceTab;
-  statusText: string;
-  statusTone: StatusTone;
   currentPath: string;
   exportQueueCount: number;
   isRefreshing: boolean;
+  scoringProgress?: {
+    completed: number;
+    pending: number;
+    processing: number;
+    total: number;
+    percent: number;
+  };
   sidebar: ReactNode;
   children: ReactNode;
   inspector: ReactNode;
@@ -28,11 +32,10 @@ interface WorkspaceShellProps {
 
 export function WorkspaceShell({
   activeTab,
-  statusText,
-  statusTone,
   currentPath,
   exportQueueCount,
   isRefreshing,
+  scoringProgress,
   sidebar,
   children,
   inspector,
@@ -40,6 +43,9 @@ export function WorkspaceShell({
   onRefresh,
   onExportQueue
 }: WorkspaceShellProps) {
+  const isScoring = Boolean(scoringProgress && (scoringProgress.processing > 0 || scoringProgress.pending > 0));
+  const progressDegrees = scoringProgress ? Math.round((scoringProgress.percent / 100) * 360) : 0;
+
   return (
     <div className="bridge-shell">
       <header className="bridge-topbar">
@@ -62,7 +68,28 @@ export function WorkspaceShell({
         <div className="bridge-actions">
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>{isRefreshing ? "Refreshing" : "Refresh"}</Button>
           <Button variant="default" size="sm" onClick={onExportQueue}>Export Queue ({exportQueueCount})</Button>
-          <Badge className="toolbar-status" variant={statusTone === "ok" ? "success" : statusTone === "error" ? "danger" : "secondary"}>{statusText}</Badge>
+          {isScoring && scoringProgress ? (
+            <div
+              className="scoring-progress"
+              style={{ "--progress-deg": `${progressDegrees}deg` } as React.CSSProperties}
+              aria-label={`Background scoring ${scoringProgress.percent}% complete`}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={scoringProgress.percent}
+              tabIndex={0}
+            >
+              <span className="scoring-progress-ring">
+                <span>{scoringProgress.percent}</span>
+              </span>
+              <div className="scoring-progress-popover" role="tooltip">
+                <strong>Background scoring</strong>
+                <span>{scoringProgress.completed} of {scoringProgress.total} complete</span>
+                <span>{scoringProgress.processing} processing</span>
+                <span>{scoringProgress.pending} queued</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       </header>
       <main className="bridge-layout">

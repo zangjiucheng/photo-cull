@@ -480,11 +480,16 @@ export default function App() {
   return (
     <WorkspaceShell
       activeTab={activeTab}
-      statusText={statusText}
-      statusTone={statusTone}
       currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
       exportQueueCount={exportQueueList.length}
       isRefreshing={isRefreshing}
+      scoringProgress={{
+        completed: completedCount,
+        pending: library.pendingCount,
+        processing: library.processingCount,
+        total: processingTotal,
+        percent: processingProgress
+      }}
       onTabChange={setActiveTab}
       onRefresh={() => void onRefresh()}
       onExportQueue={() => void onExport()}
