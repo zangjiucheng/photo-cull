@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const net = require("node:net");
 const path = require("node:path");
@@ -70,6 +70,17 @@ ipcMain.handle("open-folder", async () => {
     properties: ["openDirectory"],
   });
   return result.canceled ? null : result.filePaths[0] || null;
+});
+
+ipcMain.handle("reveal-folder", async (_event, folderPath) => {
+  if (typeof folderPath !== "string" || !folderPath) {
+    throw new Error("No folder path provided");
+  }
+  const error = await shell.openPath(folderPath);
+  if (error) {
+    throw new Error(error);
+  }
+  return true;
 });
 
 app.whenReady().then(createWindow).catch((error) => {

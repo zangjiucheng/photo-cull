@@ -14,6 +14,8 @@ import { usePhotoFilters } from "./hooks/usePhotoFilters";
 import { usePhotoRatings } from "./hooks/usePhotoRatings";
 import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
+const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
+
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
 }
@@ -139,6 +141,24 @@ export default function App() {
       updateStatus(`Opened ${workspace.name}.`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to open folder", "error");
+    }
+  }
+
+  async function onRevealWorkspaceFolder() {
+    if (!activeWorkspace) {
+      updateStatus("Open a workspace first.", "warn");
+      return;
+    }
+    if (!window.aiCulling?.revealFolder) {
+      updateStatus("Finder reveal is only available in the desktop app.", "warn");
+      return;
+    }
+    updateStatus("Opening workspace folder...", "busy");
+    try {
+      await window.aiCulling.revealFolder(activeWorkspace.rootPath);
+      updateStatus(`Opened ${activeWorkspace.name} in Finder.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to open folder in Finder", "error");
     }
   }
 
@@ -415,19 +435,25 @@ export default function App() {
         className="workspace-control-select"
         value={activeWorkspaceId ?? ""}
         onChange={(event) => {
-          if (!event.target.value) return;
-          setActiveWorkspaceId(event.target.value);
-          void loadLibrary(event.target.value);
+          const selectedValue = event.target.value;
+          if (!selectedValue) return;
+          if (selectedValue === NEW_WORKSPACE_FROM_FOLDER_VALUE) {
+            void onOpenFolder();
+            return;
+          }
+          setActiveWorkspaceId(selectedValue);
+          void loadLibrary(selectedValue);
         }}
         aria-label="Photo workspace"
       >
         {library.workspaces.map((item) => (
           <option key={item.id} value={item.id}>{item.name}</option>
         ))}
+        <option value={NEW_WORKSPACE_FROM_FOLDER_VALUE}>New Workspace from Folder...</option>
       </select>
       <div className="workspace-control-path" title={activeWorkspace?.rootPath ?? ""}>{activeWorkspace?.rootPath ?? ""}</div>
       <div className="workspace-control-actions">
-        <button className="link-button" onClick={() => void onOpenFolder()}>Open Folder</button>
+        <button className="link-button" onClick={() => void onRevealWorkspaceFolder()}>Open Folder</button>
         <button className="link-button" disabled={!excludedCount} onClick={() => void restoreRemoved()}>
           Restore Removed ({excludedCount})
         </button>
