@@ -6,6 +6,7 @@ import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportWorkspace } from "./components/workspaces/ExportWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
+import { WorkspaceLauncher } from "./components/workspaces/WorkspaceLauncher";
 import { StatsWorkspace } from "./components/workspaces/StatsWorkspace";
 import { WorkspaceShell } from "./components/workspaces/WorkspaceShell";
 import { useLibrary } from "./hooks/useLibrary";
@@ -401,33 +402,76 @@ export default function App() {
     );
   }
 
+  const workspaceControls = (
+    <section className="workspace-control-panel">
+      <div className="side-panel-head">
+        <div>
+          <span className="panel-kicker">Workspace</span>
+          <strong>{activeWorkspace?.name ?? "No Workspace"}</strong>
+        </div>
+        <span>{library.workspaces.length}</span>
+      </div>
+      <select
+        className="workspace-control-select"
+        value={activeWorkspaceId ?? ""}
+        onChange={(event) => {
+          if (!event.target.value) return;
+          setActiveWorkspaceId(event.target.value);
+          void loadLibrary(event.target.value);
+        }}
+        aria-label="Photo workspace"
+      >
+        {library.workspaces.map((item) => (
+          <option key={item.id} value={item.id}>{item.name}</option>
+        ))}
+      </select>
+      <div className="workspace-control-path" title={activeWorkspace?.rootPath ?? ""}>{activeWorkspace?.rootPath ?? ""}</div>
+      <div className="workspace-control-actions">
+        <button className="link-button" onClick={() => void onOpenFolder()}>Open Folder</button>
+        <button className="link-button" disabled={!excludedCount} onClick={() => void restoreRemoved()}>
+          Restore Removed ({excludedCount})
+        </button>
+      </div>
+    </section>
+  );
+
+  if (!activeWorkspace) {
+    return (
+      <WorkspaceLauncher
+        workspaces={library.workspaces}
+        statusText={statusText}
+        statusTone={statusTone}
+        isLoading={!library.isLibraryReady || library.isLibraryLoading}
+        onOpenFolder={() => void onOpenFolder()}
+        onWorkspaceChange={(workspaceId) => {
+          setActiveWorkspaceId(workspaceId);
+          void loadLibrary(workspaceId);
+        }}
+      />
+    );
+  }
+
   return (
     <WorkspaceShell
       activeTab={activeTab}
       statusText={statusText}
       statusTone={statusTone}
       currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
-      workspaces={library.workspaces}
-      activeWorkspaceId={activeWorkspaceId}
-      excludedCount={excludedCount}
       exportQueueCount={exportQueueList.length}
       isRefreshing={isRefreshing}
       onTabChange={setActiveTab}
-      onOpenFolder={() => void onOpenFolder()}
-      onWorkspaceChange={(workspaceId) => {
-        setActiveWorkspaceId(workspaceId);
-        void loadLibrary(workspaceId);
-      }}
       onRefresh={() => void onRefresh()}
       onExportQueue={() => void onExport()}
-      onRestoreRemoved={() => void restoreRemoved()}
       sidebar={
-        <FolderNavigator
-          folders={folders}
-          activeFolderPath={activeFolderPath}
-          visibleCount={visiblePhotos.length}
-          onSelectFolder={setActiveFolderPath}
-        />
+        <>
+          {workspaceControls}
+          <FolderNavigator
+            folders={folders}
+            activeFolderPath={activeFolderPath}
+            visibleCount={visiblePhotos.length}
+            onSelectFolder={setActiveFolderPath}
+          />
+        </>
       }
       inspector={
         <InspectorPanel

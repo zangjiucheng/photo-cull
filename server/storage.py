@@ -223,9 +223,6 @@ def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
 
 def build_library_payload(workspace_id: str | None = None) -> dict:
     workspaces = list_workspaces()
-    if workspace_id is None:
-        workspace_id = workspaces[0]["id"] if workspaces else None
-
     active_workspace = db.fetch_workspace(workspace_id) if workspace_id else None
     rows = db.list_photos(workspace_id) if workspace_id and active_workspace else []
     photos = [db.row_to_photo(row) for row in rows]

@@ -57,6 +57,24 @@ def test_open_workspace_scans_external_folder_without_copying(client, tmp_path):
     assert not list((tmp_path / "uploads").glob("*.jpg"))
 
 
+def test_library_does_not_auto_select_workspace(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "sample.jpg")
+    workspace = open_workspace(client, source)
+
+    landing_library = client.get("/api/library")
+    assert landing_library.status_code == 200
+    landing_payload = landing_library.get_json()
+    assert landing_payload["activeWorkspace"] is None
+    assert landing_payload["workspaces"][0]["id"] == workspace["id"]
+    assert landing_payload["photos"] == []
+
+    selected_library = client.get(f"/api/library?workspace_id={workspace['id']}")
+    assert selected_library.status_code == 200
+    assert selected_library.get_json()["activeWorkspace"]["id"] == workspace["id"]
+    assert len(selected_library.get_json()["photos"]) == 1
+
+
 def test_rating_score_image_and_export(client, tmp_path):
     source = tmp_path / "source"
     make_image(source / "sample.jpg")

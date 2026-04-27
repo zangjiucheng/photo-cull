@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { PhotoWorkspace, StatusTone, WorkspaceTab } from "../../types";
+import type { StatusTone, WorkspaceTab } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 
@@ -16,20 +16,14 @@ interface WorkspaceShellProps {
   statusText: string;
   statusTone: StatusTone;
   currentPath: string;
-  workspaces: PhotoWorkspace[];
-  activeWorkspaceId: string | null;
-  excludedCount: number;
   exportQueueCount: number;
   isRefreshing: boolean;
   sidebar: ReactNode;
   children: ReactNode;
   inspector: ReactNode;
   onTabChange: (tab: WorkspaceTab) => void;
-  onOpenFolder: () => void;
-  onWorkspaceChange: (workspaceId: string) => void;
   onRefresh: () => void;
   onExportQueue: () => void;
-  onRestoreRemoved: () => void;
 }
 
 export function WorkspaceShell({
@@ -37,20 +31,14 @@ export function WorkspaceShell({
   statusText,
   statusTone,
   currentPath,
-  workspaces,
-  activeWorkspaceId,
-  excludedCount,
   exportQueueCount,
   isRefreshing,
   sidebar,
   children,
   inspector,
   onTabChange,
-  onOpenFolder,
-  onWorkspaceChange,
   onRefresh,
-  onExportQueue,
-  onRestoreRemoved
+  onExportQueue
 }: WorkspaceShellProps) {
   return (
     <div className="bridge-shell">
@@ -59,19 +47,6 @@ export function WorkspaceShell({
           <strong>AI Photo Culling</strong>
           <span>{currentPath || "All Photos"}</span>
         </div>
-        <select
-          className="workspace-switcher"
-          value={activeWorkspaceId ?? ""}
-          onChange={(event) => {
-            if (event.target.value) onWorkspaceChange(event.target.value);
-          }}
-          aria-label="Photo workspace"
-        >
-          <option value="">No workspace</option>
-          {workspaces.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-          ))}
-        </select>
         <nav className="workspace-tabs" aria-label="Workspace tabs">
           {tabs.map((tab) => (
             <button
@@ -85,9 +60,7 @@ export function WorkspaceShell({
           ))}
         </nav>
         <div className="bridge-actions">
-          <Button variant="outline" size="sm" onClick={onOpenFolder}>Open Folder</Button>
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>{isRefreshing ? "Refreshing" : "Refresh"}</Button>
-          <Button variant="outline" size="sm" onClick={onRestoreRemoved} disabled={!excludedCount}>Restore Removed ({excludedCount})</Button>
           <Button variant="default" size="sm" onClick={onExportQueue}>Export Queue ({exportQueueCount})</Button>
           <Badge className="toolbar-status" variant={statusTone === "ok" ? "success" : statusTone === "error" ? "danger" : "secondary"}>{statusText}</Badge>
         </div>

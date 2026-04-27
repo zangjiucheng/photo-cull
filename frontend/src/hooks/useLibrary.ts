@@ -3,18 +3,16 @@ import { fetchWorkspaceLibrary, openWorkspace, refreshLibrary, restorePhotos } f
 import { normalizeScores } from "../core";
 import type { LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
 
-const ACTIVE_WORKSPACE_KEY = "ai-culling-active-workspace";
-
 export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => void) {
   const [workspaces, setWorkspaces] = useState<PhotoWorkspace[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() => (
-    window.localStorage.getItem(ACTIVE_WORKSPACE_KEY)
-  ));
+  const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [processingCount, setProcessingCount] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
+  const [isLibraryReady, setIsLibraryReady] = useState(false);
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
   const [activeFolderByWorkspace, setActiveFolderByWorkspace] = useState<Record<string, string>>({});
   const [activeIdByWorkspace, setActiveIdByWorkspace] = useState<Record<string, string | null>>({});
 
@@ -24,11 +22,6 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
 
   const setActiveWorkspaceId = useCallback((workspaceId: string | null) => {
     setActiveWorkspaceIdState(workspaceId);
-    if (workspaceId) {
-      window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
-    } else {
-      window.localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
-    }
   }, []);
 
   const setActiveFolderPath = useCallback((folderPath: string) => {
@@ -43,7 +36,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
 
   const applyLibraryPayload = useCallback((data: LibraryPayload) => {
     const normalized = normalizeScores(data.photos);
-    const nextWorkspaceId = data.activeWorkspace?.id ?? data.workspaces[0]?.id ?? null;
+    const nextWorkspaceId = data.activeWorkspace?.id ?? null;
 
     setWorkspaces(data.workspaces);
     setPhotos(normalized);
@@ -86,10 +79,14 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   }, [setActiveWorkspaceId, updateStatus]);
 
   const loadLibrary = useCallback(async (workspaceId = activeWorkspaceId) => {
+    setIsLibraryLoading(true);
     try {
       applyLibraryPayload(await fetchWorkspaceLibrary(workspaceId));
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to load library", "error");
+    } finally {
+      setIsLibraryReady(true);
+      setIsLibraryLoading(false);
     }
   }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
@@ -145,6 +142,8 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     pendingCount,
     processingCount,
     excludedCount,
+    isLibraryReady,
+    isLibraryLoading,
     activeFolderPath,
     setActiveFolderPath,
     activeId,

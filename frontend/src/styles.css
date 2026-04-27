@@ -27,7 +27,7 @@ body {
 .bridge-topbar {
   height: 48px;
   display: grid;
-  grid-template-columns: 220px 180px minmax(0, 1fr) auto;
+  grid-template-columns: 240px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 0 12px;
@@ -60,19 +60,6 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.workspace-switcher {
-  min-width: 0;
-  width: 100%;
-  height: 30px;
-  border: 1px solid #48515f;
-  border-radius: 6px;
-  background: #2c333d;
-  color: #eef3f7;
-  padding: 0 9px;
-  font-size: 0.78rem;
-  font-weight: 700;
 }
 
 .workspace-tabs {
@@ -133,6 +120,256 @@ body {
   min-height: 0;
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr) 340px;
+}
+
+.workspace-launcher {
+  min-height: 100vh;
+  padding: 0;
+  background: #181b21;
+  color: #dfe5eb;
+}
+
+.vscode-welcome {
+  width: min(1040px, calc(100vw - 64px));
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: 54px;
+  align-items: start;
+  margin: 0 auto;
+  padding: 96px 0 48px;
+}
+
+.welcome-start,
+.welcome-main {
+  min-width: 0;
+}
+
+.welcome-brand {
+  margin-bottom: 42px;
+}
+
+.welcome-brand span {
+  color: #8f99a7;
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.welcome-brand h1 {
+  margin: 8px 0 0;
+  color: #f3f6f9;
+  font-size: 2.75rem;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.welcome-section {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.welcome-section h2 {
+  margin: 0 0 5px;
+  color: #f2f5f8;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.welcome-action,
+.welcome-recent {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #59a6d6;
+  text-align: left;
+  cursor: pointer;
+}
+
+.welcome-action {
+  padding: 5px 0;
+  font-size: 0.92rem;
+}
+
+.welcome-action:hover,
+.welcome-recent:hover {
+  color: #8cc8ed;
+}
+
+.welcome-action:disabled {
+  color: #5c6570;
+  cursor: not-allowed;
+}
+
+.welcome-action.primary {
+  color: #70b8e6;
+}
+
+.welcome-recent-list {
+  display: grid;
+  gap: 6px;
+}
+
+.welcome-recent {
+  display: grid;
+  gap: 3px;
+  padding: 6px 0;
+}
+
+.welcome-recent strong,
+.welcome-recent span,
+.welcome-muted-row {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-recent strong {
+  color: #dfe5eb;
+  font-size: 0.9rem;
+}
+
+.welcome-recent span,
+.welcome-muted-row {
+  color: #8f99a7;
+  font-size: 0.78rem;
+}
+
+.welcome-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.welcome-title-row h2 {
+  margin: 5px 0 0;
+  color: #f3f6f9;
+  font-size: 1.5rem;
+  letter-spacing: 0;
+}
+
+.welcome-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 20px;
+  align-items: center;
+  padding: 18px;
+  border: 1px solid #343b45;
+  border-radius: 6px;
+  background: #20252c;
+}
+
+.welcome-card strong {
+  color: #f3f6f9;
+  font-size: 1rem;
+}
+
+.welcome-card p {
+  grid-column: 1;
+  margin: 0;
+  color: #a3adba;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.welcome-card-action {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  height: 34px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 14px;
+  background: #0f7f97;
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.welcome-card-action:hover {
+  background: #128da8;
+}
+
+.welcome-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.welcome-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #303742;
+  border-radius: 6px;
+  background: #1f242b;
+}
+
+.welcome-grid span {
+  color: #8f99a7;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.welcome-grid strong {
+  color: #eef3f7;
+}
+
+.welcome-grid p {
+  margin: 0;
+  color: #9ea8b3;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.workspace-control-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid #11151a;
+  background: #20252c;
+}
+
+.workspace-control-select {
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  border: 1px solid #3c4652;
+  border-radius: 6px;
+  background: #2b323b;
+  color: #eef3f7;
+  padding: 0 9px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.workspace-control-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9ea8b3;
+  font-size: 0.74rem;
+}
+
+.workspace-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workspace-control-actions .link-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .bridge-sidebar,
@@ -423,6 +660,32 @@ body {
 }
 
 @media (max-width: 820px) {
+  .vscode-welcome {
+    width: min(100% - 28px, 720px);
+    grid-template-columns: 1fr;
+    gap: 24px;
+    padding: 36px 0;
+  }
+
+  .welcome-brand {
+    margin-bottom: 24px;
+  }
+
+  .welcome-brand h1 {
+    font-size: 2.15rem;
+  }
+
+  .welcome-card,
+  .welcome-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .welcome-card-action {
+    grid-column: 1;
+    grid-row: auto;
+    width: max-content;
+  }
+
   .bridge-shell {
     grid-template-rows: auto minmax(0, 1fr);
   }
