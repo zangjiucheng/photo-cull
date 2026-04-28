@@ -3271,8 +3271,9 @@ input[type="range"] {
 }
 
 .review-workspace {
+  --review-preview-height: 420px;
   display: grid;
-  grid-template-rows: auto minmax(260px, 1fr) clamp(220px, 34vh, 360px);
+  grid-template-rows: auto minmax(220px, var(--review-preview-height)) 10px minmax(180px, 1fr);
   overflow: hidden;
 }
 
@@ -3289,13 +3290,92 @@ input[type="range"] {
 .review-preview {
   height: 100%;
   min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  position: relative;
 }
 
 .review-preview img {
+  grid-area: 1 / 1;
+  display: block;
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: min(62vh, 620px);
+  max-height: 100%;
+}
+
+.review-preview.zoomed {
+  place-items: start;
+}
+
+.review-preview img[style] {
+  max-width: none;
+  max-height: none;
+}
+
+.review-resize-handle {
+  min-height: 10px;
+  cursor: row-resize;
+  border: 1px solid #303843;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, #2a313a 0, #20262e 100%);
+  position: relative;
+  touch-action: none;
+}
+
+.review-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 2px;
+  border-radius: 999px;
+  background: #667383;
+  transform: translate(-50%, -50%);
+}
+
+.review-resize-handle:hover,
+.review-resize-handle:focus-visible {
+  border-color: #2b9ec1;
+  background: #26323d;
+  outline: none;
+}
+
+.review-resize-handle:hover::before,
+.review-resize-handle:focus-visible::before {
+  background: #75c7df;
+}
+
+.review-resizing,
+.review-resizing * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+.review-controls {
+  flex-wrap: wrap;
+}
+
+.review-zoom-indicator {
+  grid-area: 1 / 1;
+  position: sticky;
+  right: 12px;
+  bottom: 12px;
+  justify-self: end;
+  align-self: end;
+  padding: 4px 7px;
+  border: 1px solid rgba(130, 145, 162, 0.55);
+  border-radius: 6px;
+  background: rgba(17, 22, 28, 0.78);
+  color: #dbe3eb;
+  font-size: 0.74rem;
+  font-weight: 800;
+  pointer-events: none;
 }
 
 .review-workspace .bridge-gallery {
@@ -3521,7 +3601,7 @@ input[type="range"] {
   }
 
   .review-preview {
-    height: 320px;
+    height: 100%;
   }
 
   .folder-item-grid {
