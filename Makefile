@@ -14,7 +14,7 @@ IMAGE_NAME ?= ai-culling-app
 help:
 	@echo "Available targets:"
 	@echo "  make setup          install Python, web, and Electron dependencies"
-	@echo "  make dev            run the Electron desktop app (default development flow)"
+	@echo "  make dev            run the branded desktop app (default development flow)"
 	@echo "  make dev-web        build web assets and run Flask for browser debugging"
 	@echo "  make test           run backend and frontend tests"
 	@echo "  make build-web      build React frontend into static/dist"
@@ -81,5 +81,6 @@ clean:
 	rm -rf static/dist
 	rm -rf build dist release
 	rm -rf frontend/dist
+	rm -rf frontend/.electron-dev
 	rm -rf __pycache__
 	find . -name "*.pyc" -delete

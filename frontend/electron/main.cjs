@@ -1,10 +1,12 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 
-app.setName("AI Photo Culling");
+const appName = "AI Photo Culling";
+app.setName(appName);
+app.setAboutPanelOptions({ applicationName: appName });
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const backendHost = process.env.FLASK_HOST || "127.0.0.1";
@@ -13,7 +15,62 @@ const pythonBin = process.env.PYTHON || "python3";
 const backendEntry = process.env.BACKEND_ENTRY
   ? path.resolve(repoRoot, process.env.BACKEND_ENTRY)
   : path.join(repoRoot, "app.py");
+const appIconPath = path.join(__dirname, "assets", "icon.png");
 let backendProcess = null;
+
+function configureApplicationMenu() {
+  const template = [
+    ...(process.platform === "darwin" ? [{
+      label: appName,
+      submenu: [
+        { role: "about", label: `About ${appName}` },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide", label: `Hide ${appName}` },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit", label: `Quit ${appName}` },
+      ],
+    }] : []),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "close" },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function prepareDbPath() {
   if (process.env.DB_PATH) {
@@ -74,15 +131,21 @@ function startBackend() {
 }
 
 async function createWindow() {
+  configureApplicationMenu();
   startBackend();
   await waitForPort(backendHost, backendPort);
+
+  if (process.platform === "darwin" && fs.existsSync(appIconPath)) {
+    app.dock.setIcon(appIconPath);
+  }
 
   const win = new BrowserWindow({
     width: 1440,
     height: 980,
     minWidth: 1100,
     minHeight: 720,
-    title: "AI Photo Culling",
+    title: appName,
+    icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

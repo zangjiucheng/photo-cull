@@ -1,12 +1,13 @@
 {
-  "name": "ai-culling-frontend",
+  "name": "ai-photo-culling",
+  "productName": "AI Photo Culling",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "electron:dev": "electron electron/main.cjs",
+    "electron:dev": "node scripts/electron-dev.cjs",
     "preview": "vite preview",
     "test": "vitest run"
   },
