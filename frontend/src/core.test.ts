@@ -9,6 +9,7 @@ function photo(overrides: Partial<ApiPhoto>): ApiPhoto {
     name: "IMG_0001.jpg",
     score: 10,
     manualScore: null,
+    orientationOverride: null,
     path: "/tmp/IMG_0001.jpg",
     url: "/api/photos/id/image",
     folder: "Root",

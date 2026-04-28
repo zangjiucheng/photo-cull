@@ -10,6 +10,7 @@ interface InspectorPanelProps {
   onRatePhoto: (id: string, rating: number) => void;
   onToggleExportQueue: (id: string) => void;
   onSaveScoreOverride: (id: string, manualScore: number | null) => Promise<void>;
+  onSaveOrientationOverride: (id: string, orientationOverride: 0 | 90 | 180 | 270 | null) => Promise<void>;
 }
 
 function StarRating({
@@ -50,11 +51,13 @@ export function InspectorPanel({
   exportQueueIds,
   onRatePhoto,
   onToggleExportQueue,
-  onSaveScoreOverride
+  onSaveScoreOverride,
+  onSaveOrientationOverride
 }: InspectorPanelProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [scoreDraft, setScoreDraft] = useState("");
   const [isSavingScore, setIsSavingScore] = useState(false);
+  const [isSavingOrientation, setIsSavingOrientation] = useState(false);
 
   useEffect(() => {
     setIsPreviewOpen(false);
@@ -128,6 +131,18 @@ export function InspectorPanel({
     }
   }
 
+  async function handleOrientationChange(orientationOverride: 0 | 90 | 180 | 270 | null) {
+    if (!activePhoto) {
+      return;
+    }
+    setIsSavingOrientation(true);
+    try {
+      await onSaveOrientationOverride(activePhoto.id, orientationOverride);
+    } finally {
+      setIsSavingOrientation(false);
+    }
+  }
+
   return (
     <>
       <Card className="inspector-card">
@@ -193,6 +208,32 @@ export function InspectorPanel({
                     {activePhoto.status === "error" && (activePhoto.error || "Scoring failed.")}
                   </div>
                 )}
+                <div className="orientation-override-card">
+                  <div className="orientation-override-head">
+                    <div>
+                      <span className="score-override-label">Orientation</span>
+                      <strong>{activePhoto.orientationOverride ? `${activePhoto.orientationOverride} deg clockwise` : "Using EXIF orientation"}</strong>
+                    </div>
+                    {activePhoto.orientationOverride ? <span className="score-override-badge">Override On</span> : null}
+                  </div>
+                  <div className="orientation-override-controls" aria-label="Orientation override">
+                    {[0, 90, 180, 270].map((degrees) => {
+                      const value = degrees as 0 | 90 | 180 | 270;
+                      const isActive = (activePhoto.orientationOverride ?? 0) === value;
+                      return (
+                        <Button
+                          key={degrees}
+                          className="orientation-override-button"
+                          variant={isActive ? "secondary" : "outline"}
+                          onClick={() => void handleOrientationChange(value === 0 ? null : value)}
+                          disabled={isSavingOrientation}
+                        >
+                          {degrees}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="inspector-actions">
                   <StarRating
                     photo={activePhoto}

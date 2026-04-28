@@ -262,7 +262,10 @@ def score_job(photo_id: str, path: str) -> None:
         row = db.fetch_photo(photo_id)
         workspace_id = row["workspace_id"] if row else None
         events.publish("library:update", workspace_id, {"source": "scoring", "photoId": photo_id, "status": "processing"})
-        scoring_path = raw_pipeline.ensure_display_image(path)
+        if row is not None:
+            scoring_path = raw_pipeline.ensure_display_image(row["path"], row["content_hash"], row["orientation_override"])
+        else:
+            scoring_path = raw_pipeline.ensure_display_image(path)
         score_value, score_details = score_image_multi(scoring_path)
         db.mark_done(photo_id, score_value, score_details)
     except Exception as exc:

@@ -154,6 +154,11 @@ def test_rating_score_image_and_export(client, tmp_path):
     assert score.status_code == 200
     assert score.get_json()["manualScore"] == 88
 
+    orientation = client.patch(f"/api/photos/{photo['id']}/orientation", json={"orientation_override": 90})
+    assert orientation.status_code == 200
+    assert orientation.get_json()["orientationOverride"] == 90
+    assert "?v=" in orientation.get_json()["url"]
+
     export = client.post("/api/photos/export", json={"selected_ids": [photo["id"]]})
     assert export.status_code == 200
     assert export.headers["Content-Type"].startswith("application/zip")

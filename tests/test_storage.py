@@ -22,6 +22,13 @@ def make_image(path: Path) -> None:
     Image.new("RGB", (8, 8), "red").save(path)
 
 
+def make_oriented_image(path: Path, orientation: int = 6) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exif = Image.Exif()
+    exif[274] = orientation
+    Image.new("RGB", (12, 8), "red").save(path, exif=exif)
+
+
 def fake_rawpy(monkeypatch, orientation: int | None = None):
     from io import BytesIO
 
@@ -98,6 +105,41 @@ def test_dng_display_image_applies_embedded_preview_orientation(tmp_path, monkey
     with Image.open(cached) as img:
         assert img.size == (8, 12)
         assert 274 not in img.getexif()
+
+
+def test_jpeg_display_image_applies_exif_orientation(tmp_path):
+    configure_tmp(tmp_path)
+    image_path = tmp_path / "portrait.jpg"
+    make_oriented_image(image_path, orientation=6)
+
+    display_path = raw_pipeline.ensure_display_image(str(image_path), content_hash="portrait")
+
+    assert display_path != str(image_path)
+    assert Path(display_path).name == "portrait-oriented.jpg"
+    with Image.open(display_path) as img:
+        assert img.size == (8, 12)
+        assert 274 not in img.getexif()
+
+
+def test_jpeg_without_exif_orientation_uses_original_path(tmp_path):
+    configure_tmp(tmp_path)
+    image_path = tmp_path / "landscape.jpg"
+    make_image(image_path)
+
+    assert raw_pipeline.ensure_display_image(str(image_path), content_hash="landscape") == str(image_path)
+
+
+def test_orientation_override_rotates_raster_without_exif(tmp_path):
+    configure_tmp(tmp_path)
+    image_path = tmp_path / "landscape.jpg"
+    Image.new("RGB", (12, 8), "red").save(image_path)
+
+    display_path = raw_pipeline.ensure_display_image(str(image_path), content_hash="landscape", orientation_override=90)
+
+    assert display_path != str(image_path)
+    assert Path(display_path).name == "landscape-override-90.jpg"
+    with Image.open(display_path) as img:
+        assert img.size == (8, 12)
 
 
 def test_validate_dng_file_fails_cleanly_without_rawpy(tmp_path, monkeypatch):
@@ -202,3 +244,12 @@ def test_init_db_adds_score_details_column(tmp_path):
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
 
     assert "score_details" in columns
+
+
+def test_init_db_adds_orientation_override_column(tmp_path):
+    configure_tmp(tmp_path)
+
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
+
+    assert "orientation_override" in columns

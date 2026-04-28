@@ -71,6 +71,7 @@ def init_db() -> None:
                 score REAL,
                 score_details TEXT,
                 manual_score REAL,
+                orientation_override INTEGER,
                 rating INTEGER,
                 status TEXT NOT NULL DEFAULT 'pending',
                 error TEXT,
@@ -86,6 +87,8 @@ def init_db() -> None:
         }
         if "score_details" not in photos_columns:
             conn.execute("ALTER TABLE photos ADD COLUMN score_details TEXT")
+        if "orientation_override" not in photos_columns:
+            conn.execute("ALTER TABLE photos ADD COLUMN orientation_override INTEGER")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS excluded_photos (
@@ -130,8 +133,9 @@ def row_to_photo(row: sqlite3.Row) -> dict[str, Any]:
         "name": row["name"],
         "score": row["score"],
         "manualScore": row["manual_score"],
+        "orientationOverride": row["orientation_override"],
         "path": row["path"],
-        "url": f"/api/photos/{row['id']}/image",
+        "url": f"/api/photos/{row['id']}/image?v={int(row['updated_at'] * 1000)}",
         "folder": row["folder"],
         "folderPath": row["folder_path"],
         "relativePath": row["relative_path"],
@@ -382,6 +386,19 @@ def update_manual_score(photo_id: str, manual_score: float | None) -> bool:
         conn.execute(
             "UPDATE photos SET manual_score = ?, status = 'done', error = NULL, updated_at = ? WHERE id = ?",
             (manual_score, now, photo_id),
+        )
+    return True
+
+
+def update_orientation_override(photo_id: str, orientation_override: int | None) -> bool:
+    now = time.time()
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        if row is None:
+            return False
+        conn.execute(
+            "UPDATE photos SET orientation_override = ?, updated_at = ? WHERE id = ?",
+            (orientation_override, now, photo_id),
         )
     return True
 

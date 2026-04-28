@@ -283,3 +283,26 @@ def set_score(photo_id):
 
     row = db.fetch_photo(photo_id)
     return jsonify(db.row_to_photo(row))
+
+
+@bp.route("/photos/<photo_id>/orientation", methods=["PATCH"])
+def set_orientation(photo_id):
+    data = request.get_json(silent=True) or {}
+    orientation_override = data.get("orientation_override")
+
+    if orientation_override is not None:
+        try:
+            orientation_override = int(orientation_override)
+        except (TypeError, ValueError):
+            return error_response("orientation_override must be 0, 90, 180, 270, or null", 400)
+        if orientation_override not in {0, 90, 180, 270}:
+            return error_response("orientation_override must be 0, 90, 180, 270, or null", 400)
+        if orientation_override == 0:
+            orientation_override = None
+
+    updated = db.update_orientation_override(photo_id, orientation_override)
+    if not updated:
+        return error_response("Photo not found", 404)
+
+    row = db.fetch_photo(photo_id)
+    return jsonify(db.row_to_photo(row))

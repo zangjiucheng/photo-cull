@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoRating, updatePhotoScore } from "./api";
+import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -354,6 +354,16 @@ export default function App() {
     }
   }
 
+  async function saveOrientationOverride(id: string, orientationOverride: 0 | 90 | 180 | 270 | null) {
+    try {
+      await updatePhotoOrientation(id, orientationOverride);
+      await loadLibrary(activeWorkspaceId);
+      updateStatus(orientationOverride === null ? "Orientation override reset." : `Orientation set to ${orientationOverride} deg clockwise.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to update orientation", "error");
+    }
+  }
+
   async function onFindSimilar() {
     if (!activeWorkspaceId) {
       updateStatus("Open a workspace before finding similar photos.", "warn");
@@ -613,6 +623,7 @@ export default function App() {
           onRatePhoto={ratePhoto}
           onToggleExportQueue={toggleExportQueue}
           onSaveScoreOverride={saveScoreOverride}
+          onSaveOrientationOverride={saveOrientationOverride}
         />
       }
     >

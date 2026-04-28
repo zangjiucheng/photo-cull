@@ -149,6 +149,19 @@ export async function updatePhotoScore(photoId: string, manualScore: number | nu
   return data;
 }
 
+export async function updatePhotoOrientation(photoId: string, orientationOverride: 0 | 90 | 180 | 270 | null): Promise<ApiPhoto> {
+  const data = await requestJson<ApiPhoto>(`/api/photos/${photoId}/orientation`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orientation_override: orientationOverride })
+  }, "Failed to update orientation");
+
+  if (!data || !("id" in data)) {
+    throw new Error("Failed to update orientation");
+  }
+  return data;
+}
+
 export async function findSimilarPhotos(options: {
   workspaceId: string;
   includeClip?: boolean;

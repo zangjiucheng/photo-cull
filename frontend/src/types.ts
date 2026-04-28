@@ -4,6 +4,7 @@ export interface ApiPhoto {
   name: string;
   score: number | null;
   manualScore: number | null;
+  orientationOverride: 0 | 90 | 180 | 270 | null;
   path: string;
   url: string;
   folder: string;
