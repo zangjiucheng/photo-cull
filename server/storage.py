@@ -7,6 +7,7 @@ import threading
 import time
 import zipfile
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
@@ -20,6 +21,9 @@ from .config import ALLOWED_EXTS, AppConfig
 _config = AppConfig()
 _gc_lock = threading.Lock()
 _last_gc_at = 0.0
+_scan_executor = ThreadPoolExecutor(max_workers=1)
+_scan_lock = threading.Lock()
+_scan_jobs: dict[str, dict] = {}
 
 
 class InvalidImageError(ValueError):
@@ -31,8 +35,11 @@ class InvalidWorkspaceError(ValueError):
 
 
 def configure(config: AppConfig) -> None:
-    global _config
+    global _config, _scan_executor, _scan_jobs
     _config = config
+    _scan_executor.shutdown(wait=False, cancel_futures=True)
+    _scan_executor = ThreadPoolExecutor(max_workers=1)
+    _scan_jobs = {}
     os.makedirs(_config.upload_folder, exist_ok=True)
     raw_pipeline.configure(config)
 
@@ -65,12 +72,7 @@ def display_path_for_photo_row(row) -> str:
 
 
 def _enqueue_photo_scoring(row) -> bool:
-    try:
-        scoring_path = display_path_for_photo_row(row)
-    except InvalidImageError as exc:
-        db.mark_error(row["id"], exc)
-        return False
-    scoring.enqueue_scoring(row["id"], scoring_path)
+    scoring.enqueue_scoring(row["id"], row["path"])
     return True
 
 
@@ -127,7 +129,7 @@ def create_workspace(root_path: str, name: str | None = None) -> dict:
     resolved_root = normalize_root_path(root_path)
     workspace_name = name or os.path.basename(resolved_root) or resolved_root
     row = db.upsert_workspace(make_workspace_id(resolved_root), workspace_name, resolved_root)
-    scan_workspace(row["id"], force_gc=True)
+    start_workspace_scan(row["id"])
     refreshed = db.fetch_workspace(row["id"])
     return db.row_to_workspace(refreshed)
 
@@ -138,6 +140,101 @@ def list_workspaces() -> list[dict]:
 
 def delete_workspace(workspace_id: str) -> bool:
     return db.delete_workspace(workspace_id)
+
+
+def _idle_scan_state() -> dict:
+    return {
+        "active": False,
+        "indexed": 0,
+        "totalDiscovered": 0,
+        "status": "idle",
+        "startedAt": None,
+        "finishedAt": None,
+        "error": None,
+    }
+
+
+def _public_scan_state(state: dict | None) -> dict:
+    if state is None:
+        return _idle_scan_state()
+    return {
+        "active": bool(state.get("active")),
+        "indexed": int(state.get("indexed") or 0),
+        "totalDiscovered": int(state.get("totalDiscovered") or 0),
+        "status": state.get("status") or "idle",
+        "startedAt": state.get("startedAt"),
+        "finishedAt": state.get("finishedAt"),
+        "error": state.get("error"),
+    }
+
+
+def get_scan_state(workspace_id: str | None) -> dict:
+    if not workspace_id:
+        return _idle_scan_state()
+    with _scan_lock:
+        return _public_scan_state(_scan_jobs.get(workspace_id))
+
+
+def _set_scan_state(workspace_id: str, **updates) -> None:
+    with _scan_lock:
+        state = _scan_jobs.setdefault(workspace_id, _idle_scan_state())
+        state.update(updates)
+
+
+def _increment_scan_state(workspace_id: str, key: str, amount: int = 1) -> None:
+    with _scan_lock:
+        state = _scan_jobs.setdefault(workspace_id, _idle_scan_state())
+        state[key] = int(state.get(key) or 0) + amount
+
+
+def _run_scan_job(workspace_id: str) -> None:
+    _set_scan_state(
+        workspace_id,
+        active=True,
+        indexed=0,
+        totalDiscovered=0,
+        status="indexing",
+        startedAt=time.time(),
+        finishedAt=None,
+        error=None,
+    )
+    try:
+        scan_workspace(workspace_id, force_gc=True, update_progress=True)
+    except Exception as exc:
+        _set_scan_state(workspace_id, active=False, status="error", finishedAt=time.time(), error=str(exc)[:500])
+        return
+    _set_scan_state(workspace_id, active=False, status="done", finishedAt=time.time(), error=None)
+
+
+def start_workspace_scan(workspace_id: str) -> dict:
+    workspace = db.fetch_workspace(workspace_id)
+    if workspace is None:
+        raise InvalidWorkspaceError("Workspace not found")
+    with _scan_lock:
+        state = _scan_jobs.get(workspace_id)
+        if state and state.get("active"):
+            return _public_scan_state(state)
+        _scan_jobs[workspace_id] = {
+            "active": True,
+            "indexed": 0,
+            "totalDiscovered": 0,
+            "status": "indexing",
+            "startedAt": time.time(),
+            "finishedAt": None,
+            "error": None,
+        }
+    _scan_executor.submit(_run_scan_job, workspace_id)
+    return get_scan_state(workspace_id)
+
+
+def wait_for_scan(workspace_id: str, timeout: float = 5.0) -> dict:
+    started_at = time.time()
+    while time.time() - started_at < timeout:
+        state = get_scan_state(workspace_id)
+        if not state["active"]:
+            return state
+        time.sleep(0.02)
+    return get_scan_state(workspace_id)
 
 
 def _match_missing_by_hash(rows, content_hash: str, filename: str, matched_keys: set[str], key_field: str):
@@ -185,11 +282,18 @@ def index_workspace_file(
     if db.is_excluded(workspace_id, relative_path):
         return None, "excluded"
 
-    validate_image_file(resolved_path)
     relative_folder = os.path.dirname(relative_path)
     stat = os.stat(resolved_path)
-    content_hash = compute_content_hash(resolved_path)
     photo_id = make_photo_id(workspace_id, relative_path)
+    exact_photo = db.fetch_photo_by_relative_path(workspace_id, relative_path)
+
+    if exact_photo and float(exact_photo["mtime"]) == stat.st_mtime and int(exact_photo["size"]) == stat.st_size:
+        if exact_photo["score"] is None and exact_photo["status"] != "processing":
+            return db.row_to_photo(exact_photo), "pending"
+        return db.row_to_photo(exact_photo), "unchanged"
+
+    validate_image_file(resolved_path)
+    content_hash = compute_content_hash(resolved_path)
 
     if moved_excluded_candidates is not None and matched_excluded_paths is not None:
         excluded_match = _match_missing_by_hash(moved_excluded_candidates, content_hash, filename, matched_excluded_paths, "relative_path")
@@ -204,7 +308,6 @@ def index_workspace_file(
             matched_excluded_paths.add(excluded_match["relative_path"])
             return None, "excluded"
 
-    exact_photo = db.fetch_photo_by_relative_path(workspace_id, relative_path)
     if exact_photo is None and moved_photo_candidates is not None and matched_photo_ids is not None:
         photo_match = _match_missing_by_hash(moved_photo_candidates, content_hash, filename, matched_photo_ids, "id")
         if photo_match and db.move_photo_record(
@@ -294,7 +397,7 @@ def maybe_run_gc(workspace_id: str | None = None, force: bool = False) -> int:
     return gc_missing_photos(workspace_id)
 
 
-def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
+def scan_workspace(workspace_id: str, force_gc: bool = False, update_progress: bool = False) -> None:
     workspace = db.fetch_workspace(workspace_id)
     if workspace is None:
         raise InvalidWorkspaceError("Workspace not found")
@@ -319,6 +422,8 @@ def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
         for file_name in sorted(files):
             if file_name.startswith(".") or not allowed_image(file_name):
                 continue
+            if update_progress:
+                _increment_scan_state(workspace_id, "totalDiscovered")
             path = os.path.join(root, file_name)
             try:
                 record, state = index_workspace_file(
@@ -330,11 +435,15 @@ def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
                     matched_excluded_paths=matched_excluded_paths,
                 )
             except InvalidImageError:
+                if update_progress:
+                    _increment_scan_state(workspace_id, "indexed")
                 continue
             if record and state in {"inserted", "pending"}:
                 row = db.fetch_photo(record["id"])
                 if row:
                     _enqueue_photo_scoring(row)
+            if update_progress:
+                _increment_scan_state(workspace_id, "indexed")
     missing_ids = collect_missing_photo_ids(workspace_id)
     if missing_ids:
         removed = db.delete_photos(missing_ids)
@@ -379,6 +488,7 @@ def build_library_payload(workspace_id: str | None = None) -> dict:
         "error": sum(1 for photo in photos if photo["status"] == "error"),
         "scoreMode": scoring.score_mode(),
         "excluded": len(db.list_excluded(workspace_id)) if workspace_id else 0,
+        "indexing": get_scan_state(workspace_id),
     }
     return {
         "activeWorkspace": db.row_to_workspace(active_workspace) if active_workspace else None,

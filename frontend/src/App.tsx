@@ -85,6 +85,28 @@ export default function App() {
   const processingProgress = processingTotal
     ? Math.max(0, Math.min(100, Math.round((completedCount / processingTotal) * 100)))
     : 0;
+  const indexingTotal = Math.max(library.indexing.totalDiscovered, library.indexing.indexed, 0);
+  const backgroundProgress = library.indexing.active
+    ? {
+        title: "Background indexing",
+        state: "active" as const,
+        detail: "Indexing workspace",
+        completed: library.indexing.indexed,
+        pending: Math.max(indexingTotal - library.indexing.indexed, 0),
+        processing: 0,
+        total: indexingTotal || 1,
+        percent: indexingTotal ? Math.max(0, Math.min(100, Math.round((library.indexing.indexed / indexingTotal) * 100))) : 0
+      }
+    : {
+        title: "Background scoring",
+        state: (library.indexing.status === "error" ? "error" : processingInFlight > 0 ? "active" : "idle") as "active" | "idle" | "error",
+        detail: library.indexing.status === "error" ? (library.indexing.error || "Indexing failed") : processingInFlight > 0 ? "Scoring in background" : "Idle",
+        completed: completedCount,
+        pending: library.pendingCount,
+        processing: library.processingCount,
+        total: processingTotal,
+        percent: processingProgress
+      };
 
   function toggleExportQueue(id: string) {
     if (!activeWorkspaceId) return;
@@ -297,8 +319,12 @@ export default function App() {
     updateStatus("Refreshing active workspace...", "busy");
     setIsRefreshing(true);
     try {
-      await refresh();
-      updateStatus("Refresh complete.", "ok");
+      const data = await refresh();
+      if (data?.summary.indexing?.active) {
+        updateStatus(`Indexing workspace: ${data.summary.indexing.indexed} file(s) processed`, "busy");
+      } else {
+        updateStatus("Refresh complete.", "ok");
+      }
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Refresh failed", "error");
     } finally {
@@ -561,13 +587,7 @@ export default function App() {
       exportQueueCount={exportQueueList.length}
       isRefreshing={isRefreshing}
       isRescoring={isRescoring}
-      scoringProgress={{
-        completed: completedCount,
-        pending: library.pendingCount,
-        processing: library.processingCount,
-        total: processingTotal,
-        percent: processingProgress
-      }}
+      backgroundProgress={backgroundProgress}
       onTabChange={setActiveTab}
       onRefresh={() => void onRefresh()}
       onRefreshScores={() => void onRefreshScores()}

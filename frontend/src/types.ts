@@ -52,6 +52,15 @@ export interface LibraryPayload {
     error: number;
     scoreMode?: string;
     excluded?: number;
+    indexing?: {
+      active: boolean;
+      indexed: number;
+      totalDiscovered: number;
+      status: "idle" | "indexing" | "done" | "error";
+      startedAt?: number | null;
+      finishedAt?: number | null;
+      error?: string | null;
+    };
   };
   rescore?: {
     queued: number;

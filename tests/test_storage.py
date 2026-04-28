@@ -22,11 +22,17 @@ def make_image(path: Path) -> None:
     Image.new("RGB", (8, 8), "red").save(path)
 
 
-def fake_rawpy(monkeypatch):
+def fake_rawpy(monkeypatch, orientation: int | None = None):
     from io import BytesIO
 
     thumb_buffer = BytesIO()
-    Image.new("RGB", (12, 8), "green").save(thumb_buffer, format="JPEG")
+    thumb = Image.new("RGB", (12, 8), "green")
+    if orientation is None:
+        thumb.save(thumb_buffer, format="JPEG")
+    else:
+        exif = Image.Exif()
+        exif[274] = orientation
+        thumb.save(thumb_buffer, format="JPEG", exif=exif)
 
     class FakeRaw:
         def __enter__(self):
@@ -72,12 +78,26 @@ def test_validate_dng_file_renders_cached_display_image(tmp_path, monkeypatch):
     raw_path.write_bytes(b"fake-dng")
 
     storage.validate_image_file(str(raw_path))
+    assert not list(Path(config.render_cache_folder).glob("*.jpg"))
 
     cached = raw_pipeline.ensure_display_image(str(raw_path))
     assert Path(cached).parent == Path(config.render_cache_folder)
     assert Path(cached).suffix == ".jpg"
     with Image.open(cached) as img:
         assert img.format == "JPEG"
+
+
+def test_dng_display_image_applies_embedded_preview_orientation(tmp_path, monkeypatch):
+    configure_tmp(tmp_path)
+    fake_rawpy(monkeypatch, orientation=6)
+    raw_path = tmp_path / "portrait.dng"
+    raw_path.write_bytes(b"fake-dng")
+
+    cached = raw_pipeline.ensure_display_image(str(raw_path))
+
+    with Image.open(cached) as img:
+        assert img.size == (8, 12)
+        assert 274 not in img.getexif()
 
 
 def test_validate_dng_file_fails_cleanly_without_rawpy(tmp_path, monkeypatch):
@@ -112,6 +132,27 @@ def test_index_workspace_file_inserts_and_reuses_record(tmp_path):
     assert record_again["id"] == record["id"]
 
 
+def test_scan_skips_hash_for_unchanged_file(tmp_path, monkeypatch):
+    configure_tmp(tmp_path)
+    monkeypatch.setattr("server.scoring.enqueue_scoring", lambda _photo_id, _path: None)
+    workspace_root = tmp_path / "source"
+    image_path = workspace_root / "photo.jpg"
+    make_image(image_path)
+    workspace = storage.create_workspace(str(workspace_root))
+    storage.wait_for_scan(workspace["id"])
+    calls = []
+
+    def fail_hash(path):
+        calls.append(path)
+        raise AssertionError("unchanged files should not be hashed")
+
+    monkeypatch.setattr(storage, "compute_content_hash", fail_hash)
+
+    storage.scan_workspace(workspace["id"], force_gc=True)
+
+    assert calls == []
+
+
 def test_scan_dng_queues_cached_display_image_for_scoring(tmp_path, monkeypatch):
     config = configure_tmp(tmp_path)
     fake_rawpy(monkeypatch)
@@ -123,11 +164,12 @@ def test_scan_dng_queues_cached_display_image_for_scoring(tmp_path, monkeypatch)
     dng_path.write_bytes(b"fake-dng")
 
     workspace = storage.create_workspace(str(workspace_root))
+    storage.wait_for_scan(workspace["id"])
 
     assert workspace["id"]
     assert len(queued) == 1
-    assert Path(queued[0][1]).parent == Path(config.render_cache_folder)
-    assert Path(queued[0][1]).suffix == ".jpg"
+    assert queued[0][1] == str(dng_path.resolve())
+    assert not list(Path(config.render_cache_folder).glob("*.jpg"))
 
 
 def test_default_db_path_uses_application_support(monkeypatch, tmp_path):

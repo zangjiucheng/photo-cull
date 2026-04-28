@@ -8,7 +8,7 @@ import os
 from typing import Any
 
 import numpy as np
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .config import AppConfig
 
@@ -50,7 +50,8 @@ def _load_rawpy():
 
 
 def _normalize_display_image(img: Image.Image, target_path: str) -> str:
-    rgb = img.convert("RGB")
+    oriented = ImageOps.exif_transpose(img)
+    rgb = oriented.convert("RGB")
     rgb.thumbnail((MAX_DISPLAY_EDGE, MAX_DISPLAY_EDGE), Image.Resampling.LANCZOS)
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     rgb.save(target_path, "JPEG", quality=JPEG_QUALITY, optimize=True)
@@ -81,6 +82,19 @@ def _render_raw_to_jpeg(path: str, target_path: str) -> str:
         raise InvalidRawImageError("File is not a valid DNG image") from exc
 
 
+def validate_raw_file(path: str) -> None:
+    if not is_raw_image(path):
+        return
+    if not os.path.exists(path):
+        raise InvalidRawImageError("RAW file does not exist")
+    rawpy = _load_rawpy()
+    try:
+        with rawpy.imread(path):
+            return
+    except Exception as exc:
+        raise InvalidRawImageError("File is not a valid DNG image") from exc
+
+
 def ensure_display_image(path: str, content_hash: str | None = None) -> str:
     if not is_raw_image(path):
         return path
@@ -96,7 +110,7 @@ def ensure_display_image(path: str, content_hash: str | None = None) -> str:
 
 def validate_image_file(path: str) -> None:
     if is_raw_image(path):
-        ensure_display_image(path)
+        validate_raw_file(path)
         return
 
     try:

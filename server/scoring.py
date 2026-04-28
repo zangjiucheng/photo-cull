@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from . import db
+from . import db, raw_pipeline
 from .config import AppConfig
 
 
@@ -258,7 +258,8 @@ def score_image(path: str) -> float:
 def score_job(photo_id: str, path: str) -> None:
     try:
         db.mark_processing(photo_id)
-        score_value, score_details = score_image_multi(path)
+        scoring_path = raw_pipeline.ensure_display_image(path)
+        score_value, score_details = score_image_multi(scoring_path)
         db.mark_done(photo_id, score_value, score_details)
     except Exception as exc:
         db.mark_error(photo_id, exc)

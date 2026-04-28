@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 from zipfile import ZipFile
 
@@ -6,7 +7,7 @@ import pytest
 from PIL import Image
 
 from server import create_app
-from server import db, raw_pipeline
+from server import db, raw_pipeline, storage
 from server.config import AppConfig
 
 
@@ -56,6 +57,14 @@ def fake_rawpy(monkeypatch):
 def open_workspace(client, root: Path):
     response = client.post("/api/workspaces", json={"root_path": str(root)})
     assert response.status_code == 200
+    workspace = response.get_json()
+    storage.wait_for_scan(workspace["id"])
+    return workspace
+
+
+def open_workspace_without_wait(client, root: Path):
+    response = client.post("/api/workspaces", json={"root_path": str(root)})
+    assert response.status_code == 200
     return response.get_json()
 
 
@@ -86,6 +95,27 @@ def test_open_workspace_scans_external_folder_without_copying(client, tmp_path):
     assert photo["relativePath"] == "set/sample.jpg"
     assert Path(photo["path"]) == source / "set" / "sample.jpg"
     assert not list((tmp_path / "uploads").glob("*.jpg"))
+
+
+def test_open_workspace_returns_before_background_scan_finishes(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "sample.jpg")
+    scan_started = threading.Event()
+    release_scan = threading.Event()
+
+    def deferred_scan(*args, **kwargs):
+        scan_started.set()
+        release_scan.wait(timeout=2)
+
+    monkeypatch.setattr(storage, "scan_workspace", deferred_scan)
+    workspace = open_workspace_without_wait(client, source)
+    library = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()
+
+    assert library["activeWorkspace"]["id"] == workspace["id"]
+    assert library["summary"]["indexing"]["active"] is True
+    assert scan_started.wait(timeout=1)
+    release_scan.set()
+    storage.wait_for_scan(workspace["id"])
 
 
 def test_library_does_not_auto_select_workspace(client, tmp_path):
@@ -175,12 +205,14 @@ def test_refresh_detects_new_and_missing_files(client, tmp_path):
     make_image(source / "second.jpg")
     refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh.status_code == 200
-    assert len(refresh.get_json()["photos"]) == 2
+    storage.wait_for_scan(workspace["id"])
+    assert len(client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"]) == 2
 
     first_path.unlink()
     refresh_missing = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh_missing.status_code == 200
-    names = {photo["name"] for photo in refresh_missing.get_json()["photos"]}
+    storage.wait_for_scan(workspace["id"])
+    names = {photo["name"] for photo in client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"]}
     assert names == {"second.jpg"}
 
 
@@ -201,7 +233,8 @@ def test_refresh_preserves_photo_state_after_move(client, tmp_path):
 
     refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh.status_code == 200
-    photos = refresh.get_json()["photos"]
+    storage.wait_for_scan(workspace["id"])
+    photos = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"]
     assert len(photos) == 1
     moved = photos[0]
     assert moved["relativePath"] == "renamed/sample.jpg"
@@ -224,7 +257,8 @@ def test_refresh_preserves_score_details_after_move(client, tmp_path):
 
     refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh.status_code == 200
-    moved = refresh.get_json()["photos"][0]
+    storage.wait_for_scan(workspace["id"])
+    moved = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
     row = db.fetch_photo(moved["id"])
     assert row["score"] == 76
     assert '"mode": "test"' in row["score_details"]
@@ -246,7 +280,8 @@ def test_refresh_preserves_dng_state_after_move(client, tmp_path, monkeypatch):
 
     refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh.status_code == 200
-    moved = refresh.get_json()["photos"][0]
+    storage.wait_for_scan(workspace["id"])
+    moved = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
     assert moved["relativePath"] == "renamed/sample.dng"
     row = db.fetch_photo(moved["id"])
     assert row["score"] == 77
@@ -294,7 +329,8 @@ def test_refresh_keeps_moved_removed_photo_hidden(client, tmp_path):
 
     refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh.status_code == 200
-    payload = refresh.get_json()
+    storage.wait_for_scan(workspace["id"])
+    payload = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()
     assert payload["photos"] == []
     assert payload["summary"]["excluded"] == 1
 
@@ -312,12 +348,15 @@ def test_remove_keeps_source_file_hidden_and_restore_returns_it(client, tmp_path
 
     refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
     assert refresh.status_code == 200
-    assert refresh.get_json()["photos"] == []
-    assert refresh.get_json()["summary"]["excluded"] == 1
+    storage.wait_for_scan(workspace["id"])
+    refreshed = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()
+    assert refreshed["photos"] == []
+    assert refreshed["summary"]["excluded"] == 1
 
     restore = client.post("/api/photos/restore", json={"workspace_id": workspace["id"]})
     assert restore.status_code == 200
     assert restore.get_json()["restored"] == 1
+    storage.wait_for_scan(workspace["id"])
 
     library = client.get(f"/api/library?workspace_id={workspace['id']}")
     assert len(library.get_json()["photos"]) == 1

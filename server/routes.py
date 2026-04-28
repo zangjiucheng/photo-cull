@@ -94,7 +94,7 @@ def remove_workspace(workspace_id):
 @bp.route("/workspaces/<workspace_id>/refresh", methods=["POST"])
 def refresh_workspace(workspace_id):
     try:
-        storage.scan_workspace(workspace_id, force_gc=True)
+        storage.start_workspace_scan(workspace_id)
     except storage.InvalidWorkspaceError as exc:
         return error_response(str(exc), 404)
     return jsonify(storage.build_library_payload(workspace_id))
@@ -124,7 +124,7 @@ def refresh_library():
     if not workspace_id:
         return error_response("workspace_id is required", 400)
     try:
-        storage.scan_workspace(str(workspace_id), force_gc=True)
+        storage.start_workspace_scan(str(workspace_id))
     except storage.InvalidWorkspaceError as exc:
         return error_response(str(exc), 404)
     return jsonify(storage.build_library_payload(str(workspace_id)))

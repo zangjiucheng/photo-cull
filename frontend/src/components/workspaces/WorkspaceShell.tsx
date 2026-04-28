@@ -16,7 +16,10 @@ interface WorkspaceShellProps {
   exportQueueCount: number;
   isRefreshing: boolean;
   isRescoring?: boolean;
-  scoringProgress?: {
+  backgroundProgress?: {
+    title: string;
+    state: "active" | "idle" | "error";
+    detail: string;
     completed: number;
     pending: number;
     processing: number;
@@ -38,7 +41,7 @@ export function WorkspaceShell({
   exportQueueCount,
   isRefreshing,
   isRescoring = false,
-  scoringProgress,
+  backgroundProgress,
   sidebar,
   children,
   inspector,
@@ -47,9 +50,9 @@ export function WorkspaceShell({
   onRefreshScores,
   onExportQueue
 }: WorkspaceShellProps) {
-  const isScoring = Boolean(scoringProgress && (scoringProgress.processing > 0 || scoringProgress.pending > 0));
-  const progressDegrees = scoringProgress ? Math.round((scoringProgress.percent / 100) * 360) : 0;
-  const scoringState = isScoring ? "active" : "idle";
+  const isActive = backgroundProgress?.state === "active";
+  const progressDegrees = backgroundProgress ? Math.round((backgroundProgress.percent / 100) * 360) : 0;
+  const progressState = backgroundProgress?.state ?? "idle";
 
   return (
     <div className="bridge-shell">
@@ -73,32 +76,32 @@ export function WorkspaceShell({
         <div className="bridge-actions">
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>{isRefreshing ? "Refreshing" : "Refresh"}</Button>
           <Button variant="default" size="sm" onClick={onExportQueue}>Export Queue ({exportQueueCount})</Button>
-          {scoringProgress ? (
+          {backgroundProgress ? (
             <div
-              className={`scoring-progress ${scoringState}`}
+              className={`scoring-progress ${progressState}`}
               style={{ "--progress-deg": `${progressDegrees}deg` } as CSSProperties}
-              aria-label={isScoring ? `Background scoring ${scoringProgress.percent}% complete` : "Background scoring idle"}
+              aria-label={isActive ? `${backgroundProgress.title} ${backgroundProgress.percent}% complete` : `${backgroundProgress.title} idle`}
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={scoringProgress.percent}
+              aria-valuenow={backgroundProgress.percent}
               tabIndex={0}
             >
               <span className="scoring-progress-ring">
-                <span>{scoringProgress.percent}</span>
+                <span>{backgroundProgress.percent}</span>
               </span>
               <div className="scoring-progress-popover" role="tooltip">
-                <strong>Background scoring</strong>
-                <span>{isScoring ? "Scoring in background" : "Idle"}</span>
-                <span>{scoringProgress.completed} of {scoringProgress.total} complete</span>
-                <span>{scoringProgress.processing} processing</span>
-                <span>{scoringProgress.pending} queued</span>
+                <strong>{backgroundProgress.title}</strong>
+                <span>{backgroundProgress.detail}</span>
+                <span>{backgroundProgress.completed} of {backgroundProgress.total} complete</span>
+                <span>{backgroundProgress.processing} processing</span>
+                <span>{backgroundProgress.pending} queued</span>
                 {onRefreshScores ? (
                   <button
                     className="scoring-progress-action"
                     type="button"
                     onClick={onRefreshScores}
-                    disabled={isRescoring || scoringProgress.total === 0}
+                    disabled={isRescoring || backgroundProgress.total === 0}
                   >
                     {isRescoring ? "Queueing..." : "Refresh AI Scores"}
                   </button>

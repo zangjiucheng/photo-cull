@@ -11,6 +11,15 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   const [pendingCount, setPendingCount] = useState(0);
   const [processingCount, setProcessingCount] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
+  const [indexing, setIndexing] = useState<NonNullable<LibraryPayload["summary"]["indexing"]>>({
+    active: false,
+    indexed: 0,
+    totalDiscovered: 0,
+    status: "idle",
+    startedAt: null,
+    finishedAt: null,
+    error: null
+  });
   const [isLibraryReady, setIsLibraryReady] = useState(false);
   const [isLibraryLoading, setIsLibraryLoading] = useState(false);
   const [activeFolderByWorkspace, setActiveFolderByWorkspace] = useState<Record<string, string>>({});
@@ -44,6 +53,15 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     setPendingCount(data.summary.pending);
     setProcessingCount(data.summary.processing);
     setExcludedCount(data.summary.excluded ?? 0);
+    setIndexing(data.summary.indexing ?? {
+      active: false,
+      indexed: 0,
+      totalDiscovered: 0,
+      status: "idle",
+      startedAt: null,
+      finishedAt: null,
+      error: null
+    });
     setActiveWorkspaceId(nextWorkspaceId);
 
     if (nextWorkspaceId) {
@@ -66,6 +84,8 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     const scoreMode = data.summary.scoreMode ? ` using ${data.summary.scoreMode}` : "";
     if (!nextWorkspaceId) {
       updateStatus("Open a folder to create a workspace.", "warn");
+    } else if (data.summary.indexing?.active) {
+      updateStatus(`Indexing workspace: ${data.summary.indexing.indexed} file(s) processed`, "busy");
     } else if (data.summary.processing > 0 || data.summary.pending > 0) {
       updateStatus(
         `Scoring in background${scoreMode}: ${data.summary.processing} processing, ${data.summary.pending} queued`,
@@ -97,6 +117,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     }
     const data = await refreshLibrary(activeWorkspaceId);
     applyLibraryPayload(data);
+    return data;
   }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
   const refreshScores = useCallback(async () => {
@@ -131,7 +152,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   }, [loadLibrary]);
 
   useEffect(() => {
-    if (pendingCount === 0 && processingCount === 0) {
+    if (!indexing.active && pendingCount === 0 && processingCount === 0) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -140,7 +161,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     return () => {
       window.clearInterval(timer);
     };
-  }, [loadLibrary, pendingCount, processingCount]);
+  }, [loadLibrary, indexing.active, pendingCount, processingCount]);
 
   return {
     workspaces,
@@ -151,6 +172,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     folders,
     pendingCount,
     processingCount,
+    indexing,
     excludedCount,
     isLibraryReady,
     isLibraryLoading,
