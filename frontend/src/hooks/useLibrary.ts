@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchWorkspaceLibrary, openWorkspace, refreshLibrary, restorePhotos } from "../api";
+import { fetchWorkspaceLibrary, openWorkspace, refreshLibrary, rescoreWorkspace, restorePhotos } from "../api";
 import { normalizeScores } from "../core";
 import type { LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
 
@@ -99,6 +99,16 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     applyLibraryPayload(data);
   }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
+  const refreshScores = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      updateStatus("Open a workspace before refreshing AI scores.", "warn");
+      return;
+    }
+    const data = await rescoreWorkspace(activeWorkspaceId);
+    applyLibraryPayload(data);
+    return data;
+  }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
+
   const openFolderWorkspace = useCallback(async (rootPath: string) => {
     const workspace = await openWorkspace(rootPath);
     setActiveWorkspaceId(workspace.id);
@@ -150,6 +160,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     setActiveId,
     loadLibrary,
     refresh,
+    refreshScores,
     openFolderWorkspace,
     restoreRemoved
   };

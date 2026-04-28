@@ -387,3 +387,17 @@ def restore_excluded(workspace_id: str, relative_paths: list[str] | None = None)
     restored_paths = db.restore_excluded(workspace_id, relative_paths)
     scan_workspace(workspace_id, force_gc=True)
     return {"restoredPaths": restored_paths, "restored": len(restored_paths)}
+
+
+def rescore_workspace(workspace_id: str) -> dict:
+    workspace = db.fetch_workspace(workspace_id)
+    if workspace is None:
+        raise InvalidWorkspaceError("Workspace not found")
+
+    rows = db.list_photos(workspace_id)
+    existing_rows = [row for row in rows if os.path.exists(resolve_disk_path(row["path"]))]
+    photo_ids = [row["id"] for row in existing_rows]
+    reset_count = db.reset_auto_scores(photo_ids)
+    for row in existing_rows:
+        scoring.enqueue_scoring(row["id"], row["path"])
+    return {"queued": len(existing_rows), "reset": reset_count}

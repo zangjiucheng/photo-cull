@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals, deletePhotos, exportPhotos, findSimilarPhotos, openWorkspace, restorePhotos } from "./api";
+import { apiInternals, deletePhotos, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -115,6 +115,24 @@ describe("api helpers", () => {
     const restored = await restorePhotos("ws1");
     expect(restored.restored).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/photos/restore", expect.objectContaining({ method: "POST" }));
+    vi.unstubAllGlobals();
+  });
+
+  it("requests a full workspace AI rescore", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      activeWorkspace: null,
+      workspaces: [],
+      folders: [],
+      photos: [],
+      summary: { pending: 0, processing: 0, done: 0, error: 0 }
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await rescoreWorkspace("ws1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspaces/ws1/rescore", expect.objectContaining({ method: "POST" }));
     vi.unstubAllGlobals();
   });
 });

@@ -35,6 +35,19 @@ function configureApplicationMenu() {
       ],
     }] : []),
     {
+      label: "File",
+      submenu: [
+        {
+          label: "Save Workspace File...",
+          accelerator: "CmdOrCtrl+S",
+          click: (_menuItem, browserWindow) => {
+            const targetWindow = browserWindow || BrowserWindow.getFocusedWindow();
+            targetWindow?.webContents.send("save-workspace-file-request");
+          },
+        },
+      ],
+    },
+    {
       label: "Edit",
       submenu: [
         { role: "undo" },
@@ -130,6 +143,44 @@ function startBackend() {
   });
 }
 
+function resolveWorkspaceFileRoot(workspaceFilePath) {
+  const fileDir = path.dirname(workspaceFilePath);
+  const raw = fs.readFileSync(workspaceFilePath, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error("Workspace file must be valid JSON");
+  }
+
+  const rootPath = parsed.rootPath
+    || parsed.root_path
+    || parsed.path
+    || (Array.isArray(parsed.folders) && parsed.folders[0]?.path);
+
+  if (typeof rootPath !== "string" || !rootPath.trim()) {
+    throw new Error("Workspace file must include rootPath or folders[0].path");
+  }
+
+  const expandedPath = rootPath.startsWith("~")
+    ? path.join(app.getPath("home"), rootPath.slice(1))
+    : rootPath;
+  const resolvedPath = path.resolve(fileDir, expandedPath);
+  const stat = fs.existsSync(resolvedPath) ? fs.statSync(resolvedPath) : null;
+  if (!stat || !stat.isDirectory()) {
+    throw new Error("Workspace file points to a folder that does not exist");
+  }
+  return resolvedPath;
+}
+
+function workspaceFileDefaultName(name) {
+  const safeName = String(name || "Workspace")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim() || "Workspace";
+  return `${safeName}.aiculling`;
+}
+
 async function createWindow() {
   configureApplicationMenu();
   startBackend();
@@ -161,6 +212,53 @@ ipcMain.handle("open-folder", async () => {
     properties: ["openDirectory"],
   });
   return result.canceled ? null : result.filePaths[0] || null;
+});
+
+ipcMain.handle("open-workspace-file", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [
+      { name: "Workspace Files", extensions: ["ai-culling-workspace", "aiculling", "code-workspace", "json"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+  return resolveWorkspaceFileRoot(result.filePaths[0]);
+});
+
+ipcMain.handle("save-workspace-file", async (_event, workspace) => {
+  if (!workspace || typeof workspace !== "object") {
+    throw new Error("No workspace provided");
+  }
+  if (typeof workspace.rootPath !== "string" || !workspace.rootPath) {
+    throw new Error("Workspace folder is missing");
+  }
+
+  const result = await dialog.showSaveDialog({
+    defaultPath: workspaceFileDefaultName(workspace.name),
+    filters: [
+      { name: "AI Culling Workspace", extensions: ["aiculling"] },
+      { name: "JSON", extensions: ["json"] },
+    ],
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  const targetPath = path.extname(result.filePath)
+    ? result.filePath
+    : `${result.filePath}.aiculling`;
+  const payload = {
+    version: 1,
+    app: appName,
+    name: typeof workspace.name === "string" ? workspace.name : "Workspace",
+    rootPath: workspace.rootPath,
+    folders: [{ path: workspace.rootPath }],
+  };
+  fs.writeFileSync(targetPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return targetPath;
 });
 
 ipcMain.handle("reveal-folder", async (_event, folderPath) => {

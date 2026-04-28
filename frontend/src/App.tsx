@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
@@ -30,6 +30,7 @@ export default function App() {
   const [statusText, setStatusText] = useState("Ready");
   const [statusTone, setStatusTone] = useState<StatusTone>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRescoring, setIsRescoring] = useState(false);
   const [exportQueues, setExportQueues] = useState<Record<string, string[]>>({});
   const [similarGroups, setSimilarGroups] = useState<SimilarGroup[]>([]);
   const [similarDeleteIds, setSimilarDeleteIds] = useState<Set<string>>(new Set());
@@ -52,6 +53,7 @@ export default function App() {
     setActiveId,
     loadLibrary,
     refresh,
+    refreshScores,
     activeWorkspace,
     activeWorkspaceId,
     setActiveWorkspaceId,
@@ -143,6 +145,58 @@ export default function App() {
       updateStatus(err instanceof Error ? err.message : "Failed to open folder", "error");
     }
   }
+
+  async function onOpenWorkspaceFile() {
+    updateStatus("Opening workspace file...", "busy");
+    try {
+      const selectedPath = window.aiCulling?.openWorkspaceFile
+        ? await window.aiCulling.openWorkspaceFile()
+        : window.prompt("Enter the workspace folder path referenced by the workspace file");
+      if (!selectedPath) {
+        updateStatus("Open workspace file cancelled.", "warn");
+        return;
+      }
+      const workspace = await openFolderWorkspace(selectedPath);
+      updateStatus(`Opened ${workspace.name}.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to open workspace file", "error");
+    }
+  }
+
+  const onSaveWorkspaceFile = useCallback(async () => {
+    if (!activeWorkspace) {
+      updateStatus("Open a workspace before saving a workspace file.", "warn");
+      return;
+    }
+    if (!window.aiCulling?.saveWorkspaceFile) {
+      updateStatus("Saving workspace files is only available in the desktop app.", "warn");
+      return;
+    }
+
+    updateStatus("Saving workspace file...", "busy");
+    try {
+      const savedPath = await window.aiCulling.saveWorkspaceFile({
+        name: activeWorkspace.name,
+        rootPath: activeWorkspace.rootPath
+      });
+      if (!savedPath) {
+        updateStatus("Save workspace file cancelled.", "warn");
+        return;
+      }
+      updateStatus(`Saved workspace file to ${savedPath}.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to save workspace file", "error");
+    }
+  }, [activeWorkspace, updateStatus]);
+
+  useEffect(() => {
+    if (!window.aiCulling?.onSaveWorkspaceFileRequest) {
+      return undefined;
+    }
+    return window.aiCulling.onSaveWorkspaceFileRequest(() => {
+      void onSaveWorkspaceFile();
+    });
+  }, [onSaveWorkspaceFile]);
 
   async function onRevealWorkspaceFolder() {
     if (!activeWorkspace) {
@@ -249,6 +303,28 @@ export default function App() {
       updateStatus(err instanceof Error ? err.message : "Refresh failed", "error");
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  async function onRefreshScores() {
+    if (!photos.length) {
+      updateStatus("No photos to rescore.", "warn");
+      return;
+    }
+    const confirmed = window.confirm(`Refresh AI scores for all ${photos.length} photo(s) in this workspace? Manual overrides and stars will stay.`);
+    if (!confirmed) {
+      return;
+    }
+
+    updateStatus("Refreshing all AI scores...", "busy");
+    setIsRescoring(true);
+    try {
+      const payload = await refreshScores();
+      updateStatus(`Queued ${payload?.rescore?.queued ?? photos.length} photo(s) for AI scoring.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to refresh AI scores", "error");
+    } finally {
+      setIsRescoring(false);
     }
   }
 
@@ -469,6 +545,7 @@ export default function App() {
         statusTone={statusTone}
         isLoading={!library.isLibraryReady || library.isLibraryLoading}
         onOpenFolder={() => void onOpenFolder()}
+        onOpenWorkspaceFile={() => void onOpenWorkspaceFile()}
         onWorkspaceChange={(workspaceId) => {
           setActiveWorkspaceId(workspaceId);
           void loadLibrary(workspaceId);
@@ -483,6 +560,7 @@ export default function App() {
       currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
       exportQueueCount={exportQueueList.length}
       isRefreshing={isRefreshing}
+      isRescoring={isRescoring}
       scoringProgress={{
         completed: completedCount,
         pending: library.pendingCount,
@@ -492,6 +570,7 @@ export default function App() {
       }}
       onTabChange={setActiveTab}
       onRefresh={() => void onRefresh()}
+      onRefreshScores={() => void onRefreshScores()}
       onExportQueue={() => void onExport()}
       sidebar={
         <>

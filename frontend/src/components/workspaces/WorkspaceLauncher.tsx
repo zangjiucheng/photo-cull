@@ -7,12 +7,8 @@ interface WorkspaceLauncherProps {
   statusTone: StatusTone;
   isLoading: boolean;
   onOpenFolder: () => void;
+  onOpenWorkspaceFile: () => void;
   onWorkspaceChange: (workspaceId: string) => void;
-}
-
-function formatScanState(workspace: PhotoWorkspace): string {
-  if (!workspace.lastScannedAt) return "Not scanned yet";
-  return "Recently indexed";
 }
 
 export function WorkspaceLauncher({
@@ -21,6 +17,7 @@ export function WorkspaceLauncher({
   statusTone,
   isLoading,
   onOpenFolder,
+  onOpenWorkspaceFile,
   onWorkspaceChange
 }: WorkspaceLauncherProps) {
   return (
@@ -34,7 +31,7 @@ export function WorkspaceLauncher({
           <div className="welcome-section">
             <h2>Start</h2>
             <button className="welcome-action primary" onClick={onOpenFolder}>Open Folder...</button>
-            <button className="welcome-action" disabled>Open Workspace File...</button>
+            <button className="welcome-action" onClick={onOpenWorkspaceFile}>Open Workspace File...</button>
           </div>
           <div className="welcome-section">
             <h2>Recent</h2>
@@ -68,18 +65,6 @@ export function WorkspaceLauncher({
             <strong>Folder workspaces</strong>
             <p>Open a local folder to index photos in place. Ratings, similarity groups, and export queues stay scoped to that workspace.</p>
             <button className="welcome-card-action" onClick={onOpenFolder}>Open Folder</button>
-          </div>
-          <div className="welcome-grid">
-            <article>
-              <span>Storage</span>
-              <strong>No copy import</strong>
-              <p>Original files remain in their folder. Removed photos are hidden from the library and can be restored.</p>
-            </article>
-            <article>
-              <span>Recent</span>
-              <strong>{workspaces.length} workspace(s)</strong>
-              <p>{workspaces[0] ? `${workspaces[0].name} - ${formatScanState(workspaces[0])}` : "Open a folder to create your first workspace."}</p>
-            </article>
           </div>
         </section>
       </section>

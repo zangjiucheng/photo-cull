@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 import time
 from collections.abc import Iterable
@@ -68,6 +69,7 @@ def init_db() -> None:
                 size INTEGER NOT NULL,
                 content_hash TEXT,
                 score REAL,
+                score_details TEXT,
                 manual_score REAL,
                 rating INTEGER,
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -78,6 +80,12 @@ def init_db() -> None:
             )
             """
         )
+        photos_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(photos)").fetchall()
+        }
+        if "score_details" not in photos_columns:
+            conn.execute("ALTER TABLE photos ADD COLUMN score_details TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS excluded_photos (
@@ -304,9 +312,9 @@ def insert_or_update_photo(
                 """
                 INSERT INTO photos (
                     id, workspace_id, name, path, relative_path, folder, folder_path,
-                    mtime, size, content_hash, score, status, error, created_at, updated_at
+                    mtime, size, content_hash, score, score_details, status, error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?)
                 """,
                 (
                     photo_id,
@@ -337,7 +345,7 @@ def insert_or_update_photo(
 
         if row["content_hash"] != content_hash and row["status"] != "processing":
             conn.execute(
-                "UPDATE photos SET score = NULL, status = 'pending', error = NULL, updated_at = ? WHERE id = ?",
+                "UPDATE photos SET score = NULL, score_details = NULL, status = 'pending', error = NULL, updated_at = ? WHERE id = ?",
                 (now, photo_id),
             )
             return "pending"
@@ -386,12 +394,26 @@ def mark_processing(photo_id: str) -> None:
         )
 
 
-def mark_done(photo_id: str, score_value: float) -> None:
+def mark_done(photo_id: str, score_value: float, score_details: Any | None = None) -> None:
+    details_json = json.dumps(score_details, sort_keys=True) if score_details is not None else None
     with connect() as conn:
         conn.execute(
-            "UPDATE photos SET score = ?, status = 'done', error = NULL, updated_at = ? WHERE id = ?",
-            (round(float(score_value), 2), time.time(), photo_id),
+            "UPDATE photos SET score = ?, score_details = ?, status = 'done', error = NULL, updated_at = ? WHERE id = ?",
+            (round(float(score_value), 2), details_json, time.time(), photo_id),
         )
+
+
+def reset_auto_scores(photo_ids: Iterable[str]) -> int:
+    ids = list(dict.fromkeys(photo_ids))
+    if not ids:
+        return 0
+    now = time.time()
+    with connect() as conn:
+        conn.executemany(
+            "UPDATE photos SET score = NULL, score_details = NULL, status = 'pending', error = NULL, updated_at = ? WHERE id = ?",
+            [(now, photo_id) for photo_id in ids],
+        )
+        return conn.total_changes
 
 
 def mark_error(photo_id: str, message: object) -> None:

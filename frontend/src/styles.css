@@ -119,12 +119,22 @@ body {
   line-height: 1;
 }
 
+.scoring-progress.idle .scoring-progress-ring {
+  background:
+    radial-gradient(circle at center, #1f242b 0 52%, transparent 53%),
+    conic-gradient(#8b96a3 var(--progress-deg), #3a424d 0);
+}
+
+.scoring-progress.idle .scoring-progress-ring span {
+  color: #c8d0d8;
+}
+
 .scoring-progress-popover {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
   z-index: 20;
-  min-width: 190px;
+  min-width: 210px;
   display: grid;
   gap: 4px;
   padding: 10px 11px;
@@ -150,12 +160,35 @@ body {
   font-size: 0.72rem;
 }
 
+.scoring-progress-action {
+  height: 28px;
+  margin-top: 6px;
+  border: 1px solid #566171;
+  border-radius: 6px;
+  background: #2b323b;
+  color: #f2f6fa;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.scoring-progress-action:hover:not(:disabled) {
+  background: #36404c;
+  border-color: #6c798c;
+}
+
+.scoring-progress-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .scoring-progress:hover .scoring-progress-popover,
 .scoring-progress:focus-visible .scoring-progress-popover,
 .scoring-progress:focus-within .scoring-progress-popover {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+  pointer-events: auto;
 }
 
 .toolbar-upload {
@@ -350,41 +383,6 @@ body {
 
 .welcome-card-action:hover {
   background: #128da8;
-}
-
-.welcome-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.welcome-grid article {
-  display: grid;
-  gap: 6px;
-  padding: 14px;
-  border: 1px solid #303742;
-  border-radius: 6px;
-  background: #1f242b;
-}
-
-.welcome-grid span {
-  color: #8f99a7;
-  font-size: 0.72rem;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.welcome-grid strong {
-  color: #eef3f7;
-}
-
-.welcome-grid p {
-  margin: 0;
-  color: #9ea8b3;
-  font-size: 0.82rem;
-  line-height: 1.4;
 }
 
 .workspace-control-panel {
@@ -738,8 +736,7 @@ body {
     font-size: 2.15rem;
   }
 
-  .welcome-card,
-  .welcome-grid {
+  .welcome-card {
     grid-template-columns: 1fr;
   }
 

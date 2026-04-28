@@ -72,3 +72,12 @@ def test_migrate_legacy_db_moves_repo_database(tmp_path):
     assert moved_from == str(legacy)
     assert target.read_bytes() == b"legacy-db"
     assert not legacy.exists()
+
+
+def test_init_db_adds_score_details_column(tmp_path):
+    configure_tmp(tmp_path)
+
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
+
+    assert "score_details" in columns

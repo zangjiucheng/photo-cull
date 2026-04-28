@@ -100,6 +100,17 @@ def refresh_workspace(workspace_id):
     return jsonify(storage.build_library_payload(workspace_id))
 
 
+@bp.route("/workspaces/<workspace_id>/rescore", methods=["POST"])
+def rescore_workspace(workspace_id):
+    try:
+        result = storage.rescore_workspace(workspace_id)
+    except storage.InvalidWorkspaceError as exc:
+        return error_response(str(exc), 404)
+    payload = storage.build_library_payload(workspace_id)
+    payload["rescore"] = result
+    return jsonify(payload)
+
+
 @bp.route("/library", methods=["GET"])
 def library():
     workspace_id = request.args.get("workspace_id")

@@ -53,6 +53,10 @@ export interface LibraryPayload {
     scoreMode?: string;
     excluded?: number;
   };
+  rescore?: {
+    queued: number;
+    reset: number;
+  };
 }
 
 export interface SimilarGroupPayload {

@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from server import create_app
+from server import db
 from server.config import AppConfig
 
 
@@ -157,6 +158,51 @@ def test_refresh_preserves_photo_state_after_move(client, tmp_path):
     assert moved["rating"] == 4
     assert moved["manualScore"] == 91
     assert moved["id"] != photo["id"]
+
+
+def test_refresh_preserves_score_details_after_move(client, tmp_path):
+    source = tmp_path / "source"
+    first_path = make_image(source / "set" / "sample.jpg")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    db.mark_done(photo["id"], 76, {"mode": "test", "metrics": {"fake": {"raw": 1}}})
+
+    moved_path = source / "renamed" / "sample.jpg"
+    moved_path.parent.mkdir()
+    first_path.rename(moved_path)
+
+    refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
+    assert refresh.status_code == 200
+    moved = refresh.get_json()["photos"][0]
+    row = db.fetch_photo(moved["id"])
+    assert row["score"] == 76
+    assert '"mode": "test"' in row["score_details"]
+
+
+def test_rescore_workspace_resets_auto_scores_and_preserves_manual_state(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "sample.jpg")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    db.mark_done(photo["id"], 76, {"mode": "old"})
+    client.patch(f"/api/photos/{photo['id']}/rating", json={"rating": 5})
+    client.patch(f"/api/photos/{photo['id']}/score", json={"manual_score": 91})
+    queued = []
+    monkeypatch.setattr("server.scoring.enqueue_scoring", lambda photo_id, path: queued.append((photo_id, path)))
+
+    response = client.post(f"/api/workspaces/{workspace['id']}/rescore")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rescore"]["queued"] == 1
+    assert payload["summary"]["pending"] == 1
+    assert queued == [(photo["id"], str(source / "sample.jpg"))]
+    refreshed = payload["photos"][0]
+    assert refreshed["score"] is None
+    assert refreshed["manualScore"] == 91
+    assert refreshed["rating"] == 5
+    row = db.fetch_photo(photo["id"])
+    assert row["score_details"] is None
 
 
 def test_refresh_keeps_moved_removed_photo_hidden(client, tmp_path):

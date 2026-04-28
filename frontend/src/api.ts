@@ -66,6 +66,16 @@ export async function refreshLibrary(workspaceId: string): Promise<LibraryPayloa
   return data;
 }
 
+export async function rescoreWorkspace(workspaceId: string): Promise<LibraryPayload> {
+  const data = await requestJson<LibraryPayload>(`/api/workspaces/${encodeURIComponent(workspaceId)}/rescore`, {
+    method: "POST"
+  }, "Failed to refresh AI scores");
+  if (!data || !("folders" in data) || !("photos" in data)) {
+    throw new Error("Failed to refresh AI scores");
+  }
+  return data;
+}
+
 export async function fetchWorkspaces(): Promise<PhotoWorkspace[]> {
   const data = await requestJson<{ workspaces: PhotoWorkspace[] }>("/api/workspaces", undefined, "Failed to load workspaces");
   return Array.isArray(data.workspaces) ? data.workspaces : [];
