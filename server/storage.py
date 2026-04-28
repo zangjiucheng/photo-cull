@@ -14,7 +14,7 @@ from PIL import Image, UnidentifiedImageError
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-from . import db, raw_pipeline, scoring
+from . import db, events, raw_pipeline, scoring
 from .config import ALLOWED_EXTS, AppConfig
 
 
@@ -179,12 +179,19 @@ def _set_scan_state(workspace_id: str, **updates) -> None:
     with _scan_lock:
         state = _scan_jobs.setdefault(workspace_id, _idle_scan_state())
         state.update(updates)
+    events.publish("library:update", workspace_id, {"source": "indexing", "status": updates.get("status")})
 
 
 def _increment_scan_state(workspace_id: str, key: str, amount: int = 1) -> None:
+    should_publish = False
     with _scan_lock:
         state = _scan_jobs.setdefault(workspace_id, _idle_scan_state())
         state[key] = int(state.get(key) or 0) + amount
+        if key == "indexed":
+            indexed = int(state.get("indexed") or 0)
+            should_publish = indexed <= 5 or indexed % 10 == 0 or indexed >= int(state.get("totalDiscovered") or 0)
+    if should_publish:
+        events.publish("library:update", workspace_id, {"source": "indexing", "status": "indexing"})
 
 
 def _run_scan_job(workspace_id: str) -> None:
@@ -224,6 +231,7 @@ def start_workspace_scan(workspace_id: str) -> dict:
             "error": None,
         }
     _scan_executor.submit(_run_scan_job, workspace_id)
+    events.publish("library:update", workspace_id, {"source": "indexing", "status": "indexing"})
     return get_scan_state(workspace_id)
 
 

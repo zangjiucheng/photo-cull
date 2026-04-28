@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWorkspaceLibrary, openWorkspace, refreshLibrary, rescoreWorkspace, restorePhotos } from "../api";
 import { normalizeScores } from "../core";
 import type { LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
@@ -22,6 +22,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   });
   const [isLibraryReady, setIsLibraryReady] = useState(false);
   const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+  const observerRefreshTimer = useRef<number | null>(null);
   const [activeFolderByWorkspace, setActiveFolderByWorkspace] = useState<Record<string, string>>({});
   const [activeIdByWorkspace, setActiveIdByWorkspace] = useState<Record<string, string | null>>({});
 
@@ -162,6 +163,30 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
       window.clearInterval(timer);
     };
   }, [loadLibrary, indexing.active, pendingCount, processingCount]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || typeof EventSource === "undefined") {
+      return undefined;
+    }
+    const source = new EventSource(`/api/events?workspace_id=${encodeURIComponent(activeWorkspaceId)}`);
+    const scheduleRefresh = () => {
+      if (observerRefreshTimer.current !== null) {
+        return;
+      }
+      observerRefreshTimer.current = window.setTimeout(() => {
+        observerRefreshTimer.current = null;
+        void loadLibrary(activeWorkspaceId);
+      }, 150);
+    };
+    source.addEventListener("library:update", scheduleRefresh);
+    return () => {
+      source.close();
+      if (observerRefreshTimer.current !== null) {
+        window.clearTimeout(observerRefreshTimer.current);
+        observerRefreshTimer.current = null;
+      }
+    };
+  }, [activeWorkspaceId, loadLibrary]);
 
   return {
     workspaces,

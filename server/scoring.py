@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from . import db, raw_pipeline
+from . import db, events, raw_pipeline
 from .config import AppConfig
 
 
@@ -256,8 +256,12 @@ def score_image(path: str) -> float:
 
 
 def score_job(photo_id: str, path: str) -> None:
+    workspace_id = None
     try:
         db.mark_processing(photo_id)
+        row = db.fetch_photo(photo_id)
+        workspace_id = row["workspace_id"] if row else None
+        events.publish("library:update", workspace_id, {"source": "scoring", "photoId": photo_id, "status": "processing"})
         scoring_path = raw_pipeline.ensure_display_image(path)
         score_value, score_details = score_image_multi(scoring_path)
         db.mark_done(photo_id, score_value, score_details)
@@ -266,6 +270,10 @@ def score_job(photo_id: str, path: str) -> None:
     finally:
         with _jobs_lock:
             _running_jobs.discard(photo_id)
+        if workspace_id is None:
+            row = db.fetch_photo(photo_id)
+            workspace_id = row["workspace_id"] if row else None
+        events.publish("library:update", workspace_id, {"source": "scoring", "photoId": photo_id, "status": "done"})
 
 
 def enqueue_scoring(photo_id: str, path: str) -> None:
@@ -273,6 +281,8 @@ def enqueue_scoring(photo_id: str, path: str) -> None:
         if photo_id in _running_jobs:
             return
         _running_jobs.add(photo_id)
+    row = db.fetch_photo(photo_id)
+    events.publish("library:update", row["workspace_id"] if row else None, {"source": "scoring", "photoId": photo_id, "status": "queued"})
     _executor.submit(score_job, photo_id, path)
 
 

@@ -119,6 +119,7 @@ def test_index_workspace_file_inserts_and_reuses_record(tmp_path):
     workspace_root = tmp_path / "source"
     workspace_root.mkdir()
     workspace = storage.create_workspace(str(workspace_root))
+    storage.wait_for_scan(workspace["id"])
     image_path = workspace_root / "set" / "photo.jpg"
     make_image(image_path)
 

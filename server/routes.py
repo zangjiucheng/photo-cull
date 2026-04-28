@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 
-from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
+from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from . import db, scoring, similarity, storage
+from . import db, events, scoring, similarity, storage
 
 
 bp = Blueprint("api", __name__)
@@ -65,6 +65,12 @@ def health():
             "runningJobs": scoring.running_count(),
         }
     )
+
+
+@bp.route("/events", methods=["GET"])
+def event_stream():
+    workspace_id = request.args.get("workspace_id")
+    return Response(events.stream(workspace_id), mimetype="text/event-stream")
 
 
 @bp.route("/workspaces", methods=["GET"])
