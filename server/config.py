@@ -44,6 +44,13 @@ def resolve_upload_folder() -> str:
     return os.getenv("UPLOAD_FOLDER", "uploads")
 
 
+def resolve_render_cache_folder() -> str:
+    configured = os.getenv("RAW_RENDER_CACHE")
+    if configured:
+        return configured
+    return os.path.join(os.path.dirname(resolve_db_path()), "renders")
+
+
 def resolve_gc_interval_seconds() -> int:
     return int(os.getenv("GC_INTERVAL_SECONDS", "300"))
 
@@ -59,10 +66,18 @@ def resolve_score_workers() -> int:
 @dataclass(frozen=True)
 class AppConfig:
     upload_folder: str = field(default_factory=resolve_upload_folder)
+    render_cache_folder: str = field(default_factory=resolve_render_cache_folder)
     db_path: str = field(default_factory=resolve_db_path)
     gc_interval_seconds: int = field(default_factory=resolve_gc_interval_seconds)
     max_content_length: int = field(default_factory=resolve_max_content_length)
     score_workers: int = field(default_factory=resolve_score_workers)
 
+    def __post_init__(self) -> None:
+        if os.getenv("RAW_RENDER_CACHE"):
+            return
+        default_cache = resolve_render_cache_folder()
+        if self.render_cache_folder == default_cache:
+            object.__setattr__(self, "render_cache_folder", os.path.join(os.path.dirname(self.db_path), "renders"))
 
-ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+
+ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".dng"}

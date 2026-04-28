@@ -1,10 +1,12 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
 from server.config import AppConfig, migrate_legacy_db, resolve_db_path
 from server import db, storage
+from server import raw_pipeline
 
 
 def configure_tmp(tmp_path: Path) -> AppConfig:
@@ -20,9 +22,38 @@ def make_image(path: Path) -> None:
     Image.new("RGB", (8, 8), "red").save(path)
 
 
+def fake_rawpy(monkeypatch):
+    from io import BytesIO
+
+    thumb_buffer = BytesIO()
+    Image.new("RGB", (12, 8), "green").save(thumb_buffer, format="JPEG")
+
+    class FakeRaw:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            return False
+
+        def extract_thumb(self):
+            return SimpleNamespace(format="jpeg", data=thumb_buffer.getvalue())
+
+        def postprocess(self, **_kwargs):
+            raise AssertionError("embedded thumbnail should be preferred")
+
+    module = SimpleNamespace(
+        ThumbFormat=SimpleNamespace(JPEG="jpeg", BITMAP="bitmap"),
+        imread=lambda _path: FakeRaw(),
+    )
+    monkeypatch.setattr(raw_pipeline.importlib.util, "find_spec", lambda name: object() if name == "rawpy" else None)
+    monkeypatch.setattr(raw_pipeline.importlib, "import_module", lambda name: module if name == "rawpy" else __import__(name))
+    return module
+
+
 def test_allowed_image_extensions():
     assert storage.allowed_image("frame.JPG")
     assert storage.allowed_image("frame.webp")
+    assert storage.allowed_image("frame.dng")
     assert not storage.allowed_image("frame.txt")
 
 
@@ -32,6 +63,35 @@ def test_validate_image_file_rejects_invalid_file(tmp_path):
 
     with pytest.raises(storage.InvalidImageError):
         storage.validate_image_file(str(bad))
+
+
+def test_validate_dng_file_renders_cached_display_image(tmp_path, monkeypatch):
+    config = configure_tmp(tmp_path)
+    fake_rawpy(monkeypatch)
+    raw_path = tmp_path / "sample.dng"
+    raw_path.write_bytes(b"fake-dng")
+
+    storage.validate_image_file(str(raw_path))
+
+    cached = raw_pipeline.ensure_display_image(str(raw_path))
+    assert Path(cached).parent == Path(config.render_cache_folder)
+    assert Path(cached).suffix == ".jpg"
+    with Image.open(cached) as img:
+        assert img.format == "JPEG"
+
+
+def test_validate_dng_file_fails_cleanly_without_rawpy(tmp_path, monkeypatch):
+    configure_tmp(tmp_path)
+    raw_path = tmp_path / "sample.dng"
+    raw_path.write_bytes(b"fake-dng")
+    jpg_path = tmp_path / "sample.jpg"
+    make_image(jpg_path)
+    monkeypatch.setattr(raw_pipeline.importlib.util, "find_spec", lambda name: None if name == "rawpy" else object())
+
+    with pytest.raises(storage.InvalidImageError):
+        storage.validate_image_file(str(raw_path))
+
+    storage.validate_image_file(str(jpg_path))
 
 
 def test_index_workspace_file_inserts_and_reuses_record(tmp_path):
@@ -50,6 +110,24 @@ def test_index_workspace_file_inserts_and_reuses_record(tmp_path):
     record_again, state_again = storage.index_workspace_file(workspace["id"], str(image_path))
     assert state_again == "pending"
     assert record_again["id"] == record["id"]
+
+
+def test_scan_dng_queues_cached_display_image_for_scoring(tmp_path, monkeypatch):
+    config = configure_tmp(tmp_path)
+    fake_rawpy(monkeypatch)
+    queued = []
+    monkeypatch.setattr("server.scoring.enqueue_scoring", lambda photo_id, path: queued.append((photo_id, path)))
+    workspace_root = tmp_path / "source"
+    dng_path = workspace_root / "photo.dng"
+    dng_path.parent.mkdir()
+    dng_path.write_bytes(b"fake-dng")
+
+    workspace = storage.create_workspace(str(workspace_root))
+
+    assert workspace["id"]
+    assert len(queued) == 1
+    assert Path(queued[0][1]).parent == Path(config.render_cache_folder)
+    assert Path(queued[0][1]).suffix == ".jpg"
 
 
 def test_default_db_path_uses_application_support(monkeypatch, tmp_path):

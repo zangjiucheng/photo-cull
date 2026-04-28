@@ -162,7 +162,10 @@ def uploaded_image(photo_id):
     photo = db.fetch_photo(photo_id)
     if not photo:
         abort(404)
-    path = storage.resolve_disk_path(photo["path"])
+    try:
+        path = storage.display_path_for_photo_row(photo)
+    except storage.InvalidImageError:
+        abort(404)
     if not os.path.exists(path):
         abort(404)
     return send_file(path)

@@ -13,7 +13,7 @@ from PIL import Image, UnidentifiedImageError
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-from . import db, scoring
+from . import db, raw_pipeline, scoring
 from .config import ALLOWED_EXTS, AppConfig
 
 
@@ -34,6 +34,7 @@ def configure(config: AppConfig) -> None:
     global _config
     _config = config
     os.makedirs(_config.upload_folder, exist_ok=True)
+    raw_pipeline.configure(config)
 
 
 def allowed_image(filename: str) -> bool:
@@ -42,11 +43,35 @@ def allowed_image(filename: str) -> bool:
 
 
 def validate_image_file(path: str) -> None:
+    if raw_pipeline.is_raw_image(path):
+        try:
+            raw_pipeline.validate_image_file(path)
+        except raw_pipeline.InvalidRawImageError as exc:
+            raise InvalidImageError("File is not a valid image") from exc
+        return
+
     try:
         with Image.open(path) as img:
             img.verify()
     except (UnidentifiedImageError, OSError) as exc:
         raise InvalidImageError("File is not a valid image") from exc
+
+
+def display_path_for_photo_row(row) -> str:
+    try:
+        return raw_pipeline.display_path_for_row(row)
+    except raw_pipeline.InvalidRawImageError as exc:
+        raise InvalidImageError("File is not a valid image") from exc
+
+
+def _enqueue_photo_scoring(row) -> bool:
+    try:
+        scoring_path = display_path_for_photo_row(row)
+    except InvalidImageError as exc:
+        db.mark_error(row["id"], exc)
+        return False
+    scoring.enqueue_scoring(row["id"], scoring_path)
+    return True
 
 
 def resolve_disk_path(path: str) -> str:
@@ -239,7 +264,9 @@ def save_upload(file_obj: FileStorage) -> dict | None:
 
     if record is None:
         return None
-    scoring.enqueue_scoring(record["id"], record["path"])
+    row = db.fetch_photo(record["id"])
+    if row:
+        _enqueue_photo_scoring(row)
     return record
 
 
@@ -305,7 +332,9 @@ def scan_workspace(workspace_id: str, force_gc: bool = False) -> None:
             except InvalidImageError:
                 continue
             if record and state in {"inserted", "pending"}:
-                scoring.enqueue_scoring(record["id"], record["path"])
+                row = db.fetch_photo(record["id"])
+                if row:
+                    _enqueue_photo_scoring(row)
     missing_ids = collect_missing_photo_ids(workspace_id)
     if missing_ids:
         removed = db.delete_photos(missing_ids)
@@ -398,6 +427,8 @@ def rescore_workspace(workspace_id: str) -> dict:
     existing_rows = [row for row in rows if os.path.exists(resolve_disk_path(row["path"]))]
     photo_ids = [row["id"] for row in existing_rows]
     reset_count = db.reset_auto_scores(photo_ids)
+    queued_count = 0
     for row in existing_rows:
-        scoring.enqueue_scoring(row["id"], row["path"])
-    return {"queued": len(existing_rows), "reset": reset_count}
+        if _enqueue_photo_scoring(row):
+            queued_count += 1
+    return {"queued": queued_count, "reset": reset_count}

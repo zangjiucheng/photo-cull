@@ -118,15 +118,16 @@ def load_candidates(workspace_id: str | None = None, folder_path: str | None = N
         if not os.path.exists(path):
             continue
         try:
+            display_path = storage.display_path_for_photo_row(row)
             candidates.append(
                 PhotoCandidate(
                     row=row,
-                    path=path,
-                    metadata=extract_metadata(row, path),
-                    phash=perceptual_hash(path),
+                    path=display_path,
+                    metadata=extract_metadata(row, display_path),
+                    phash=perceptual_hash(display_path),
                 )
             )
-        except OSError:
+        except (OSError, storage.InvalidImageError):
             continue
     return candidates
 

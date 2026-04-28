@@ -1,11 +1,12 @@
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
 from PIL import Image
 
 from server import create_app
-from server import db
+from server import db, raw_pipeline
 from server.config import AppConfig
 
 
@@ -22,6 +23,34 @@ def make_image(path: Path, color: str = "blue") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (8, 8), color).save(path)
     return path
+
+
+def fake_rawpy(monkeypatch):
+    from io import BytesIO
+
+    thumb_buffer = BytesIO()
+    Image.new("RGB", (12, 8), "green").save(thumb_buffer, format="JPEG")
+
+    class FakeRaw:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            return False
+
+        def extract_thumb(self):
+            return SimpleNamespace(format="jpeg", data=thumb_buffer.getvalue())
+
+        def postprocess(self, **_kwargs):
+            raise AssertionError("embedded thumbnail should be preferred")
+
+    module = SimpleNamespace(
+        ThumbFormat=SimpleNamespace(JPEG="jpeg", BITMAP="bitmap"),
+        imread=lambda _path: FakeRaw(),
+    )
+    monkeypatch.setattr(raw_pipeline.importlib.util, "find_spec", lambda name: object() if name == "rawpy" else None)
+    monkeypatch.setattr(raw_pipeline.importlib, "import_module", lambda name: module if name == "rawpy" else __import__(name))
+    return module
 
 
 def open_workspace(client, root: Path):
@@ -98,6 +127,28 @@ def test_rating_score_image_and_export(client, tmp_path):
     export = client.post("/api/photos/export", json={"selected_ids": [photo["id"]]})
     assert export.status_code == 200
     assert export.headers["Content-Type"].startswith("application/zip")
+
+
+def test_dng_preview_uses_cached_jpeg_and_export_keeps_original(client, tmp_path, monkeypatch):
+    fake_rawpy(monkeypatch)
+    source = tmp_path / "source"
+    dng_path = source / "sample.dng"
+    dng_path.parent.mkdir()
+    dng_path.write_bytes(b"fake-dng")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+
+    image = client.get(f"/api/photos/{photo['id']}/image")
+    assert image.status_code == 200
+    assert image.headers["Content-Type"].startswith("image/jpeg")
+
+    export = client.post("/api/photos/export", json={"selected_ids": [photo["id"]]})
+    assert export.status_code == 200
+    archive_path = tmp_path / "selected.zip"
+    archive_path.write_bytes(export.data)
+    with ZipFile(archive_path) as zip_file:
+        assert zip_file.namelist() == ["sample.dng"]
+        assert zip_file.read("sample.dng") == b"fake-dng"
 
 
 def test_multiple_workspaces_isolate_same_relative_path(client, tmp_path):
@@ -177,6 +228,29 @@ def test_refresh_preserves_score_details_after_move(client, tmp_path):
     row = db.fetch_photo(moved["id"])
     assert row["score"] == 76
     assert '"mode": "test"' in row["score_details"]
+
+
+def test_refresh_preserves_dng_state_after_move(client, tmp_path, monkeypatch):
+    fake_rawpy(monkeypatch)
+    source = tmp_path / "source"
+    first_path = source / "set" / "sample.dng"
+    first_path.parent.mkdir(parents=True)
+    first_path.write_bytes(b"fake-dng")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    db.mark_done(photo["id"], 77, {"mode": "dng"})
+
+    moved_path = source / "renamed" / "sample.dng"
+    moved_path.parent.mkdir()
+    first_path.rename(moved_path)
+
+    refresh = client.post(f"/api/workspaces/{workspace['id']}/refresh")
+    assert refresh.status_code == 200
+    moved = refresh.get_json()["photos"][0]
+    assert moved["relativePath"] == "renamed/sample.dng"
+    row = db.fetch_photo(moved["id"])
+    assert row["score"] == 77
+    assert '"mode": "dng"' in row["score_details"]
 
 
 def test_rescore_workspace_resets_auto_scores_and_preserves_manual_state(client, tmp_path, monkeypatch):
@@ -272,6 +346,20 @@ def test_similar_detection_uses_workspace_scope(client, tmp_path):
 
     invalid_scope = client.get(f"/api/photos/similar?workspace_id={first['id']}&scope=bad")
     assert invalid_scope.status_code == 400
+
+
+def test_similarity_uses_cached_display_image_for_dng(client, tmp_path, monkeypatch):
+    fake_rawpy(monkeypatch)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "a.dng").write_bytes(b"fake-dng-a")
+    (source / "b.dng").write_bytes(b"fake-dng-b")
+    workspace = open_workspace(client, source)
+
+    similar = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")
+
+    assert similar.status_code == 200
+    assert similar.get_json()["groups"]
 
 
 def test_invalid_score_and_missing_photo(client):
