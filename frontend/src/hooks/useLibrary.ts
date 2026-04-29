@@ -121,6 +121,19 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     return data;
   }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
+  const activateWorkspace = useCallback(async (workspaceId: string) => {
+    setActiveWorkspaceId(workspaceId);
+    setIsLibraryLoading(true);
+    try {
+      applyLibraryPayload(await refreshLibrary(workspaceId));
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to sync workspace", "error");
+    } finally {
+      setIsLibraryReady(true);
+      setIsLibraryLoading(false);
+    }
+  }, [applyLibraryPayload, setActiveWorkspaceId, updateStatus]);
+
   const refreshScores = useCallback(async () => {
     if (!activeWorkspaceId) {
       updateStatus("Open a workspace before refreshing AI scores.", "warn");
@@ -207,6 +220,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     setActiveId,
     loadLibrary,
     refresh,
+    activateWorkspace,
     refreshScores,
     openFolderWorkspace,
     restoreRemoved

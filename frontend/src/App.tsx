@@ -53,10 +53,10 @@ export default function App() {
     setActiveId,
     loadLibrary,
     refresh,
+    activateWorkspace,
     refreshScores,
     activeWorkspace,
     activeWorkspaceId,
-    setActiveWorkspaceId,
     openFolderWorkspace,
     restoreRemoved,
     excludedCount
@@ -553,8 +553,7 @@ export default function App() {
             void onOpenFolder();
             return;
           }
-          setActiveWorkspaceId(selectedValue);
-          void loadLibrary(selectedValue);
+          void activateWorkspace(selectedValue);
         }}
         aria-label="Photo workspace"
       >
@@ -583,8 +582,7 @@ export default function App() {
         onOpenFolder={() => void onOpenFolder()}
         onOpenWorkspaceFile={() => void onOpenWorkspaceFile()}
         onWorkspaceChange={(workspaceId) => {
-          setActiveWorkspaceId(workspaceId);
-          void loadLibrary(workspaceId);
+          void activateWorkspace(workspaceId);
         }}
       />
     );
