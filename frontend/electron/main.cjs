@@ -1,5 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
@@ -20,9 +20,23 @@ const pythonBin = process.env.PYTHON || "python3";
 const backendEntry = process.env.BACKEND_ENTRY
   ? path.resolve(repoRoot, process.env.BACKEND_ENTRY)
   : path.join(repoRoot, "app.py");
+const runtimeSourcePath = isPackaged ? path.join(process.resourcesPath, "runtime-source") : repoRoot;
 const appIconPath = path.join(__dirname, "assets", "icon.png");
 let backendProcess = null;
 let backendLogFd = null;
+let mainWindow = null;
+const aiRuntime = {
+  installing: false,
+  state: "idle",
+  message: "AI runtime is not installed.",
+  detail: "",
+  error: "",
+};
+
+function setAiRuntimeStatus(updates) {
+  Object.assign(aiRuntime, updates);
+  publishAiRuntimeStatus();
+}
 
 function configureApplicationMenu() {
   const template = [
@@ -120,6 +134,95 @@ function prepareUserDataDir(name) {
   return targetPath;
 }
 
+function aiRuntimeDir() {
+  return path.join(app.getPath("userData"), "ai-runtime");
+}
+
+function aiRuntimeVenvDir() {
+  return path.join(aiRuntimeDir(), "venv");
+}
+
+function aiRuntimeMarkerPath() {
+  return path.join(aiRuntimeDir(), "installed.json");
+}
+
+function runtimePythonPath() {
+  return process.platform === "win32"
+    ? path.join(aiRuntimeVenvDir(), "Scripts", "python.exe")
+    : path.join(aiRuntimeVenvDir(), "bin", "python");
+}
+
+function runtimeInstalled() {
+  return fs.existsSync(aiRuntimeMarkerPath()) && fs.existsSync(runtimePythonPath());
+}
+
+function useAiRuntimeBackend() {
+  return runtimeInstalled() && fs.existsSync(path.join(runtimeSourcePath, "app.py"));
+}
+
+function aiRuntimePublicStatus() {
+  return {
+    available: isPackaged || fs.existsSync(path.join(runtimeSourcePath, "requirements-ai.txt")),
+    installed: runtimeInstalled(),
+    installing: aiRuntime.installing,
+    using: useAiRuntimeBackend() && backendProcess !== null,
+    state: aiRuntime.state,
+    message: runtimeInstalled() ? "Advanced AI runtime is installed." : aiRuntime.message,
+    detail: aiRuntime.detail,
+    error: aiRuntime.error,
+    logPath: path.join(app.getPath("userData"), "ai-runtime-install.log"),
+  };
+}
+
+function publishAiRuntimeStatus() {
+  mainWindow?.webContents.send("ai-runtime-status", aiRuntimePublicStatus());
+}
+
+function writeAiRuntimeLog(message) {
+  fs.mkdirSync(aiRuntimeDir(), { recursive: true });
+  fs.appendFileSync(path.join(app.getPath("userData"), "ai-runtime-install.log"), `${message}\n`);
+}
+
+function runLogged(command, args, options = {}) {
+  writeAiRuntimeLog(`$ ${command} ${args.join(" ")}`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || runtimeSourcePath,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+        PIP_DISABLE_PIP_VERSION_CHECK: "1",
+        ...(options.env || {}),
+      },
+    });
+    child.stdout.on("data", (chunk) => writeAiRuntimeLog(String(chunk).trimEnd()));
+    child.stderr.on("data", (chunk) => writeAiRuntimeLog(String(chunk).trimEnd()));
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} exited with ${code}`));
+    });
+  });
+}
+
+function closeBackendLog() {
+  if (backendLogFd) {
+    fs.closeSync(backendLogFd);
+    backendLogFd = null;
+  }
+}
+
+function systemPythonPath() {
+  if (process.env.AI_RUNTIME_PYTHON) {
+    return process.env.AI_RUNTIME_PYTHON;
+  }
+  const result = spawnSync("which", ["python3"], { encoding: "utf8" });
+  return result.status === 0 ? result.stdout.trim() : "python3";
+}
+
 function findAvailablePort(host) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -163,11 +266,12 @@ function startBackend() {
   const dbPath = prepareDbPath();
   const uploadFolder = prepareUserDataDir("uploads");
   const logPath = path.join(app.getPath("userData"), "backend.log");
-  const command = hasPackagedBackend ? packagedBackendPath : pythonBin;
-  const args = hasPackagedBackend ? [] : [backendEntry];
+  const shouldUseAiRuntime = useAiRuntimeBackend();
+  const command = shouldUseAiRuntime ? runtimePythonPath() : hasPackagedBackend ? packagedBackendPath : pythonBin;
+  const args = shouldUseAiRuntime ? [path.join(runtimeSourcePath, "app.py")] : hasPackagedBackend ? [] : [backendEntry];
   backendLogFd = isPackaged ? fs.openSync(logPath, "a") : null;
   backendProcess = spawn(command, args, {
-    cwd: repoRoot,
+    cwd: shouldUseAiRuntime ? runtimeSourcePath : repoRoot,
     env: {
       ...process.env,
       FLASK_HOST: backendHost,
@@ -189,6 +293,109 @@ function startBackend() {
       fs.writeSync(backendLogFd, `[electron] backend exited code=${code ?? ""} signal=${signal ?? ""}\n`);
     }
   });
+}
+
+function stopBackend() {
+  return new Promise((resolve) => {
+    if (!backendProcess || backendProcess.killed) {
+      resolve();
+      return;
+    }
+    const processToStop = backendProcess;
+    backendProcess = null;
+    const timeout = setTimeout(resolve, 3000);
+    processToStop.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    processToStop.kill();
+  });
+}
+
+async function restartBackend() {
+  await stopBackend();
+  closeBackendLog();
+  startBackend();
+  await waitForPort(backendHost, backendPort);
+}
+
+async function verifyAiRuntime(runtimePython) {
+  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
+  await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
+}
+
+async function installAiRuntime() {
+  if (aiRuntime.installing) {
+    return aiRuntimePublicStatus();
+  }
+  if (!fs.existsSync(path.join(runtimeSourcePath, "requirements-ai.txt"))) {
+    throw new Error("AI runtime source files are missing from this app build.");
+  }
+
+  setAiRuntimeStatus({
+    installing: true,
+    state: "installing",
+    message: "Installing advanced AI runtime...",
+    detail: "Preparing Python environment",
+    error: "",
+  });
+
+  try {
+    fs.mkdirSync(aiRuntimeDir(), { recursive: true });
+    if (fs.existsSync(aiRuntimeMarkerPath())) {
+      fs.rmSync(aiRuntimeMarkerPath(), { force: true });
+    }
+    writeAiRuntimeLog(`\n[${new Date().toISOString()}] Installing AI runtime`);
+    const python = systemPythonPath();
+    setAiRuntimeStatus({ detail: `Creating venv with ${python}` });
+    await runLogged(python, ["-m", "venv", aiRuntimeVenvDir()], { cwd: runtimeSourcePath });
+
+    const runtimePython = runtimePythonPath();
+    setAiRuntimeStatus({ detail: "Upgrading pip" });
+    await runLogged(runtimePython, ["-m", "pip", "install", "--upgrade", "pip"], { cwd: runtimeSourcePath });
+
+    setAiRuntimeStatus({ detail: "Installing AI dependencies. This may take a while." });
+    await runLogged(runtimePython, [
+      "-m",
+      "pip",
+      "install",
+      "-r",
+      path.join(runtimeSourcePath, "requirements.txt"),
+      "-r",
+      path.join(runtimeSourcePath, "requirements-ai.txt"),
+      "-r",
+      path.join(runtimeSourcePath, "requirements-faiss.txt"),
+    ], { cwd: runtimeSourcePath });
+
+    setAiRuntimeStatus({ detail: "Verifying AI runtime packages" });
+    await verifyAiRuntime(runtimePython);
+
+    fs.writeFileSync(aiRuntimeMarkerPath(), JSON.stringify({
+      installedAt: new Date().toISOString(),
+      python: runtimePython,
+      source: runtimeSourcePath,
+    }, null, 2));
+    setAiRuntimeStatus({
+      state: "installed",
+      message: "Advanced AI runtime installed.",
+      detail: "Restarting backend with AI runtime",
+    });
+    await restartBackend();
+    setAiRuntimeStatus({ detail: "AI runtime is active." });
+  } catch (error) {
+    if (fs.existsSync(aiRuntimeMarkerPath())) {
+      fs.rmSync(aiRuntimeMarkerPath(), { force: true });
+    }
+    setAiRuntimeStatus({
+      state: "error",
+      message: "AI runtime installation failed.",
+      error: error instanceof Error ? error.message : String(error),
+      detail: `See ${path.join(app.getPath("userData"), "ai-runtime-install.log")}`,
+    });
+  } finally {
+    setAiRuntimeStatus({ installing: false });
+  }
+  return aiRuntimePublicStatus();
 }
 
 function resolveWorkspaceFileRoot(workspaceFilePath) {
@@ -254,8 +461,10 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
+  mainWindow = win;
 
   await win.loadURL(`http://${backendHost}:${backendPort}`);
+  publishAiRuntimeStatus();
 }
 
 ipcMain.handle("open-folder", async () => {
@@ -323,6 +532,10 @@ ipcMain.handle("reveal-folder", async (_event, folderPath) => {
   return true;
 });
 
+ipcMain.handle("ai-runtime-status", async () => aiRuntimePublicStatus());
+
+ipcMain.handle("install-ai-runtime", async () => installAiRuntime());
+
 app.whenReady().then(createWindow).catch((error) => {
   dialog.showErrorBox("Failed to start", error instanceof Error ? error.message : String(error));
   app.quit();
@@ -336,8 +549,5 @@ app.on("before-quit", () => {
   if (backendProcess && !backendProcess.killed) {
     backendProcess.kill();
   }
-  if (backendLogFd) {
-    fs.closeSync(backendLogFd);
-    backendLogFd = null;
-  }
+  closeBackendLog();
 });

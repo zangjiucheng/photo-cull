@@ -16,7 +16,7 @@ import { ShortcutHelpDialog } from "./shortcuts/ShortcutHelpDialog";
 import { shortcutRegistry } from "./shortcuts/registry";
 import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
 import { useShortcuts } from "./shortcuts/useShortcuts";
-import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
+import type { AiRuntimeStatus, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 
@@ -50,6 +50,7 @@ export default function App() {
   const [openPreviewSignal, setOpenPreviewSignal] = useState(0);
   const [isInspectorPreviewOpen, setIsInspectorPreviewOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+  const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -71,6 +72,7 @@ export default function App() {
     activeWorkspace,
     activeWorkspaceId,
     openFolderWorkspace,
+    removeWorkspace,
     restoreRemoved,
     excludedCount
   } = library;
@@ -85,6 +87,32 @@ export default function App() {
     ratings,
     activeId
   });
+
+  useEffect(() => {
+    if (!window.aiCulling?.getAiRuntimeStatus) {
+      return;
+    }
+    let cancelled = false;
+    window.aiCulling.getAiRuntimeStatus()
+      .then((status) => {
+        if (!cancelled) setAiRuntimeStatus(status);
+      })
+      .catch(() => undefined);
+    const unsubscribe = window.aiCulling.onAiRuntimeStatus?.((status) => {
+      setAiRuntimeStatus(status);
+      if (status.state === "installed" && status.using) {
+        updateStatus("AI runtime is active.", "ok");
+        void loadLibrary(activeWorkspaceId);
+      }
+      if (status.state === "error") {
+        updateStatus(status.error || "AI runtime installation failed.", "error");
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [activeWorkspaceId, loadLibrary, updateStatus]);
 
   const keepRate = folderPhotos.length ? Math.round((visiblePhotos.length / folderPhotos.length) * 100) : 0;
   const ratedCount = ratings.size;
@@ -238,6 +266,20 @@ export default function App() {
       updateStatus(`Opened ${workspace.name}.`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to open workspace file", "error");
+    }
+  }
+
+  async function onDeleteWorkspace(workspaceId: string) {
+    const workspace = library.workspaces.find((item) => item.id === workspaceId);
+    const confirmed = window.confirm(`Delete ${workspace?.name ?? "this workspace"} from the recent workspace list? Photos on disk will stay untouched.`);
+    if (!confirmed) {
+      return;
+    }
+    updateStatus("Deleting workspace...", "busy");
+    try {
+      await removeWorkspace(workspaceId);
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to delete workspace", "error");
     }
   }
 
@@ -407,6 +449,26 @@ export default function App() {
       updateStatus(err instanceof Error ? err.message : "Failed to refresh AI scores", "error");
     } finally {
       setIsRescoring(false);
+    }
+  }
+
+  async function onInstallAiRuntime() {
+    if (!window.aiCulling?.installAiRuntime) {
+      updateStatus("AI runtime installer is only available in the desktop app.", "warn");
+      return;
+    }
+    updateStatus("Installing AI runtime. This can take a while.", "busy");
+    try {
+      const status = await window.aiCulling.installAiRuntime();
+      setAiRuntimeStatus(status);
+      if (status.state === "error") {
+        updateStatus(status.error || "AI runtime installation failed.", "error");
+        return;
+      }
+      updateStatus(status.using ? "AI runtime is active." : "AI runtime installed.", "ok");
+      await loadLibrary(activeWorkspaceId);
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to install AI runtime", "error");
     }
   }
 
@@ -914,6 +976,9 @@ export default function App() {
           onWorkspaceChange={(workspaceId) => {
             void activateWorkspace(workspaceId);
           }}
+          onWorkspaceDelete={(workspaceId) => {
+            void onDeleteWorkspace(workspaceId);
+          }}
         />
         <ShortcutHelpDialog
           open={isShortcutHelpOpen}
@@ -933,9 +998,11 @@ export default function App() {
         isRefreshing={isRefreshing}
         isRescoring={isRescoring}
         backgroundProgress={backgroundProgress}
+        aiRuntimeStatus={aiRuntimeStatus}
         onTabChange={setActiveTab}
         onRefresh={() => void onRefresh()}
         onRefreshScores={() => void onRefreshScores()}
+        onInstallAiRuntime={() => void onInstallAiRuntime()}
         onExportQueue={() => void onExport()}
         sidebar={
           <>

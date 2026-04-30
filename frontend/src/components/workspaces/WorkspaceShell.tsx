@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { WorkspaceTab } from "../../types";
+import type { AiRuntimeStatus, WorkspaceTab } from "../../types";
 import { Button } from "../ui/button";
 
 const tabs: Array<{ id: WorkspaceTab; label: string }> = [
@@ -26,12 +26,14 @@ interface WorkspaceShellProps {
     total: number;
     percent: number;
   };
+  aiRuntimeStatus?: AiRuntimeStatus | null;
   sidebar: ReactNode;
   children: ReactNode;
   inspector: ReactNode;
   onTabChange: (tab: WorkspaceTab) => void;
   onRefresh: () => void;
   onRefreshScores?: () => void;
+  onInstallAiRuntime?: () => void;
   onExportQueue: () => void;
 }
 
@@ -42,17 +44,24 @@ export function WorkspaceShell({
   isRefreshing,
   isRescoring = false,
   backgroundProgress,
+  aiRuntimeStatus,
   sidebar,
   children,
   inspector,
   onTabChange,
   onRefresh,
   onRefreshScores,
+  onInstallAiRuntime,
   onExportQueue
 }: WorkspaceShellProps) {
   const isActive = backgroundProgress?.state === "active";
   const progressDegrees = backgroundProgress ? Math.round((backgroundProgress.percent / 100) * 360) : 0;
   const progressState = backgroundProgress?.state ?? "idle";
+  const aiRuntimeButtonLabel = aiRuntimeStatus?.installing
+    ? "Installing AI..."
+    : aiRuntimeStatus?.installed
+      ? aiRuntimeStatus.using ? "AI Runtime Active" : "AI Runtime Installed"
+      : "Install AI Runtime";
 
   return (
     <div className="bridge-shell">
@@ -75,6 +84,18 @@ export function WorkspaceShell({
         </nav>
         <div className="bridge-actions">
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>{isRefreshing ? "Refreshing" : "Refresh"}</Button>
+          {aiRuntimeStatus?.available && onInstallAiRuntime ? (
+            <Button
+              className={`ai-runtime-topbar-button ${aiRuntimeStatus.state === "error" ? "error" : ""}`.trim()}
+              variant={aiRuntimeStatus.installed ? "secondary" : "outline"}
+              size="sm"
+              onClick={onInstallAiRuntime}
+              disabled={aiRuntimeStatus.installing || aiRuntimeStatus.installed}
+              title={aiRuntimeStatus.state === "error" ? aiRuntimeStatus.error || aiRuntimeStatus.message : aiRuntimeStatus.detail || aiRuntimeStatus.message}
+            >
+              {aiRuntimeButtonLabel}
+            </Button>
+          ) : null}
           <Button variant="default" size="sm" onClick={onExportQueue}>Export Queue ({exportQueueCount})</Button>
           {backgroundProgress ? (
             <div
@@ -105,6 +126,11 @@ export function WorkspaceShell({
                   >
                     {isRescoring ? "Queueing..." : "Refresh AI Scores"}
                   </button>
+                ) : null}
+                {aiRuntimeStatus ? (
+                  <span className={`ai-runtime-status ${aiRuntimeStatus.state === "error" ? "error" : ""}`.trim()}>
+                    {aiRuntimeStatus.state === "error" ? aiRuntimeStatus.error || aiRuntimeStatus.message : aiRuntimeStatus.detail || aiRuntimeStatus.message}
+                  </span>
                 ) : null}
               </div>
             </div>

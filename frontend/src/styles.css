@@ -89,6 +89,15 @@ body {
   justify-content: flex-end;
 }
 
+.ai-runtime-topbar-button {
+  max-width: 150px;
+}
+
+.ai-runtime-topbar-button.error {
+  border-color: #ff9f92;
+  color: #ffe0dc;
+}
+
 .scoring-progress {
   --progress-deg: 0deg;
   position: relative;
@@ -190,6 +199,16 @@ body {
 .scoring-progress-action:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.ai-runtime-status {
+  color: #aeb8c4;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.ai-runtime-status.error {
+  color: #ffb4aa;
 }
 
 .scoring-progress:hover .scoring-progress-popover,
@@ -362,10 +381,35 @@ body {
   gap: 6px;
 }
 
+.welcome-recent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .welcome-recent {
   display: grid;
   gap: 3px;
   padding: 6px 0;
+}
+
+.welcome-recent-delete {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #8f99a7;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.welcome-recent-delete:hover {
+  border-color: #5a2f35;
+  background: #352329;
+  color: #ff9ca6;
 }
 
 .welcome-recent strong,

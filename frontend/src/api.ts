@@ -93,6 +93,12 @@ export async function openWorkspace(rootPath: string): Promise<PhotoWorkspace> {
   return data;
 }
 
+export async function deleteWorkspace(workspaceId: string): Promise<{ deleted: boolean; workspaceId: string }> {
+  return requestJson<{ deleted: boolean; workspaceId: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: "DELETE"
+  }, "Failed to delete workspace");
+}
+
 export async function restorePhotos(workspaceId: string, relativePaths?: string[]): Promise<{ restored: number; restoredPaths: string[] }> {
   return requestJson<{ restored: number; restoredPaths: string[] }>("/api/photos/restore", {
     method: "POST",

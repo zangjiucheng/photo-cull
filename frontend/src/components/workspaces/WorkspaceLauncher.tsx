@@ -9,6 +9,7 @@ interface WorkspaceLauncherProps {
   onOpenFolder: () => void;
   onOpenWorkspaceFile: () => void;
   onWorkspaceChange: (workspaceId: string) => void;
+  onWorkspaceDelete: (workspaceId: string) => void;
 }
 
 export function WorkspaceLauncher({
@@ -18,7 +19,8 @@ export function WorkspaceLauncher({
   isLoading,
   onOpenFolder,
   onOpenWorkspaceFile,
-  onWorkspaceChange
+  onWorkspaceChange,
+  onWorkspaceDelete
 }: WorkspaceLauncherProps) {
   return (
     <main className="workspace-launcher vscode-launcher">
@@ -49,10 +51,21 @@ export function WorkspaceLauncher({
             ) : workspaces.length ? (
               <div className="welcome-recent-list">
                 {workspaces.map((workspace) => (
-                  <button className="welcome-recent" key={workspace.id} onClick={() => onWorkspaceChange(workspace.id)}>
-                    <strong>{workspace.name}</strong>
-                    <span>{workspace.rootPath}</span>
-                  </button>
+                  <div className="welcome-recent-row" key={workspace.id}>
+                    <button className="welcome-recent" onClick={() => onWorkspaceChange(workspace.id)}>
+                      <strong>{workspace.name}</strong>
+                      <span>{workspace.rootPath}</span>
+                    </button>
+                    <button
+                      className="welcome-recent-delete"
+                      type="button"
+                      onClick={() => onWorkspaceDelete(workspace.id)}
+                      aria-label={`Delete ${workspace.name} workspace`}
+                      title="Delete workspace"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 ))}
               </div>
             ) : (

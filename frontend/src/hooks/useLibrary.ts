@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchWorkspaceLibrary, openWorkspace, refreshLibrary, rescoreWorkspace, restorePhotos } from "../api";
+import { deleteWorkspace, fetchWorkspaceLibrary, openWorkspace, refreshLibrary, rescoreWorkspace, restorePhotos } from "../api";
 import { normalizeScores } from "../core";
 import type { LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
 
@@ -151,6 +151,40 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     return workspace;
   }, [loadLibrary, setActiveWorkspaceId]);
 
+  const removeWorkspace = useCallback(async (workspaceId: string) => {
+    const workspace = workspaces.find((item) => item.id === workspaceId);
+    await deleteWorkspace(workspaceId);
+    setWorkspaces((current) => current.filter((item) => item.id !== workspaceId));
+    setActiveFolderByWorkspace((current) => {
+      const next = { ...current };
+      delete next[workspaceId];
+      return next;
+    });
+    setActiveIdByWorkspace((current) => {
+      const next = { ...current };
+      delete next[workspaceId];
+      return next;
+    });
+    if (activeWorkspaceId === workspaceId) {
+      setActiveWorkspaceId(null);
+      setPhotos([]);
+      setFolders([]);
+      setPendingCount(0);
+      setProcessingCount(0);
+      setExcludedCount(0);
+      setIndexing({
+        active: false,
+        indexed: 0,
+        totalDiscovered: 0,
+        status: "idle",
+        startedAt: null,
+        finishedAt: null,
+        error: null
+      });
+    }
+    updateStatus(`Deleted ${workspace?.name ?? "workspace"}.`, "ok");
+  }, [activeWorkspaceId, setActiveWorkspaceId, updateStatus, workspaces]);
+
   const restoreRemoved = useCallback(async () => {
     if (!activeWorkspaceId) {
       updateStatus("Open a workspace before restoring removed photos.", "warn");
@@ -223,6 +257,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     activateWorkspace,
     refreshScores,
     openFolderWorkspace,
+    removeWorkspace,
     restoreRemoved
   };
 }

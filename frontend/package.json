@@ -50,6 +50,19 @@
           "ai-culling-backend",
           "ai-culling-backend.exe"
         ]
+      },
+      {
+        "from": "..",
+        "to": "runtime-source",
+        "filter": [
+          "app.py",
+          "server/**/*",
+          "static/**/*",
+          "templates/**/*",
+          "requirements.txt",
+          "requirements-ai.txt",
+          "requirements-faiss.txt"
+        ]
       }
     ],
     "mac": {

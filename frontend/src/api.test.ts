@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals, deletePhotos, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos } from "./api";
+import { apiInternals, deletePhotos, deleteWorkspace, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -118,6 +118,22 @@ describe("api helpers", () => {
       method: "POST",
       body: JSON.stringify({ root_path: "/photos/Shoot" })
     }));
+    vi.unstubAllGlobals();
+  });
+
+  it("deletes a workspace by id", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      deleted: true,
+      workspaceId: "ws1"
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await deleteWorkspace("ws1");
+    expect(result.deleted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspaces/ws1", expect.objectContaining({ method: "DELETE" }));
     vi.unstubAllGlobals();
   });
 

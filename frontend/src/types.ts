@@ -170,3 +170,15 @@ export type SimilarityScope = "current" | "library";
 export interface ExportQueueState {
   ids: string[];
 }
+
+export interface AiRuntimeStatus {
+  available: boolean;
+  installed: boolean;
+  installing: boolean;
+  using: boolean;
+  state: "idle" | "installing" | "installed" | "error" | string;
+  message: string;
+  detail: string;
+  error: string;
+  logPath: string;
+}
