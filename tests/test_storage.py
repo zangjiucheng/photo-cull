@@ -255,6 +255,17 @@ def test_init_db_adds_orientation_override_column(tmp_path):
     assert "orientation_override" in columns
 
 
+def test_init_db_adds_similarity_group_cache_table(tmp_path):
+    configure_tmp(tmp_path)
+
+    with db.connect() as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'similarity_group_cache'"
+        ).fetchone()
+
+    assert table is not None
+
+
 def test_reset_interrupted_processing_marks_unscored_rows_pending(tmp_path):
     configure_tmp(tmp_path)
     workspace = db.upsert_workspace("ws1", "Workspace", str(tmp_path))

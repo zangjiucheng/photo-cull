@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import copy
+import hashlib
+import json
 import os
 import threading
 from dataclasses import dataclass
@@ -135,6 +137,11 @@ def _rows_signature(rows: list[Any]) -> tuple:
     )
 
 
+def _signature_digest(signature: tuple) -> str:
+    payload = json.dumps(signature, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
 def _cache_get(key: tuple) -> dict | None:
     with _result_cache_lock:
         cached = _result_cache.get(key)
@@ -147,6 +154,26 @@ def _cache_set(key: tuple, payload: dict) -> None:
             oldest_key = next(iter(_result_cache))
             _result_cache.pop(oldest_key, None)
         _result_cache[key] = copy.deepcopy(payload)
+
+
+def _stages_payload(clip_status: str) -> dict:
+    return {
+        "phash": {
+            "exactDistance": PHASH_EXACT_DISTANCE,
+            "reviewDistance": PHASH_REVIEW_DISTANCE,
+        },
+        "clip": {
+            "status": clip_status,
+            "similarity": CLIP_HIGH_SIMILARITY,
+            "reviewSimilarity": CLIP_REVIEW_SIMILARITY,
+        },
+    }
+
+
+def _with_cache_info(payload: dict, hit: bool, source: str) -> dict:
+    next_payload = copy.deepcopy(payload)
+    next_payload["cache"] = {"hit": hit, "source": source}
+    return next_payload
 
 
 def best_version_key(candidate: PhotoCandidate) -> tuple:
@@ -375,22 +402,44 @@ def build_groups(candidates: list[PhotoCandidate], matches: list[dict]) -> list[
     return groups
 
 
-def find_similar_groups(include_clip: bool = True, folder_path: str | None = None, workspace_id: str | None = None) -> dict:
+def find_similar_groups(
+    include_clip: bool = True,
+    folder_path: str | None = None,
+    workspace_id: str | None = None,
+    cache_only: bool = False,
+) -> dict:
     rows = _candidate_rows(workspace_id=workspace_id, folder_path=folder_path)
-    cache_key = (
+    rows_signature = _rows_signature(rows)
+    signature = _signature_digest((
         "similar-v1",
-        workspace_id,
-        folder_path,
         bool(include_clip),
         PHASH_EXACT_DISTANCE,
         PHASH_REVIEW_DISTANCE,
         CLIP_HIGH_SIMILARITY,
         CLIP_REVIEW_SIMILARITY,
-        _rows_signature(rows),
+        rows_signature,
+    ))
+    cache_key = (
+        "similar-v1",
+        workspace_id,
+        folder_path,
+        bool(include_clip),
+        signature,
     )
     cached = _cache_get(cache_key)
     if cached is not None:
-        return cached
+        return _with_cache_info(cached, True, "memory")
+    if workspace_id:
+        cached = db.fetch_similarity_group_cache(workspace_id, folder_path, include_clip, signature)
+        if cached is not None:
+            _cache_set(cache_key, cached)
+            return _with_cache_info(cached, True, "persistent")
+    if cache_only:
+        return {
+            "groups": [],
+            "stages": _stages_payload("cached:miss"),
+            "cache": {"hit": False, "source": "none"},
+        }
 
     candidates = load_candidates(workspace_id=workspace_id, folder_path=folder_path, rows=rows)
     matches = phash_matches(candidates)
@@ -401,17 +450,9 @@ def find_similar_groups(include_clip: bool = True, folder_path: str | None = Non
 
     payload = {
         "groups": build_groups(candidates, matches),
-        "stages": {
-            "phash": {
-                "exactDistance": PHASH_EXACT_DISTANCE,
-                "reviewDistance": PHASH_REVIEW_DISTANCE,
-            },
-            "clip": {
-                "status": clip_status,
-                "similarity": CLIP_HIGH_SIMILARITY,
-                "reviewSimilarity": CLIP_REVIEW_SIMILARITY,
-            },
-        },
+        "stages": _stages_payload(clip_status),
     }
     _cache_set(cache_key, payload)
-    return payload
+    if workspace_id:
+        db.save_similarity_group_cache(workspace_id, folder_path, include_clip, signature, payload)
+    return _with_cache_info(payload, False, "computed")

@@ -61,6 +61,25 @@ describe("api helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("requests cached similar groups without computing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      groups: [],
+      cache: { hit: false, source: "none" },
+      stages: {
+        phash: { exactDistance: 5, reviewDistance: 12 },
+        clip: { status: "cached:miss", similarity: 0.92, reviewSimilarity: 0.85 }
+      }
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    })));
+
+    const payload = await findSimilarPhotos({ workspaceId: "ws1", scope: "current", folderPath: "shoot-a", cacheOnly: true });
+    expect(payload.cache?.hit).toBe(false);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/photos/similar?workspace_id=ws1&include_clip=1&scope=current&folder_path=shoot-a&cache_only=1");
+    vi.unstubAllGlobals();
+  });
+
   it("deletes photos by id", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       deletedIds: ["a"],

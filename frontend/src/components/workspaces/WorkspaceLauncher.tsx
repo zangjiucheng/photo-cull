@@ -22,6 +22,15 @@ export function WorkspaceLauncher({
 }: WorkspaceLauncherProps) {
   return (
     <main className="workspace-launcher vscode-launcher">
+      {isLoading ? (
+        <div className="app-loading-overlay" role="status" aria-live="polite" aria-label="Loading application">
+          <div className="app-loading-panel">
+            <span className="app-loading-spinner" aria-hidden="true" />
+            <strong>Loading</strong>
+            <span>Preparing workspaces</span>
+          </div>
+        </div>
+      ) : null}
       <section className="vscode-welcome">
         <aside className="welcome-start">
           <div className="welcome-brand">

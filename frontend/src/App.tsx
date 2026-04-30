@@ -12,7 +12,7 @@ import { WorkspaceShell } from "./components/workspaces/WorkspaceShell";
 import { useLibrary } from "./hooks/useLibrary";
 import { usePhotoFilters } from "./hooks/usePhotoFilters";
 import { usePhotoRatings } from "./hooks/usePhotoRatings";
-import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
+import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 
@@ -42,7 +42,6 @@ export default function App() {
   const [similarDeleteIds, setSimilarDeleteIds] = useState<Set<string>>(new Set());
   const [isFindingSimilar, setIsFindingSimilar] = useState(false);
   const [isDeletingSimilar, setIsDeletingSimilar] = useState(false);
-  const [similarSummary, setSimilarSummary] = useState("");
   const [similarityProgress, setSimilarityProgress] = useState<SimilarityProgress | null>(null);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
@@ -85,6 +84,27 @@ export default function App() {
   const fourPlusIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
   const exportQueueIds = useMemo(() => new Set(activeWorkspaceId ? exportQueues[activeWorkspaceId] ?? [] : []), [activeWorkspaceId, exportQueues]);
   const exportQueueList = useMemo(() => Array.from(exportQueueIds), [exportQueueIds]);
+
+  const applySimilarPayload = useCallback((payload: SimilarPayload) => {
+    const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
+    const groups = payload.groups
+      .map((group) => ({
+        id: group.id,
+        stage: group.stage,
+        tier: group.tier,
+        keepPhotoId: group.keepPhotoId,
+        maxDistance: group.maxDistance,
+        maxSimilarity: group.maxSimilarity,
+        candidates: group.candidates,
+        photos: group.photoIds
+          .map((id) => photoMap.get(id))
+          .filter((photo): photo is Photo => Boolean(photo))
+      }))
+      .filter((group) => group.photos.length > 1);
+    setSimilarGroups(groups);
+    setSimilarDeleteIds(new Set(groups.flatMap((group) => group.candidates.filter((candidate) => candidate.deleteRecommended).map((candidate) => candidate.photoId))));
+    return groups;
+  }, [photos]);
   const reviewRate = photos.length ? Math.round((ratedCount / photos.length) * 100) : 0;
   const completedCount = photos.filter((p) => p.status === "done" || p.status === "error").length;
   const processingTotal = photos.length;
@@ -131,6 +151,7 @@ export default function App() {
   function addToExportQueue(id: string) {
     if (!activeWorkspaceId) return;
     setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: Array.from(new Set([...(prev[activeWorkspaceId] ?? []), id])) }));
+    updateStatus("Added photo to export queue.", "ok");
   }
 
   function addVisibleToQueue() {
@@ -401,32 +422,19 @@ export default function App() {
     }, 900);
     try {
       const payload = await findSimilarPhotos({ workspaceId: activeWorkspaceId, includeClip: true, scope: "current", folderPath: activeFolderPath });
-      const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
-      const groups = payload.groups
-        .map((group) => ({
-          id: group.id,
-          stage: group.stage,
-          tier: group.tier,
-          keepPhotoId: group.keepPhotoId,
-          maxDistance: group.maxDistance,
-          maxSimilarity: group.maxSimilarity,
-          candidates: group.candidates,
-          photos: group.photoIds
-            .map((id) => photoMap.get(id))
-            .filter((photo): photo is Photo => Boolean(photo))
-        }))
-        .filter((group) => group.photos.length > 1);
-      setSimilarGroups(groups);
-      setSimilarDeleteIds(new Set(groups.flatMap((group) => group.candidates.filter((candidate) => candidate.deleteRecommended).map((candidate) => candidate.photoId))));
-      setSimilarSummary(
-        `pHash <= ${payload.stages.phash.exactDistance} exact match, ${payload.stages.phash.reviewDistance} review; CLIP ${payload.stages.clip.status}`
-      );
+      const groups = applySimilarPayload(payload);
+      const cacheDetail = payload.cache?.hit ? `Loaded from ${payload.cache.source} cache` : "Computed fresh similarity groups";
       setSimilarityProgress({
         percent: 100,
         label: groups.length ? `Found ${groups.length} group${groups.length === 1 ? "" : "s"}` : "No similar groups",
-        detail: `pHash complete; CLIP ${payload.stages.clip.status}`
+        detail: `${cacheDetail}; CLIP ${payload.stages.clip.status}`
       });
-      updateStatus(groups.length ? `Found ${groups.length} similar group(s).` : "No similar groups found.", groups.length ? "ok" : "warn");
+      updateStatus(
+        groups.length
+          ? `${payload.cache?.hit ? "Loaded cached" : "Found"} ${groups.length} similar group(s).`
+          : "No similar groups found.",
+        groups.length ? "ok" : "warn"
+      );
     } catch (err) {
       setSimilarityProgress({
         percent: 100,
@@ -439,6 +447,54 @@ export default function App() {
       setIsFindingSimilar(false);
     }
   }
+
+  useEffect(() => {
+    if (activeTab !== "duplicates" || !activeWorkspaceId || isFindingSimilar) {
+      return;
+    }
+
+    const workspaceId = activeWorkspaceId;
+    let cancelled = false;
+    async function loadCachedSimilarity() {
+      try {
+        const payload = await findSimilarPhotos({
+          workspaceId,
+          includeClip: true,
+          scope: "current",
+          folderPath: activeFolderPath,
+          cacheOnly: true
+        });
+        if (cancelled) {
+          return;
+        }
+        if (!payload.cache?.hit) {
+          setSimilarGroups([]);
+          setSimilarDeleteIds(new Set());
+          setSimilarityProgress(null);
+          return;
+        }
+        const groups = applySimilarPayload(payload);
+        setSimilarityProgress({
+          percent: 100,
+          label: groups.length ? `Loaded ${groups.length} cached group${groups.length === 1 ? "" : "s"}` : "No cached groups",
+          detail: `Restored from ${payload.cache.source} cache; CLIP ${payload.stages.clip.status}`
+        });
+        updateStatus(
+          groups.length ? `Loaded ${groups.length} cached similar group(s).` : "No cached similar groups.",
+          groups.length ? "ok" : "warn"
+        );
+      } catch {
+        if (!cancelled) {
+          setSimilarityProgress(null);
+        }
+      }
+    }
+
+    void loadCachedSimilarity();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, activeWorkspaceId, activeFolderPath, applySimilarPayload, isFindingSimilar, updateStatus]);
 
   function onToggleSimilarDelete(id: string) {
     setSimilarDeleteIds((prev) => {
@@ -470,7 +526,6 @@ export default function App() {
       const result = await deletePhotos([...similarDeleteIds]);
       setSimilarDeleteIds(new Set());
       setSimilarGroups([]);
-      setSimilarSummary("");
       await loadLibrary(activeWorkspaceId);
       updateStatus(`Removed ${result.deletedRecords} photo(s) from this workspace.`, "ok");
     } catch (err) {
@@ -528,9 +583,9 @@ export default function App() {
       <DuplicatesWorkspace
         similarGroups={similarGroups}
         similarDeleteIds={similarDeleteIds}
+        exportQueueIds={exportQueueIds}
         isFindingSimilar={isFindingSimilar}
         isDeletingSimilar={isDeletingSimilar}
-        similarSummary={similarSummary}
         similarityProgress={similarityProgress}
         activeFolderPath={activeFolderPath}
         onFindSimilar={onFindSimilar}

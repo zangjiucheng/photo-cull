@@ -123,6 +123,10 @@ export interface SimilarGroupPayload {
 
 export interface SimilarPayload {
   groups: SimilarGroupPayload[];
+  cache?: {
+    hit: boolean;
+    source: "memory" | "persistent" | "computed" | "none" | string;
+  };
   stages: {
     phash: {
       exactDistance: number;

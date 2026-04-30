@@ -429,7 +429,30 @@ def test_similar_detection_reuses_cached_result(client, tmp_path, monkeypatch):
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.get_json() == second.get_json()
+    first_payload = first.get_json()
+    second_payload = second.get_json()
+    assert first_payload["groups"] == second_payload["groups"]
+    assert first_payload["stages"] == second_payload["stages"]
+    assert first_payload["cache"] == {"hit": False, "source": "computed"}
+    assert second_payload["cache"] == {"hit": True, "source": "memory"}
+    assert calls["count"] == 2
+
+    similarity.clear_similarity_cache()
+    third = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")
+
+    third_payload = third.get_json()
+    assert third.status_code == 200
+    assert third_payload["groups"] == first_payload["groups"]
+    assert third_payload["stages"] == first_payload["stages"]
+    assert third_payload["cache"] == {"hit": True, "source": "persistent"}
+    assert calls["count"] == 2
+
+    cache_only = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library&cache_only=1")
+    cache_only_payload = cache_only.get_json()
+
+    assert cache_only.status_code == 200
+    assert cache_only_payload["groups"] == first_payload["groups"]
+    assert cache_only_payload["cache"]["hit"] is True
     assert calls["count"] == 2
 
 

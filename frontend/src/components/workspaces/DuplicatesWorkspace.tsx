@@ -4,9 +4,9 @@ import { Button } from "../ui/button";
 interface DuplicatesWorkspaceProps {
   similarGroups: SimilarGroup[];
   similarDeleteIds: Set<string>;
+  exportQueueIds: Set<string>;
   isFindingSimilar: boolean;
   isDeletingSimilar: boolean;
-  similarSummary: string;
   similarityProgress: {
     percent: number;
     label: string;
@@ -27,9 +27,9 @@ function formatSize(size: number): string {
 export function DuplicatesWorkspace({
   similarGroups,
   similarDeleteIds,
+  exportQueueIds,
   isFindingSimilar,
   isDeletingSimilar,
-  similarSummary,
   similarityProgress,
   activeFolderPath,
   onFindSimilar,
@@ -40,6 +40,15 @@ export function DuplicatesWorkspace({
 }: DuplicatesWorkspaceProps) {
   return (
     <div className="workspace-panel duplicates-workspace">
+      {isFindingSimilar ? (
+        <div className="workspace-loading-overlay" role="status" aria-live="polite" aria-label="Loading similar photos">
+          <div className="app-loading-panel workspace-loading-panel">
+            <span className="app-loading-spinner" aria-hidden="true" />
+            <strong>{similarityProgress?.label ?? "Finding similar photos"}</strong>
+            <span>{similarityProgress?.detail ?? "Preparing similarity scan"}</span>
+          </div>
+        </div>
+      ) : null}
       <div className="workspace-head">
         <div>
           <span className="panel-kicker">Similarity</span>
@@ -65,7 +74,6 @@ export function DuplicatesWorkspace({
           <p>{similarityProgress.detail}</p>
         </div>
       ) : null}
-      {similarSummary ? <div className="similar-summary bridge-summary">{similarSummary}</div> : null}
       {similarGroups.length ? (
         <div className="similar-groups duplicate-groups">
           {similarGroups.map((group, groupIndex) => (
@@ -78,6 +86,7 @@ export function DuplicatesWorkspace({
               <div className="similar-strip">
                 {group.photos.map((photo) => {
                   const isChecked = similarDeleteIds.has(photo.id);
+                  const isQueued = exportQueueIds.has(photo.id);
                   const candidate = group.candidates.find((item) => item.photoId === photo.id);
                   const resolution = candidate ? `${candidate.metadata.width}x${candidate.metadata.height}` : "";
                   const isKeep = group.keepPhotoId === photo.id;
@@ -91,7 +100,14 @@ export function DuplicatesWorkspace({
                         <input type="checkbox" checked={isChecked} disabled={isKeep} onChange={() => onToggleSimilarDelete(photo.id)} />
                         Delete
                       </label>
-                      <button className="link-button queue-link" onClick={() => onAddToExportQueue(photo.id)}>Queue</button>
+                      <button
+                        className={`queue-link ${isQueued ? "queued" : ""}`.trim()}
+                        type="button"
+                        onClick={() => onAddToExportQueue(photo.id)}
+                        disabled={isQueued}
+                      >
+                        {isQueued ? "Queued" : "Queue"}
+                      </button>
                       <span className="similar-name" title={photo.name}>{photo.name}</span>
                       <span className="similar-score">Score {photo.aiScore} · {resolution}</span>
                       {candidate ? <span className="similar-score">{formatSize(candidate.metadata.fileSize)}{candidate.metadata.hasGps ? " · GPS" : ""}{candidate.metadata.takenAt ? ` · ${candidate.metadata.takenAt}` : ""}</span> : null}

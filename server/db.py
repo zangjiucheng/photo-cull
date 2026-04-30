@@ -113,6 +113,26 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_rating ON photos(workspace_id, rating)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_workspace_hash ON photos(workspace_id, content_hash)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_excluded_workspace_hash ON excluded_photos(workspace_id, content_hash)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS similarity_group_cache (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                folder_path TEXT NOT NULL,
+                include_clip INTEGER NOT NULL,
+                signature TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(workspace_id, folder_path, include_clip)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_similarity_cache_workspace
+            ON similarity_group_cache(workspace_id, updated_at)
+            """
+        )
 
 
 def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
@@ -225,6 +245,60 @@ def list_photos(workspace_id: str | None = None) -> list[sqlite3.Row]:
             "SELECT * FROM photos WHERE workspace_id = ? ORDER BY relative_path ASC",
             (workspace_id,),
         ).fetchall()
+
+
+def fetch_similarity_group_cache(
+    workspace_id: str,
+    folder_path: str | None,
+    include_clip: bool,
+    signature: str,
+) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT payload FROM similarity_group_cache
+            WHERE workspace_id = ? AND folder_path = ? AND include_clip = ? AND signature = ?
+            """,
+            (workspace_id, folder_path or "", 1 if include_clip else 0, signature),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except json.JSONDecodeError:
+        return None
+
+
+def save_similarity_group_cache(
+    workspace_id: str,
+    folder_path: str | None,
+    include_clip: bool,
+    signature: str,
+    payload: dict[str, Any],
+) -> None:
+    now = time.time()
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO similarity_group_cache (
+                workspace_id, folder_path, include_clip, signature, payload, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, folder_path, include_clip)
+            DO UPDATE SET signature = excluded.signature,
+                          payload = excluded.payload,
+                          updated_at = excluded.updated_at
+            """,
+            (
+                workspace_id,
+                folder_path or "",
+                1 if include_clip else 0,
+                signature,
+                json.dumps(payload, sort_keys=True),
+                now,
+                now,
+            ),
+        )
 
 
 def list_excluded(workspace_id: str) -> list[sqlite3.Row]:

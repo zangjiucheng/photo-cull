@@ -167,6 +167,7 @@ export async function findSimilarPhotos(options: {
   includeClip?: boolean;
   scope?: SimilarityScope;
   folderPath?: string;
+  cacheOnly?: boolean;
 }): Promise<SimilarPayload> {
   const params = new URLSearchParams();
   params.set("workspace_id", options.workspaceId);
@@ -174,6 +175,9 @@ export async function findSimilarPhotos(options: {
   params.set("scope", options.scope ?? "library");
   if (options.folderPath !== undefined) {
     params.set("folder_path", options.folderPath);
+  }
+  if (options.cacheOnly) {
+    params.set("cache_only", "1");
   }
   return requestJson<SimilarPayload>(`/api/photos/similar?${params.toString()}`, undefined, "Failed to find similar photos");
 }

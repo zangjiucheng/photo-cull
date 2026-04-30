@@ -192,6 +192,7 @@ def export():
 @bp.route("/photos/similar", methods=["GET"])
 def similar_photos():
     include_clip = request.args.get("include_clip", "1") not in {"0", "false", "False"}
+    cache_only = request.args.get("cache_only", "0") in {"1", "true", "True"}
     scope = request.args.get("scope", "library")
     if scope not in {"current", "library"}:
         return error_response("scope must be current or library", 400)
@@ -199,7 +200,7 @@ def similar_photos():
     if not workspace_id:
         return error_response("workspace_id is required", 400)
     folder_path = request.args.get("folder_path", "") if scope == "current" else None
-    return jsonify(similarity.find_similar_groups(include_clip=include_clip, folder_path=folder_path, workspace_id=workspace_id))
+    return jsonify(similarity.find_similar_groups(include_clip=include_clip, folder_path=folder_path, workspace_id=workspace_id, cache_only=cache_only))
 
 
 @bp.route("/photos", methods=["DELETE"])

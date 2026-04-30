@@ -27,7 +27,6 @@ interface LibraryBrowserProps {
   similarDeleteIds: Set<string>;
   isFindingSimilar: boolean;
   isDeletingSimilar: boolean;
-  similarSummary: string;
   onSearchChange: (value: string) => void;
   onMinScoreChange: (value: number) => void;
   onRatingFilterChange: (value: RatingFilter) => void;
@@ -180,7 +179,6 @@ export function LibraryBrowser({
   similarDeleteIds,
   isFindingSimilar,
   isDeletingSimilar,
-  similarSummary,
   onSearchChange,
   onMinScoreChange,
   onRatingFilterChange,
@@ -399,7 +397,6 @@ export function LibraryBrowser({
                 <div>
                   <div className="pane-title">Similar Photos</div>
                   <p>Stage 1 uses pHash for exact matches. Stage 2 uses CLIP + FAISS when available. Best versions are ranked first.</p>
-                  {similarSummary ? <p className="similar-summary">{similarSummary}</p> : null}
                 </div>
                 <div className="similar-actions">
                   <Button variant="outline" onClick={onFindSimilar} disabled={isFindingSimilar}>
