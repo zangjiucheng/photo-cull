@@ -12,6 +12,10 @@ import { WorkspaceShell } from "./components/workspaces/WorkspaceShell";
 import { useLibrary } from "./hooks/useLibrary";
 import { usePhotoFilters } from "./hooks/usePhotoFilters";
 import { usePhotoRatings } from "./hooks/usePhotoRatings";
+import { ShortcutHelpDialog } from "./shortcuts/ShortcutHelpDialog";
+import { shortcutRegistry } from "./shortcuts/registry";
+import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
+import { useShortcuts } from "./shortcuts/useShortcuts";
 import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
@@ -43,6 +47,9 @@ export default function App() {
   const [isFindingSimilar, setIsFindingSimilar] = useState(false);
   const [isDeletingSimilar, setIsDeletingSimilar] = useState(false);
   const [similarityProgress, setSimilarityProgress] = useState<SimilarityProgress | null>(null);
+  const [openPreviewSignal, setOpenPreviewSignal] = useState(0);
+  const [isInspectorPreviewOpen, setIsInspectorPreviewOpen] = useState(false);
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -156,7 +163,7 @@ export default function App() {
         percent: processingProgress
       };
 
-  function toggleExportQueue(id: string) {
+  const toggleExportQueue = useCallback((id: string) => {
     if (!activeWorkspaceId) return;
     setExportQueues((prev) => {
       const next = new Set(prev[activeWorkspaceId] ?? []);
@@ -167,7 +174,7 @@ export default function App() {
       }
       return { ...prev, [activeWorkspaceId]: Array.from(next) };
     });
-  }
+  }, [activeWorkspaceId]);
 
   function addToExportQueue(id: string) {
     if (!activeWorkspaceId) return;
@@ -517,76 +524,208 @@ export default function App() {
     };
   }, [activeTab, activeWorkspaceId, activeFolderPath, applySimilarPayload, isFindingSimilar, updateStatus]);
 
-  useEffect(() => {
-    if (activeTab !== "duplicates" || !similarNavigation) {
-      return;
+  const selectSimilarityVerticalNeighbor = useCallback((direction: "up" | "down") => {
+    if (!activePhoto) {
+      return false;
     }
-    const selectVerticalNeighbor = (direction: "up" | "down") => {
-      if (!activePhoto) {
-        return false;
-      }
-      const cards = Array.from(document.querySelectorAll<HTMLElement>(".duplicates-workspace .similar-thumb[data-photo-id]"));
-      const current = cards.find((card) => card.dataset.photoId === activePhoto.id);
-      if (!current) {
-        return false;
-      }
-      const currentRect = current.getBoundingClientRect();
-      const currentX = currentRect.left + currentRect.width / 2;
-      const currentY = currentRect.top + currentRect.height / 2;
-      const candidates = cards
-        .map((card) => {
-          const rect = card.getBoundingClientRect();
-          return {
-            card,
-            id: card.dataset.photoId,
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2
-          };
-        })
-        .filter((item) => item.id && (direction === "up" ? item.y < currentY - 4 : item.y > currentY + 4))
-        .sort((a, b) => {
-          const rowDistance = direction === "up" ? b.y - a.y : a.y - b.y;
-          if (Math.abs(rowDistance) > 4) {
-            return rowDistance;
-          }
-          return Math.abs(a.x - currentX) - Math.abs(b.x - currentX);
-        });
-      const next = candidates[0];
-      if (!next?.id) {
-        return false;
-      }
-      setActiveId(next.id);
-      next.card.scrollIntoView({ block: "nearest", inline: "nearest" });
-      return true;
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isEditing = target?.closest("input, textarea, select, [contenteditable='true']");
-      if (isEditing) {
-        return;
-      }
-      if (event.key === "ArrowLeft" && similarNavigation.previousId) {
-        event.preventDefault();
+    const cards = Array.from(document.querySelectorAll<HTMLElement>(".duplicates-workspace .similar-thumb[data-photo-id]"));
+    const current = cards.find((card) => card.dataset.photoId === activePhoto.id);
+    if (!current) {
+      return false;
+    }
+    const currentRect = current.getBoundingClientRect();
+    const currentX = currentRect.left + currentRect.width / 2;
+    const currentY = currentRect.top + currentRect.height / 2;
+    const candidates = cards
+      .map((card) => {
+        const rect = card.getBoundingClientRect();
+        return {
+          card,
+          id: card.dataset.photoId,
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        };
+      })
+      .filter((item) => item.id && (direction === "up" ? item.y < currentY - 4 : item.y > currentY + 4))
+      .sort((a, b) => {
+        const rowDistance = direction === "up" ? b.y - a.y : a.y - b.y;
+        if (Math.abs(rowDistance) > 4) {
+          return rowDistance;
+        }
+        return Math.abs(a.x - currentX) - Math.abs(b.x - currentX);
+      });
+    const next = candidates[0];
+    if (!next?.id) {
+      return false;
+    }
+    setActiveId(next.id);
+    next.card.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return true;
+  }, [activePhoto, setActiveId]);
+
+  const getGridColumnCount = useCallback((selector: string) => {
+    const gallery = document.querySelector(selector);
+    const cards = gallery ? Array.from(gallery.querySelectorAll<HTMLElement>("[data-photo-id]")) : [];
+    if (!cards.length) {
+      return 1;
+    }
+    const firstTop = cards[0].getBoundingClientRect().top;
+    return Math.max(1, cards.filter((card) => Math.abs(card.getBoundingClientRect().top - firstTop) < 2).length);
+  }, []);
+
+  const scrollSelectedPhotoIntoView = useCallback((id: string, rootSelector?: string) => {
+    window.requestAnimationFrame(() => {
+      const root = rootSelector ? document.querySelector(rootSelector) : document;
+      root?.querySelector<HTMLElement>(`[data-photo-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }, []);
+
+  const selectPhotoByOffset = useCallback((ids: string[], offset: number, rootSelector?: string) => {
+    if (!activePhoto || !ids.length) {
+      return false;
+    }
+    const currentIndex = ids.findIndex((id) => id === activePhoto.id);
+    if (currentIndex < 0) {
+      return false;
+    }
+    const nextIndex = Math.min(Math.max(currentIndex + offset, 0), ids.length - 1);
+    if (nextIndex === currentIndex) {
+      return false;
+    }
+    const nextId = ids[nextIndex];
+    setActiveId(nextId);
+    scrollSelectedPhotoIntoView(nextId, rootSelector);
+    return true;
+  }, [activePhoto, scrollSelectedPhotoIntoView, setActiveId]);
+
+  const selectGlobalPhotoDirection = useCallback((direction: "left" | "right" | "up" | "down") => {
+    if (isInspectorPreviewOpen) {
+      return false;
+    }
+    const focusedElement = document.activeElement;
+    const isLibraryFocused = focusedElement instanceof HTMLElement && Boolean(focusedElement.closest(".folder-browser-panel"));
+    if (isLibraryFocused) {
+      const ids = folderPhotos.map((photo) => photo.id);
+      const columns = getGridColumnCount(".folder-browser-panel .folder-item-grid");
+      const offset = direction === "left" ? -1 : direction === "right" ? 1 : direction === "up" ? -columns : columns;
+      return selectPhotoByOffset(ids, offset, ".folder-browser-panel");
+    }
+    if (activeTab === "duplicates") {
+      if (direction === "left") {
+        if (!similarNavigation?.previousId) return false;
         setActiveId(similarNavigation.previousId);
+        scrollSelectedPhotoIntoView(similarNavigation.previousId, ".duplicates-workspace");
+        return true;
       }
-      if (event.key === "ArrowRight" && similarNavigation.nextId) {
-        event.preventDefault();
+      if (direction === "right") {
+        if (!similarNavigation?.nextId) return false;
         setActiveId(similarNavigation.nextId);
+        scrollSelectedPhotoIntoView(similarNavigation.nextId, ".duplicates-workspace");
+        return true;
       }
-      if (event.key === "ArrowUp") {
-        if (selectVerticalNeighbor("up")) {
-          event.preventDefault();
-        }
+      return selectSimilarityVerticalNeighbor(direction === "up" ? "up" : "down");
+    }
+
+    if (activeTab === "review") {
+      const ids = folderPhotos.map((photo) => photo.id);
+      const columns = getGridColumnCount(".review-workspace .bridge-gallery");
+      const offset = direction === "left" ? -1 : direction === "right" ? 1 : direction === "up" ? -columns : columns;
+      return selectPhotoByOffset(ids, offset, ".review-workspace .bridge-gallery");
+    }
+
+    if (activeTab === "export") {
+      const offset = direction === "left" || direction === "up" ? -1 : 1;
+      return selectPhotoByOffset(exportQueueList, offset, ".export-list");
+    }
+
+    const librarySelectedOnly = activeTab === "stats";
+    if (librarySelectedOnly) {
+      const ids = folderPhotos.map((photo) => photo.id);
+      const columns = getGridColumnCount(".folder-browser-panel .folder-item-grid");
+      const offset = direction === "left" ? -1 : direction === "right" ? 1 : direction === "up" ? -columns : columns;
+      return selectPhotoByOffset(ids, offset, ".folder-browser-panel");
+    }
+
+    const ids = visiblePhotos.map((photo) => photo.id);
+    const columns = getGridColumnCount(".browse-workspace .bridge-gallery");
+    const offset = direction === "left" ? -1 : direction === "right" ? 1 : direction === "up" ? -columns : columns;
+    return selectPhotoByOffset(ids, offset, ".browse-workspace .bridge-gallery");
+  }, [
+    activeTab,
+    exportQueueList,
+    folderPhotos,
+    getGridColumnCount,
+    isInspectorPreviewOpen,
+    scrollSelectedPhotoIntoView,
+    selectPhotoByOffset,
+    selectSimilarityVerticalNeighbor,
+    setActiveId,
+    similarNavigation,
+    visiblePhotos
+  ]);
+
+  const appShortcutScopes = useMemo<ShortcutScope[]>(() => {
+    const scopes: ShortcutScope[] = ["global"];
+    if (activeTab === "duplicates" && !isInspectorPreviewOpen) {
+      scopes.unshift("similarity");
+    }
+    return scopes;
+  }, [activeTab, isInspectorPreviewOpen]);
+
+  const shortcutHelpScopes = useMemo<ShortcutScope[]>(() => {
+    const scopes: ShortcutScope[] = ["global"];
+    if (activeTab === "duplicates") {
+      scopes.push("similarity");
+    }
+    if (activeTab === "review") {
+      scopes.push("review");
+    }
+    return scopes;
+  }, [activeTab]);
+
+  const appShortcutHandlers = useMemo<ShortcutHandlers>(() => ({
+    "global.openPreview": () => {
+      if (!activePhoto || isInspectorPreviewOpen) {
+        return false;
       }
-      if (event.key === "ArrowDown") {
-        if (selectVerticalNeighbor("down")) {
-          event.preventDefault();
-        }
+      setOpenPreviewSignal((value) => value + 1);
+    },
+    "global.toggleQueue": () => {
+      if (!activePhoto || activeTab === "review") {
+        return false;
       }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePhoto, activeTab, setActiveId, similarNavigation]);
+      toggleExportQueue(activePhoto.id);
+      updateStatus(exportQueueIds.has(activePhoto.id) ? "Removed photo from export queue." : "Added photo to export queue.", "ok");
+    },
+    "global.showHelp": () => {
+      setIsShortcutHelpOpen(true);
+    },
+    "global.previousPhoto": () => selectGlobalPhotoDirection("left"),
+    "global.nextPhoto": () => selectGlobalPhotoDirection("right"),
+    "global.photoDown": () => selectGlobalPhotoDirection("down"),
+    "global.photoUp": () => selectGlobalPhotoDirection("up"),
+    "similarity.previous": () => {
+      if (!similarNavigation?.previousId) {
+        return false;
+      }
+      setActiveId(similarNavigation.previousId);
+    },
+    "similarity.next": () => {
+      if (!similarNavigation?.nextId) {
+        return false;
+      }
+      setActiveId(similarNavigation.nextId);
+    },
+    "similarity.up": () => selectSimilarityVerticalNeighbor("up"),
+    "similarity.down": () => selectSimilarityVerticalNeighbor("down")
+  }), [activePhoto, activeTab, exportQueueIds, isInspectorPreviewOpen, selectGlobalPhotoDirection, selectSimilarityVerticalNeighbor, setActiveId, similarNavigation, toggleExportQueue, updateStatus]);
+
+  useShortcuts({
+    shortcuts: shortcutRegistry,
+    handlers: appShortcutHandlers,
+    activeScopes: appShortcutScopes,
+    disabled: isShortcutHelpOpen
+  });
 
   function onToggleSimilarDelete(id: string) {
     setSimilarDeleteIds((prev) => {
@@ -664,6 +803,7 @@ export default function App() {
         folderPhotos={folderPhotos}
         ratings={ratings}
         exportQueueIds={exportQueueIds}
+        shortcutsDisabled={isShortcutHelpOpen}
         onSelectPhoto={setActiveId}
         onRatePhoto={ratePhoto}
         onAutoRateByScore={onAutoRateByScore}
@@ -693,6 +833,7 @@ export default function App() {
       <ExportWorkspace
         photos={photos}
         queuedIds={exportQueueList}
+        activePhotoId={activePhoto?.id ?? null}
         onRemove={removeFromExportQueue}
         onClear={() => {
           if (!activeWorkspaceId) return;
@@ -762,61 +903,78 @@ export default function App() {
 
   if (!activeWorkspace) {
     return (
-      <WorkspaceLauncher
-        workspaces={library.workspaces}
-        statusText={statusText}
-        statusTone={statusTone}
-        isLoading={!library.isLibraryReady || library.isLibraryLoading}
-        onOpenFolder={() => void onOpenFolder()}
-        onOpenWorkspaceFile={() => void onOpenWorkspaceFile()}
-        onWorkspaceChange={(workspaceId) => {
-          void activateWorkspace(workspaceId);
-        }}
-      />
+      <>
+        <WorkspaceLauncher
+          workspaces={library.workspaces}
+          statusText={statusText}
+          statusTone={statusTone}
+          isLoading={!library.isLibraryReady || library.isLibraryLoading}
+          onOpenFolder={() => void onOpenFolder()}
+          onOpenWorkspaceFile={() => void onOpenWorkspaceFile()}
+          onWorkspaceChange={(workspaceId) => {
+            void activateWorkspace(workspaceId);
+          }}
+        />
+        <ShortcutHelpDialog
+          open={isShortcutHelpOpen}
+          scopes={shortcutHelpScopes}
+          onClose={() => setIsShortcutHelpOpen(false)}
+        />
+      </>
     );
   }
 
   return (
-    <WorkspaceShell
-      activeTab={activeTab}
-      currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
-      exportQueueCount={exportQueueList.length}
-      isRefreshing={isRefreshing}
-      isRescoring={isRescoring}
-      backgroundProgress={backgroundProgress}
-      onTabChange={setActiveTab}
-      onRefresh={() => void onRefresh()}
-      onRefreshScores={() => void onRefreshScores()}
-      onExportQueue={() => void onExport()}
-      sidebar={
-        <>
-          {workspaceControls}
-          <FolderNavigator
-            folders={folders}
-            photos={folderPhotos}
-            activeFolderPath={activeFolderPath}
-            activePhotoId={activePhoto?.id ?? null}
-            onSelectFolder={setActiveFolderPath}
+    <>
+      <WorkspaceShell
+        activeTab={activeTab}
+        currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
+        exportQueueCount={exportQueueList.length}
+        isRefreshing={isRefreshing}
+        isRescoring={isRescoring}
+        backgroundProgress={backgroundProgress}
+        onTabChange={setActiveTab}
+        onRefresh={() => void onRefresh()}
+        onRefreshScores={() => void onRefreshScores()}
+        onExportQueue={() => void onExport()}
+        sidebar={
+          <>
+            {workspaceControls}
+            <FolderNavigator
+              folders={folders}
+              photos={folderPhotos}
+              activeFolderPath={activeFolderPath}
+              activePhotoId={activePhoto?.id ?? null}
+              onSelectFolder={setActiveFolderPath}
+              onSelectPhoto={setActiveId}
+            />
+          </>
+        }
+        inspector={
+          <InspectorPanel
+            activePhoto={activePhoto}
+            ratings={ratings}
+            exportQueueIds={exportQueueIds}
+            openPreviewSignal={openPreviewSignal}
+            shortcutsDisabled={isShortcutHelpOpen}
+            similarNavigation={similarNavigation}
+            onRatePhoto={ratePhoto}
+            onToggleExportQueue={toggleExportQueue}
             onSelectPhoto={setActiveId}
+            onPreviewOpenChange={setIsInspectorPreviewOpen}
+            onToggleSimilarRemove={onToggleSimilarDelete}
+            onSaveScoreOverride={saveScoreOverride}
+            onSaveOrientationOverride={saveOrientationOverride}
           />
-        </>
-      }
-      inspector={
-        <InspectorPanel
-          activePhoto={activePhoto}
-          ratings={ratings}
-          exportQueueIds={exportQueueIds}
-          similarNavigation={similarNavigation}
-          onRatePhoto={ratePhoto}
-          onToggleExportQueue={toggleExportQueue}
-          onSelectPhoto={setActiveId}
-          onToggleSimilarRemove={onToggleSimilarDelete}
-          onSaveScoreOverride={saveScoreOverride}
-          onSaveOrientationOverride={saveOrientationOverride}
-        />
-      }
-    >
-      {workspace}
-    </WorkspaceShell>
+        }
+      >
+        {workspace}
+      </WorkspaceShell>
+      <ShortcutHelpDialog
+        open={isShortcutHelpOpen}
+        scopes={shortcutHelpScopes}
+        onClose={() => setIsShortcutHelpOpen(false)}
+      />
+    </>
   );
 }

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import { shortcutRegistry } from "../../shortcuts/registry";
+import type { ShortcutHandlers } from "../../shortcuts/types";
+import { useShortcuts } from "../../shortcuts/useShortcuts";
 import type { Photo } from "../../types";
 import { Button } from "../ui/button";
 import { PhotoGrid } from "../library/PhotoGrid";
@@ -9,13 +12,14 @@ interface ReviewWorkspaceProps {
   folderPhotos: Photo[];
   ratings: Map<string, number>;
   exportQueueIds: Set<string>;
+  shortcutsDisabled?: boolean;
   onSelectPhoto: (id: string) => void;
   onRatePhoto: (id: string, rating: number) => void;
   onAutoRateByScore: () => void;
   onToggleExportQueue: (id: string) => void;
 }
 
-export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueueIds, onSelectPhoto, onRatePhoto, onAutoRateByScore, onToggleExportQueue }: ReviewWorkspaceProps) {
+export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueueIds, shortcutsDisabled = false, onSelectPhoto, onRatePhoto, onAutoRateByScore, onToggleExportQueue }: ReviewWorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const reviewStageRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -91,75 +95,31 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
     setClampedPreviewZoom((zoom) => zoom + zoomDelta);
   }, [setClampedPreviewZoom]);
 
-  const getGalleryColumnCount = useCallback(() => {
-    const gallery = workspaceRef.current?.querySelector(".bridge-gallery");
-    const cards = gallery ? Array.from(gallery.querySelectorAll<HTMLElement>(".photo-card")) : [];
-    if (!cards.length) return 1;
-
-    const firstTop = cards[0].getBoundingClientRect().top;
-    const firstRowCount = cards.filter((card) => Math.abs(card.getBoundingClientRect().top - firstTop) < 2).length;
-    return Math.max(1, firstRowCount);
-  }, []);
-
-  useEffect(() => {
-    if (!activePhoto) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return;
-
-      if (event.metaKey && (event.key === "+" || event.key === "=")) {
-        event.preventDefault();
-        setClampedPreviewZoom((zoom) => zoom + 25);
-        return;
+  const reviewShortcutHandlers = useMemo<ShortcutHandlers>(() => ({
+    "review.toggleQueue": () => {
+      if (!activePhoto) {
+        return false;
       }
+      onToggleExportQueue(activePhoto.id);
+    },
+    "review.zoomIn": () => {
+      setClampedPreviewZoom((zoom) => zoom + 25);
+    },
+    "review.zoomOut": () => {
+      setClampedPreviewZoom((zoom) => zoom - 25);
+    },
+    "review.resetZoom": () => {
+      setClampedPreviewZoom(100);
+    }
+  }), [activePhoto, onToggleExportQueue, setClampedPreviewZoom]);
+  const reviewShortcutScopes = useMemo(() => ["review" as const], []);
 
-      if (event.metaKey && (event.key === "-" || event.key === "_")) {
-        event.preventDefault();
-        setClampedPreviewZoom((zoom) => zoom - 25);
-        return;
-      }
-
-      if (event.metaKey && event.key === "0") {
-        event.preventDefault();
-        setClampedPreviewZoom(100);
-        return;
-      }
-
-      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-
-      const key = event.key.toLowerCase();
-      if (key === "q") {
-        event.preventDefault();
-        if (!event.repeat) {
-          onToggleExportQueue(activePhoto.id);
-        }
-        return;
-      }
-
-      if (!["h", "j", "k", "l"].includes(key)) return;
-
-      const currentIndex = folderPhotos.findIndex((photo) => photo.id === activePhoto.id);
-      if (currentIndex < 0) return;
-
-      const columnCount = getGalleryColumnCount();
-      const offsetByKey: Record<string, number> = {
-        h: -1,
-        j: columnCount,
-        k: -columnCount,
-        l: 1
-      };
-      const nextIndex = Math.min(Math.max(currentIndex + offsetByKey[key], 0), folderPhotos.length - 1);
-      if (nextIndex === currentIndex) return;
-
-      event.preventDefault();
-      onSelectPhoto(folderPhotos[nextIndex].id);
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activePhoto, folderPhotos, getGalleryColumnCount, onSelectPhoto, onToggleExportQueue, setClampedPreviewZoom]);
+  useShortcuts({
+    shortcuts: shortcutRegistry,
+    handlers: reviewShortcutHandlers,
+    activeScopes: reviewShortcutScopes,
+    disabled: shortcutsDisabled || !activePhoto
+  });
 
   useEffect(() => {
     const activeCard = workspaceRef.current?.querySelector(".bridge-gallery .photo-card.active");

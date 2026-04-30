@@ -826,6 +826,11 @@ body {
   background: #ffffff;
 }
 
+.export-row.active {
+  border-color: #6fbfd4;
+  box-shadow: 0 0 0 2px rgba(43, 158, 193, 0.16);
+}
+
 .export-thumb {
   width: 78px;
   aspect-ratio: 4 / 3;
@@ -1906,6 +1911,13 @@ body {
   display: grid;
   grid-template-rows: auto minmax(178px, 1fr);
   min-height: 342px;
+}
+
+.photo-card:focus,
+.photo-card:focus-visible,
+.folder-browser-tile:focus,
+.folder-browser-tile:focus-visible {
+  outline: none;
 }
 
 .photo-card.active {
@@ -3108,6 +3120,112 @@ body {
 
 .inspector-lightbox-close:hover {
   background: rgba(21, 29, 38, 0.86);
+}
+
+.shortcut-help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(11, 15, 21, 0.56);
+  backdrop-filter: blur(12px) saturate(0.78);
+}
+
+.shortcut-help-panel {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  border: 1px solid rgba(124, 143, 161, 0.42);
+  border-radius: 18px;
+  background: #1a2028;
+  color: #edf3f7;
+  box-shadow: 0 28px 72px rgba(3, 7, 12, 0.42);
+}
+
+.shortcut-help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid rgba(124, 143, 161, 0.24);
+}
+
+.shortcut-help-head h2 {
+  margin: 3px 0 0;
+  font-size: 1.25rem;
+  letter-spacing: 0;
+}
+
+.shortcut-help-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(124, 143, 161, 0.34);
+  border-radius: 999px;
+  background: #232b35;
+  color: #edf3f7;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shortcut-help-close:hover,
+.shortcut-help-close:focus-visible {
+  border-color: rgba(113, 215, 242, 0.72);
+  background: #2b3541;
+  outline: none;
+}
+
+.shortcut-help-groups {
+  display: grid;
+  gap: 16px;
+  padding: 18px 22px 22px;
+}
+
+.shortcut-help-group {
+  display: grid;
+  gap: 8px;
+}
+
+.shortcut-help-group h3 {
+  margin: 0 0 2px;
+  color: #9fb0bf;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shortcut-help-row {
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  align-items: center;
+  gap: 14px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgba(124, 143, 161, 0.18);
+  border-radius: 10px;
+  background: #202832;
+  color: #dce6ee;
+  font-size: 0.88rem;
+}
+
+.shortcut-help-row kbd {
+  justify-self: start;
+  min-width: 38px;
+  padding: 5px 9px;
+  border: 1px solid rgba(177, 194, 209, 0.42);
+  border-bottom-color: rgba(177, 194, 209, 0.22);
+  border-radius: 7px;
+  background: #111821;
+  color: #f6fbff;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
 }
 
 @media (max-width: 1280px) {

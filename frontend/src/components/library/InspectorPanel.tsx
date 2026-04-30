@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { shortcutRegistry } from "../../shortcuts/registry";
+import type { ShortcutHandlers } from "../../shortcuts/types";
+import { useShortcuts } from "../../shortcuts/useShortcuts";
 import type { Photo } from "../../types";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -7,6 +10,8 @@ interface InspectorPanelProps {
   activePhoto: Photo | null;
   ratings: Map<string, number>;
   exportQueueIds: Set<string>;
+  openPreviewSignal?: number;
+  shortcutsDisabled?: boolean;
   similarNavigation?: {
     current: number;
     total: number;
@@ -19,6 +24,7 @@ interface InspectorPanelProps {
   onRatePhoto: (id: string, rating: number) => void;
   onToggleExportQueue: (id: string) => void;
   onSelectPhoto: (id: string) => void;
+  onPreviewOpenChange?: (isOpen: boolean) => void;
   onToggleSimilarRemove?: (id: string) => void;
   onSaveScoreOverride: (id: string, manualScore: number | null) => Promise<void>;
   onSaveOrientationOverride: (id: string, orientationOverride: 0 | 90 | 180 | 270 | null) => Promise<void>;
@@ -163,10 +169,13 @@ export function InspectorPanel({
   activePhoto,
   ratings,
   exportQueueIds,
+  openPreviewSignal = 0,
+  shortcutsDisabled = false,
   similarNavigation,
   onRatePhoto,
   onToggleExportQueue,
   onSelectPhoto,
+  onPreviewOpenChange,
   onToggleSimilarRemove,
   onSaveScoreOverride,
   onSaveOrientationOverride
@@ -175,6 +184,18 @@ export function InspectorPanel({
   const [scoreDraft, setScoreDraft] = useState("");
   const [isSavingScore, setIsSavingScore] = useState(false);
   const [isSavingOrientation, setIsSavingOrientation] = useState(false);
+  const lastPreviewSignalRef = useRef(openPreviewSignal);
+
+  useEffect(() => {
+    if (activePhoto && openPreviewSignal > lastPreviewSignalRef.current) {
+      setIsPreviewOpen(true);
+    }
+    lastPreviewSignalRef.current = openPreviewSignal;
+  }, [activePhoto, openPreviewSignal]);
+
+  useEffect(() => {
+    onPreviewOpenChange?.(isPreviewOpen);
+  }, [isPreviewOpen, onPreviewOpenChange]);
 
   useEffect(() => {
     if (!activePhoto) {
@@ -195,30 +216,41 @@ export function InspectorPanel({
     }
 
     const previousOverflow = document.body.style.overflow;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsPreviewOpen(false);
-        return;
-      }
-      if (event.key === "ArrowLeft" && similarNavigation?.previousId) {
-        event.preventDefault();
-        onSelectPhoto(similarNavigation.previousId);
-        return;
-      }
-      if (event.key === "ArrowRight" && similarNavigation?.nextId) {
-        event.preventDefault();
-        onSelectPhoto(similarNavigation.nextId);
-      }
-    };
-
     document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
 
     return () => {
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isPreviewOpen, onSelectPhoto, similarNavigation]);
+  }, [isPreviewOpen]);
+
+  const lightboxShortcutHandlers = useMemo<ShortcutHandlers>(() => ({
+    "lightbox.close": () => {
+      setIsPreviewOpen(false);
+    },
+    "lightbox.togglePreview": () => {
+      setIsPreviewOpen(false);
+    },
+    "lightbox.previous": () => {
+      if (!similarNavigation?.previousId) {
+        return false;
+      }
+      onSelectPhoto(similarNavigation.previousId);
+    },
+    "lightbox.next": () => {
+      if (!similarNavigation?.nextId) {
+        return false;
+      }
+      onSelectPhoto(similarNavigation.nextId);
+    }
+  }), [onSelectPhoto, similarNavigation]);
+  const lightboxShortcutScopes = useMemo(() => ["lightbox" as const], []);
+
+  useShortcuts({
+    shortcuts: shortcutRegistry,
+    handlers: lightboxShortcutHandlers,
+    activeScopes: lightboxShortcutScopes,
+    disabled: !isPreviewOpen || shortcutsDisabled
+  });
 
   async function handleSaveScoreOverride() {
     if (!activePhoto) {

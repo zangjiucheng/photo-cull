@@ -4,6 +4,7 @@ import { Button } from "../ui/button";
 interface ExportWorkspaceProps {
   photos: Photo[];
   queuedIds: string[];
+  activePhotoId: string | null;
   onRemove: (id: string) => void;
   onClear: () => void;
   onExport: () => void;
@@ -16,7 +17,7 @@ function formatBytes(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function ExportWorkspace({ photos, queuedIds, onRemove, onClear, onExport, onSelectPhoto }: ExportWorkspaceProps) {
+export function ExportWorkspace({ photos, queuedIds, activePhotoId, onRemove, onClear, onExport, onSelectPhoto }: ExportWorkspaceProps) {
   const byId = new Map(photos.map((photo) => [photo.id, photo]));
   const queuedPhotos = queuedIds.map((id) => byId.get(id)).filter((photo): photo is Photo => Boolean(photo));
   const totalBytes = queuedPhotos.reduce((sum, photo) => sum + photo.size, 0);
@@ -36,7 +37,7 @@ export function ExportWorkspace({ photos, queuedIds, onRemove, onClear, onExport
       </div>
       <div className="export-list">
         {queuedPhotos.map((photo) => (
-          <article className="export-row" key={photo.id}>
+          <article className={`export-row ${activePhotoId === photo.id ? "active" : ""}`.trim()} data-photo-id={photo.id} key={photo.id}>
             <button className="export-thumb" onClick={() => onSelectPhoto(photo.id)}><img src={photo.url} alt={photo.name} loading="lazy" /></button>
             <div>
               <strong>{photo.name}</strong>

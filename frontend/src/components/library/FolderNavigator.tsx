@@ -166,6 +166,7 @@ export function FolderNavigator({
                   <button
                     key={photo.id}
                     className={`folder-browser-tile folder-file-tile ${isActive ? "active" : ""}`.trim()}
+                    data-photo-id={photo.id}
                     onClick={() => onSelectPhoto(photo.id)}
                     aria-current={isActive ? "true" : undefined}
                     role="listitem"

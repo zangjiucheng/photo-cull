@@ -57,6 +57,7 @@ export function PhotoGrid({
           <article
             key={photo.id}
             className={`photo-card ${isActive ? "active" : ""}`.trim()}
+            data-photo-id={photo.id}
             role="button"
             tabIndex={0}
             onClick={() => onSelectPhoto(photo.id)}

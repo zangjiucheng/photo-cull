@@ -429,6 +429,7 @@ export function LibraryBrowser({
                             <article
                               key={photo.id}
                               className={`similar-thumb ${isChecked ? "marked" : ""}`.trim()}
+                              data-photo-id={photo.id}
                             >
                               <button className="similar-preview" type="button" onClick={() => onSelectPhoto(photo.id)}>
                                 <img src={photo.url} alt={photo.name} loading="lazy" />
@@ -472,6 +473,7 @@ export function LibraryBrowser({
                   <article
                     key={photo.id}
                     className={`photo-card ${isActive ? "active" : ""}`.trim()}
+                    data-photo-id={photo.id}
                     role="button"
                     tabIndex={0}
                     onClick={() => onSelectPhoto(photo.id)}
