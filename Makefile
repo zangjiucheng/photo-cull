@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := help
 
 PYTHON ?= python3
+PACKAGE_VENV ?= .package-venv
+PACKAGE_PYTHON ?= $(abspath $(PACKAGE_VENV)/bin/python)
 NPM ?= npm
 NPM_CONFIG_CACHE ?= /tmp/ai-culling-npm-cache
 FLASK_HOST ?= 127.0.0.1
@@ -9,7 +11,7 @@ DOCKER ?= docker
 DOCKER_COMPOSE ?= docker compose
 IMAGE_NAME ?= ai-culling-app
 
-.PHONY: help setup setup-py setup-web setup-ai setup-faiss test test-py test-web build-web run-backend dev dev-desktop dev-web kill docker-build docker-up docker-down clean
+.PHONY: help setup setup-py setup-web setup-package setup-ai setup-faiss test test-py test-web build-web build-backend package package-dmg package-dir run-backend dev dev-desktop dev-web kill docker-build docker-up docker-down clean
 
 help:
 	@echo "Available targets:"
@@ -18,6 +20,9 @@ help:
 	@echo "  make dev-web        build web assets and run Flask for browser debugging"
 	@echo "  make test           run backend and frontend tests"
 	@echo "  make build-web      build React frontend into static/dist"
+	@echo "  make package        build a release desktop app"
+	@echo "  make package-dmg    build a macOS DMG release package"
+	@echo "  make package-dir    build an unpacked desktop app for local smoke testing"
 	@echo "  make setup-ai       install optional AI scoring dependencies"
 	@echo "  make setup-faiss    install optional FAISS similarity backend"
 	@echo "  make docker-build   build Docker image"
@@ -38,8 +43,26 @@ setup-faiss:
 setup-web:
 	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) install
 
+setup-package:
+	$(PYTHON) -m venv $(PACKAGE_VENV)
+	$(PACKAGE_PYTHON) -m pip install --upgrade pip
+	$(PACKAGE_PYTHON) -m pip install -r requirements-package.txt
+	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) install
+
 build-web:
 	cd frontend && $(NPM) --cache $(NPM_CONFIG_CACHE) run build
+
+build-backend:
+	cd frontend && PYTHON=$(PACKAGE_PYTHON) $(NPM) --cache $(NPM_CONFIG_CACHE) run backend:build
+
+package: setup-package
+	cd frontend && PYTHON=$(PACKAGE_PYTHON) $(NPM) --cache $(NPM_CONFIG_CACHE) run package
+
+package-dmg: setup-package
+	cd frontend && PYTHON=$(PACKAGE_PYTHON) $(NPM) --cache $(NPM_CONFIG_CACHE) run package:dmg
+
+package-dir: setup-package
+	cd frontend && PYTHON=$(PACKAGE_PYTHON) $(NPM) --cache $(NPM_CONFIG_CACHE) run package:dir
 
 test: test-py test-web
 
@@ -82,5 +105,6 @@ clean:
 	rm -rf build dist release
 	rm -rf frontend/dist
 	rm -rf frontend/.electron-dev
+	rm -rf .package-venv
 	rm -rf __pycache__
 	find . -name "*.pyc" -delete

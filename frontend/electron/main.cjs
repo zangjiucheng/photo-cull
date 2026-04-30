@@ -8,15 +8,21 @@ const appName = "AI Photo Culling";
 app.setName(appName);
 app.setAboutPanelOptions({ applicationName: appName });
 
-const repoRoot = path.resolve(__dirname, "..", "..");
+const isPackaged = app.isPackaged;
+const repoRoot = isPackaged ? process.resourcesPath : path.resolve(__dirname, "..", "..");
 const backendHost = process.env.FLASK_HOST || "127.0.0.1";
-const backendPort = Number(process.env.FLASK_PORT || "5050");
+const configuredBackendPort = process.env.FLASK_PORT ? Number(process.env.FLASK_PORT) : null;
+let backendPort = configuredBackendPort || 5050;
+const packagedBackendName = process.platform === "win32" ? "ai-culling-backend.exe" : "ai-culling-backend";
+const packagedBackendPath = path.join(process.resourcesPath, "backend", packagedBackendName);
+const hasPackagedBackend = isPackaged && fs.existsSync(packagedBackendPath);
 const pythonBin = process.env.PYTHON || "python3";
 const backendEntry = process.env.BACKEND_ENTRY
   ? path.resolve(repoRoot, process.env.BACKEND_ENTRY)
   : path.join(repoRoot, "app.py");
 const appIconPath = path.join(__dirname, "assets", "icon.png");
 let backendProcess = null;
+let backendLogFd = null;
 
 function configureApplicationMenu() {
   const template = [
@@ -108,7 +114,31 @@ function prepareDbPath() {
   return dbPath;
 }
 
-function waitForPort(host, port, timeoutMs = 15000) {
+function prepareUserDataDir(name) {
+  const targetPath = path.join(app.getPath("userData"), name);
+  fs.mkdirSync(targetPath, { recursive: true });
+  return targetPath;
+}
+
+function findAvailablePort(host) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on("error", reject);
+    server.listen(0, host, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : null;
+      server.close(() => {
+        if (port) {
+          resolve(port);
+        } else {
+          reject(new Error("Could not allocate backend port"));
+        }
+      });
+    });
+  });
+}
+
+function waitForPort(host, port, timeoutMs = 60000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     function check() {
@@ -131,15 +161,33 @@ function waitForPort(host, port, timeoutMs = 15000) {
 
 function startBackend() {
   const dbPath = prepareDbPath();
-  backendProcess = spawn(pythonBin, [backendEntry], {
+  const uploadFolder = prepareUserDataDir("uploads");
+  const logPath = path.join(app.getPath("userData"), "backend.log");
+  const command = hasPackagedBackend ? packagedBackendPath : pythonBin;
+  const args = hasPackagedBackend ? [] : [backendEntry];
+  backendLogFd = isPackaged ? fs.openSync(logPath, "a") : null;
+  backendProcess = spawn(command, args, {
     cwd: repoRoot,
     env: {
       ...process.env,
       FLASK_HOST: backendHost,
       FLASK_PORT: String(backendPort),
       DB_PATH: dbPath,
+      UPLOAD_FOLDER: uploadFolder,
+      FLASK_DEBUG: "0",
+      PYTHONUNBUFFERED: "1",
     },
-    stdio: "inherit",
+    stdio: isPackaged && backendLogFd ? ["ignore", backendLogFd, backendLogFd] : "inherit",
+  });
+  backendProcess.on("error", (error) => {
+    if (backendLogFd) {
+      fs.writeSync(backendLogFd, `[electron] backend spawn error: ${error.stack || error.message}\n`);
+    }
+  });
+  backendProcess.on("exit", (code, signal) => {
+    if (backendLogFd) {
+      fs.writeSync(backendLogFd, `[electron] backend exited code=${code ?? ""} signal=${signal ?? ""}\n`);
+    }
   });
 }
 
@@ -183,6 +231,9 @@ function workspaceFileDefaultName(name) {
 
 async function createWindow() {
   configureApplicationMenu();
+  if (isPackaged && !configuredBackendPort) {
+    backendPort = await findAvailablePort(backendHost);
+  }
   startBackend();
   await waitForPort(backendHost, backendPort);
 
@@ -284,5 +335,9 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   if (backendProcess && !backendProcess.killed) {
     backendProcess.kill();
+  }
+  if (backendLogFd) {
+    fs.closeSync(backendLogFd);
+    backendLogFd = null;
   }
 });
