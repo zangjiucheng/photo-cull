@@ -91,34 +91,82 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
     setClampedPreviewZoom((zoom) => zoom + zoomDelta);
   }, [setClampedPreviewZoom]);
 
+  const getGalleryColumnCount = useCallback(() => {
+    const gallery = workspaceRef.current?.querySelector(".bridge-gallery");
+    const cards = gallery ? Array.from(gallery.querySelectorAll<HTMLElement>(".photo-card")) : [];
+    if (!cards.length) return 1;
+
+    const firstTop = cards[0].getBoundingClientRect().top;
+    const firstRowCount = cards.filter((card) => Math.abs(card.getBoundingClientRect().top - firstTop) < 2).length;
+    return Math.max(1, firstRowCount);
+  }, []);
+
   useEffect(() => {
     if (!activePhoto) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!event.metaKey) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return;
 
-      if (event.key === "+" || event.key === "=") {
+      if (event.metaKey && (event.key === "+" || event.key === "=")) {
         event.preventDefault();
         setClampedPreviewZoom((zoom) => zoom + 25);
+        return;
       }
 
-      if (event.key === "-" || event.key === "_") {
+      if (event.metaKey && (event.key === "-" || event.key === "_")) {
         event.preventDefault();
         setClampedPreviewZoom((zoom) => zoom - 25);
+        return;
       }
 
-      if (event.key === "0") {
+      if (event.metaKey && event.key === "0") {
         event.preventDefault();
         setClampedPreviewZoom(100);
+        return;
       }
+
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "q") {
+        event.preventDefault();
+        if (!event.repeat) {
+          onToggleExportQueue(activePhoto.id);
+        }
+        return;
+      }
+
+      if (!["h", "j", "k", "l"].includes(key)) return;
+
+      const currentIndex = folderPhotos.findIndex((photo) => photo.id === activePhoto.id);
+      if (currentIndex < 0) return;
+
+      const columnCount = getGalleryColumnCount();
+      const offsetByKey: Record<string, number> = {
+        h: -1,
+        j: columnCount,
+        k: -columnCount,
+        l: 1
+      };
+      const nextIndex = Math.min(Math.max(currentIndex + offsetByKey[key], 0), folderPhotos.length - 1);
+      if (nextIndex === currentIndex) return;
+
+      event.preventDefault();
+      onSelectPhoto(folderPhotos[nextIndex].id);
     };
 
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activePhoto, setClampedPreviewZoom]);
+  }, [activePhoto, folderPhotos, getGalleryColumnCount, onSelectPhoto, onToggleExportQueue, setClampedPreviewZoom]);
+
+  useEffect(() => {
+    const activeCard = workspaceRef.current?.querySelector(".bridge-gallery .photo-card.active");
+    if (activeCard) {
+      activeCard.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activePhoto?.id]);
 
   useEffect(() => {
     const preview = previewRef.current;
