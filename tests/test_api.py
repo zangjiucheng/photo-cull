@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from server import create_app
-from server import db, raw_pipeline, storage
+from server import db, raw_pipeline, similarity, storage
 from server.config import AppConfig
 
 
@@ -406,6 +406,31 @@ def test_similarity_uses_cached_display_image_for_dng(client, tmp_path, monkeypa
 
     assert similar.status_code == 200
     assert similar.get_json()["groups"]
+
+
+def test_similar_detection_reuses_cached_result(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    make_image(source / "b.jpg", "blue")
+    workspace = open_workspace(client, source)
+    similarity.clear_similarity_cache()
+
+    calls = {"count": 0}
+    original_hash = similarity.perceptual_hash
+
+    def counted_hash(path, *args, **kwargs):
+        calls["count"] += 1
+        return original_hash(path, *args, **kwargs)
+
+    monkeypatch.setattr(similarity, "perceptual_hash", counted_hash)
+
+    first = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")
+    second = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.get_json() == second.get_json()
+    assert calls["count"] == 2
 
 
 def test_invalid_score_and_missing_photo(client):

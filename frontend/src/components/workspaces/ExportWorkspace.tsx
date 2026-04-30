@@ -45,7 +45,7 @@ export function ExportWorkspace({ photos, queuedIds, onRemove, onClear, onExport
             <Button variant="ghost" size="sm" onClick={() => onRemove(photo.id)}>Remove</Button>
           </article>
         ))}
-        {!queuedPhotos.length ? <div className="empty-gallery">Add photos from Browse, Review, or Duplicates before exporting.</div> : null}
+        {!queuedPhotos.length ? <div className="empty-gallery">Add photos from Browse, Review, or Similarity before exporting.</div> : null}
       </div>
     </div>
   );

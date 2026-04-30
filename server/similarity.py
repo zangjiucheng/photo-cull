@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
 import os
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -15,6 +17,10 @@ PHASH_EXACT_DISTANCE = 5
 PHASH_REVIEW_DISTANCE = 12
 CLIP_HIGH_SIMILARITY = 0.92
 CLIP_REVIEW_SIMILARITY = 0.85
+SIMILARITY_CACHE_MAX_ITEMS = 32
+
+_result_cache: dict[tuple, dict] = {}
+_result_cache_lock = threading.Lock()
 
 
 @dataclass
@@ -96,6 +102,53 @@ def quality_score(row: Any) -> float:
     return 0.0
 
 
+def clear_similarity_cache() -> None:
+    with _result_cache_lock:
+        _result_cache.clear()
+
+
+def _candidate_rows(workspace_id: str | None = None, folder_path: str | None = None) -> list[Any]:
+    rows = []
+    for row in db.list_photos(workspace_id):
+        if folder_path is not None and row["folder_path"] != folder_path:
+            continue
+        if not os.path.exists(storage.resolve_disk_path(row["path"])):
+            continue
+        rows.append(row)
+    return rows
+
+
+def _rows_signature(rows: list[Any]) -> tuple:
+    return tuple(
+        (
+            row["id"],
+            row["path"],
+            row["content_hash"],
+            row["mtime"],
+            row["size"],
+            row["score"],
+            row["manual_score"],
+            row["orientation_override"],
+            row["status"],
+        )
+        for row in rows
+    )
+
+
+def _cache_get(key: tuple) -> dict | None:
+    with _result_cache_lock:
+        cached = _result_cache.get(key)
+    return copy.deepcopy(cached) if cached is not None else None
+
+
+def _cache_set(key: tuple, payload: dict) -> None:
+    with _result_cache_lock:
+        if len(_result_cache) >= SIMILARITY_CACHE_MAX_ITEMS:
+            oldest_key = next(iter(_result_cache))
+            _result_cache.pop(oldest_key, None)
+        _result_cache[key] = copy.deepcopy(payload)
+
+
 def best_version_key(candidate: PhotoCandidate) -> tuple:
     metadata = candidate.metadata
     return (
@@ -109,14 +162,14 @@ def best_version_key(candidate: PhotoCandidate) -> tuple:
     )
 
 
-def load_candidates(workspace_id: str | None = None, folder_path: str | None = None) -> list[PhotoCandidate]:
+def load_candidates(
+    workspace_id: str | None = None,
+    folder_path: str | None = None,
+    rows: list[Any] | None = None,
+) -> list[PhotoCandidate]:
     candidates = []
-    for row in db.list_photos(workspace_id):
-        if folder_path is not None and row["folder_path"] != folder_path:
-            continue
+    for row in rows if rows is not None else _candidate_rows(workspace_id, folder_path):
         path = storage.resolve_disk_path(row["path"])
-        if not os.path.exists(path):
-            continue
         try:
             display_path = storage.display_path_for_photo_row(row)
             candidates.append(
@@ -323,14 +376,30 @@ def build_groups(candidates: list[PhotoCandidate], matches: list[dict]) -> list[
 
 
 def find_similar_groups(include_clip: bool = True, folder_path: str | None = None, workspace_id: str | None = None) -> dict:
-    candidates = load_candidates(workspace_id=workspace_id, folder_path=folder_path)
+    rows = _candidate_rows(workspace_id=workspace_id, folder_path=folder_path)
+    cache_key = (
+        "similar-v1",
+        workspace_id,
+        folder_path,
+        bool(include_clip),
+        PHASH_EXACT_DISTANCE,
+        PHASH_REVIEW_DISTANCE,
+        CLIP_HIGH_SIMILARITY,
+        CLIP_REVIEW_SIMILARITY,
+        _rows_signature(rows),
+    )
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    candidates = load_candidates(workspace_id=workspace_id, folder_path=folder_path, rows=rows)
     matches = phash_matches(candidates)
     clip_status = "skipped"
     if include_clip:
         clip_found, clip_status = clip_matches(candidates)
         matches.extend(clip_found)
 
-    return {
+    payload = {
         "groups": build_groups(candidates, matches),
         "stages": {
             "phash": {
@@ -344,3 +413,5 @@ def find_similar_groups(include_clip: bool = True, folder_path: str | None = Non
             },
         },
     }
+    _cache_set(cache_key, payload)
+    return payload

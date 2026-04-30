@@ -7,6 +7,11 @@ interface DuplicatesWorkspaceProps {
   isFindingSimilar: boolean;
   isDeletingSimilar: boolean;
   similarSummary: string;
+  similarityProgress: {
+    percent: number;
+    label: string;
+    detail: string;
+  } | null;
   activeFolderPath: string;
   onFindSimilar: () => void;
   onSelectPhoto: (id: string) => void;
@@ -25,6 +30,7 @@ export function DuplicatesWorkspace({
   isFindingSimilar,
   isDeletingSimilar,
   similarSummary,
+  similarityProgress,
   activeFolderPath,
   onFindSimilar,
   onSelectPhoto,
@@ -33,12 +39,12 @@ export function DuplicatesWorkspace({
   onAddToExportQueue
 }: DuplicatesWorkspaceProps) {
   return (
-    <div className="workspace-panel">
+    <div className="workspace-panel duplicates-workspace">
       <div className="workspace-head">
         <div>
-          <span className="panel-kicker">Duplicates</span>
+          <span className="panel-kicker">Similarity</span>
           <h2>{activeFolderPath || "All Photos"}</h2>
-          <p>Runs pHash first, then CLIP + FAISS when available. Scope defaults to the current folder.</p>
+          <p>Review visually similar photos with pHash first, then CLIP + FAISS when available. Scope defaults to the current folder.</p>
         </div>
         <div className="workspace-actions">
           <Button variant="outline" onClick={onFindSimilar} disabled={isFindingSimilar}>{isFindingSimilar ? "Finding..." : "Find Similar"}</Button>
@@ -47,6 +53,18 @@ export function DuplicatesWorkspace({
           </Button>
         </div>
       </div>
+      {similarityProgress ? (
+        <div className={`duplicate-progress bridge-summary ${isFindingSimilar ? "active" : ""}`.trim()}>
+          <div className="duplicate-progress-head">
+            <strong>{similarityProgress.label}</strong>
+            <span>{similarityProgress.percent}%</span>
+          </div>
+          <div className="progress duplicate-progress-bar" aria-label="Similarity scan progress">
+            <span style={{ width: `${similarityProgress.percent}%` }} />
+          </div>
+          <p>{similarityProgress.detail}</p>
+        </div>
+      ) : null}
       {similarSummary ? <div className="similar-summary bridge-summary">{similarSummary}</div> : null}
       {similarGroups.length ? (
         <div className="similar-groups duplicate-groups">
@@ -84,7 +102,7 @@ export function DuplicatesWorkspace({
             </article>
           ))}
         </div>
-      ) : <div className="similar-empty">No duplicate groups for this folder yet.</div>}
+      ) : <div className="similar-empty">No similar photo groups for this folder yet.</div>}
     </div>
   );
 }

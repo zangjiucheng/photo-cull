@@ -5,7 +5,7 @@ import { Button } from "../ui/button";
 const tabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "browse", label: "Browse" },
   { id: "review", label: "Review" },
-  { id: "duplicates", label: "Duplicates" },
+  { id: "duplicates", label: "Similarity" },
   { id: "export", label: "Export" },
   { id: "stats", label: "Stats" }
 ];

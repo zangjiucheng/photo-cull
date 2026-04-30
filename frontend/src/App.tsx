@@ -16,6 +16,12 @@ import type { LibraryFolder, Photo, RatingFilter, SimilarGroup, SortMode, Status
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 
+interface SimilarityProgress {
+  percent: number;
+  label: string;
+  detail: string;
+}
+
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
 }
@@ -37,6 +43,7 @@ export default function App() {
   const [isFindingSimilar, setIsFindingSimilar] = useState(false);
   const [isDeletingSimilar, setIsDeletingSimilar] = useState(false);
   const [similarSummary, setSimilarSummary] = useState("");
+  const [similarityProgress, setSimilarityProgress] = useState<SimilarityProgress | null>(null);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -369,8 +376,29 @@ export default function App() {
       updateStatus("Open a workspace before finding similar photos.", "warn");
       return;
     }
-    updateStatus("Finding similar photos...", "busy");
+    const targetCount = folderPhotos.length;
+    const folderLabel = activeFolderPath || "All Photos";
+    updateStatus(`Finding similar photos in ${folderLabel}...`, "busy");
     setIsFindingSimilar(true);
+    setSimilarityProgress({
+      percent: 8,
+      label: "Preparing similarity scan",
+      detail: `${targetCount} photo${targetCount === 1 ? "" : "s"} in scope`
+    });
+    const stages = [
+      { percent: 24, label: "Loading candidates", detail: "Reading file metadata and display images" },
+      { percent: 48, label: "Computing pHash", detail: "Comparing perceptual hashes for near matches" },
+      { percent: 72, label: "Checking visual similarity", detail: "Running CLIP when available" },
+      { percent: 90, label: "Building groups", detail: "Choosing keep candidates and delete suggestions" }
+    ];
+    let stageIndex = 0;
+    const progressTimer = window.setInterval(() => {
+      const nextStage = stages[Math.min(stageIndex, stages.length - 1)];
+      setSimilarityProgress(nextStage);
+      if (stageIndex < stages.length - 1) {
+        stageIndex += 1;
+      }
+    }, 900);
     try {
       const payload = await findSimilarPhotos({ workspaceId: activeWorkspaceId, includeClip: true, scope: "current", folderPath: activeFolderPath });
       const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
@@ -391,12 +419,23 @@ export default function App() {
       setSimilarGroups(groups);
       setSimilarDeleteIds(new Set(groups.flatMap((group) => group.candidates.filter((candidate) => candidate.deleteRecommended).map((candidate) => candidate.photoId))));
       setSimilarSummary(
-        `pHash <= ${payload.stages.phash.exactDistance} duplicate, ${payload.stages.phash.reviewDistance} review; CLIP ${payload.stages.clip.status}`
+        `pHash <= ${payload.stages.phash.exactDistance} exact match, ${payload.stages.phash.reviewDistance} review; CLIP ${payload.stages.clip.status}`
       );
+      setSimilarityProgress({
+        percent: 100,
+        label: groups.length ? `Found ${groups.length} group${groups.length === 1 ? "" : "s"}` : "No similar groups",
+        detail: `pHash complete; CLIP ${payload.stages.clip.status}`
+      });
       updateStatus(groups.length ? `Found ${groups.length} similar group(s).` : "No similar groups found.", groups.length ? "ok" : "warn");
     } catch (err) {
+      setSimilarityProgress({
+        percent: 100,
+        label: "Similarity scan failed",
+        detail: err instanceof Error ? err.message : "Failed to find similar photos"
+      });
       updateStatus(err instanceof Error ? err.message : "Failed to find similar photos", "error");
     } finally {
+      window.clearInterval(progressTimer);
       setIsFindingSimilar(false);
     }
   }
@@ -492,6 +531,7 @@ export default function App() {
         isFindingSimilar={isFindingSimilar}
         isDeletingSimilar={isDeletingSimilar}
         similarSummary={similarSummary}
+        similarityProgress={similarityProgress}
         activeFolderPath={activeFolderPath}
         onFindSimilar={onFindSimilar}
         onSelectPhoto={setActiveId}

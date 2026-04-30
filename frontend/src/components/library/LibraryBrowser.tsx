@@ -398,7 +398,7 @@ export function LibraryBrowser({
               <div className="similar-panel-head">
                 <div>
                   <div className="pane-title">Similar Photos</div>
-                  <p>Stage 1 uses pHash for duplicates. Stage 2 uses CLIP + FAISS when available. Best versions are ranked first.</p>
+                  <p>Stage 1 uses pHash for exact matches. Stage 2 uses CLIP + FAISS when available. Best versions are ranked first.</p>
                   {similarSummary ? <p className="similar-summary">{similarSummary}</p> : null}
                 </div>
                 <div className="similar-actions">
