@@ -3,6 +3,7 @@ export interface ApiPhoto {
   workspaceId: string;
   name: string;
   score: number | null;
+  scoreDetails: ScoreDetails | null;
   manualScore: number | null;
   orientationOverride: 0 | 90 | 180 | 270 | null;
   path: string;
@@ -16,6 +17,26 @@ export interface ApiPhoto {
   rating: number | null;
   status: "pending" | "processing" | "done" | "error";
   error?: string | null;
+}
+
+export interface ScoreMetricDetail {
+  group?: string;
+  weight?: number;
+  lowerBetter?: boolean;
+  scoreRange?: [number, number] | number[];
+  raw?: number;
+  normalized?: number;
+  status?: "ok" | "error" | string;
+  error?: string;
+}
+
+export interface ScoreDetails {
+  mode?: string;
+  final?: number;
+  metrics?: Record<string, ScoreMetricDetail>;
+  heuristics?: Record<string, number>;
+  errors?: Record<string, string>;
+  raw?: string;
 }
 
 export interface Photo extends ApiPhoto {

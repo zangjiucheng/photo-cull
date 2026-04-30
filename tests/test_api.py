@@ -266,6 +266,8 @@ def test_refresh_preserves_score_details_after_move(client, tmp_path):
     moved = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
     row = db.fetch_photo(moved["id"])
     assert row["score"] == 76
+    assert moved["scoreDetails"]["mode"] == "test"
+    assert moved["scoreDetails"]["metrics"]["fake"]["raw"] == 1
     assert '"mode": "test"' in row["score_details"]
 
 

@@ -126,12 +126,22 @@ def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _parse_score_details(value: str | None) -> Any | None:
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return {"raw": value}
+
+
 def row_to_photo(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "workspaceId": row["workspace_id"],
         "name": row["name"],
         "score": row["score"],
+        "scoreDetails": _parse_score_details(row["score_details"]),
         "manualScore": row["manual_score"],
         "orientationOverride": row["orientation_override"],
         "path": row["path"],

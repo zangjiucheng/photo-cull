@@ -8,6 +8,7 @@ function photo(overrides: Partial<ApiPhoto>): ApiPhoto {
     workspaceId: "ws1",
     name: "IMG_0001.jpg",
     score: 10,
+    scoreDetails: null,
     manualScore: null,
     orientationOverride: null,
     path: "/tmp/IMG_0001.jpg",

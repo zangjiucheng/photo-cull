@@ -45,6 +45,109 @@ function StarRating({
   );
 }
 
+function formatScoreValue(value: number | undefined, digits = 1): string {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "-";
+  }
+  return value.toFixed(digits).replace(/\.0$/, "");
+}
+
+function scoreQualityLabel(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "Unknown";
+  if (value >= 82) return "Strong";
+  if (value >= 70) return "Good";
+  if (value >= 50) return "Review";
+  return "Weak";
+}
+
+function ScoreReasonPanel({ photo }: { photo: Photo }) {
+  const details = photo.scoreDetails;
+  const metrics = Object.entries(details?.metrics ?? {})
+    .sort(([, a], [, b]) => (Number(b.weight) || 0) - (Number(a.weight) || 0));
+  const heuristics = details?.heuristics ?? null;
+  const errors = Object.entries(details?.errors ?? {}).filter(([, message]) => message);
+
+  if (!details) {
+    return (
+      <div className="score-reason-card">
+        <div className="score-reason-head">
+          <div>
+            <span className="score-override-label">Score Reasons</span>
+            <strong>No details yet</strong>
+          </div>
+        </div>
+        <p className="score-reason-empty">
+          {photo.status === "done" ? "Refresh AI scores to generate detailed reasons for this photo." : "Details will appear after backend scoring finishes."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="score-reason-card">
+      <div className="score-reason-head">
+        <div>
+          <span className="score-override-label">Score Reasons</span>
+          <strong>{details.mode || "AI scoring"} · Final {formatScoreValue(details.final ?? photo.score ?? undefined)}</strong>
+        </div>
+        <span className="score-reason-pill">{scoreQualityLabel(details.final ?? photo.score ?? undefined)}</span>
+      </div>
+
+      {metrics.length ? (
+        <div className="score-reason-section">
+          <span className="score-reason-section-title">Model metrics</span>
+          <div className="score-reason-list">
+            {metrics.map(([name, metric]) => {
+              const normalized = typeof metric.normalized === "number" ? metric.normalized : undefined;
+              return (
+                <div className={`score-reason-row ${metric.status === "error" ? "error" : ""}`.trim()} key={name}>
+                  <div>
+                    <strong>{name}</strong>
+                    <span>
+                      {metric.group || "metric"}
+                      {typeof metric.weight === "number" ? ` · weight ${formatScoreValue(metric.weight, 2)}` : ""}
+                      {metric.lowerBetter ? " · lower is better" : ""}
+                    </span>
+                  </div>
+                  <div className="score-reason-value">
+                    <strong>{metric.status === "error" ? "Error" : formatScoreValue(normalized)}</strong>
+                    <span>{metric.status === "error" ? metric.error || "Metric failed" : `raw ${formatScoreValue(metric.raw, 3)}`}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {heuristics ? (
+        <div className="score-reason-section">
+          <span className="score-reason-section-title">Photo signals</span>
+          <div className="score-signal-grid">
+            <div><span>Sharpness</span><strong>{formatScoreValue(heuristics.sharpness)}</strong></div>
+            <div><span>Exposure</span><strong>{formatScoreValue(heuristics.exposure)}</strong></div>
+            <div><span>Contrast</span><strong>{formatScoreValue(heuristics.contrast)}</strong></div>
+            <div><span>Clipping</span><strong>{formatScoreValue(heuristics.clipping)}</strong></div>
+            <div><span>Brightness</span><strong>{formatScoreValue(heuristics.brightness, 3)}</strong></div>
+            <div><span>Clipped</span><strong>{formatScoreValue((heuristics.clippedRatio ?? 0) * 100, 2)}%</strong></div>
+          </div>
+        </div>
+      ) : null}
+
+      {errors.length ? (
+        <div className="score-reason-section">
+          <span className="score-reason-section-title">Scoring errors</span>
+          <div className="score-error-list">
+            {errors.map(([name, message]) => <span key={name}>{name}: {message}</span>)}
+          </div>
+        </div>
+      ) : null}
+
+      {details.raw ? <p className="score-reason-empty">{details.raw}</p> : null}
+    </div>
+  );
+}
+
 export function InspectorPanel({
   activePhoto,
   ratings,
@@ -165,10 +268,16 @@ export function InspectorPanel({
               <div className="inspect-meta">
                 <h3>{activePhoto.name}</h3>
                 <p>Folder: {activePhoto.folder || "Root"}</p>
+                <StarRating
+                  photo={activePhoto}
+                  rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
+                  onRatePhoto={onRatePhoto}
+                />
                 <div className="metric-grid">
                   <div className="metric"><span>AI Score</span><strong>{activePhoto.aiScore}</strong></div>
                   <div className="metric"><span>Raw Score</span><strong>{activePhoto.score ?? "-"}</strong></div>
                 </div>
+                <ScoreReasonPanel photo={activePhoto} />
                 <div className="score-override-card">
                   <div className="score-override-head">
                     <div>
@@ -235,11 +344,6 @@ export function InspectorPanel({
                   </div>
                 </div>
                 <div className="inspector-actions">
-                  <StarRating
-                    photo={activePhoto}
-                    rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
-                    onRatePhoto={onRatePhoto}
-                  />
                   <Button
                     className="inspector-queue-button"
                     variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
