@@ -33,6 +33,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     storage.configure(app_config)
     scoring.configure(app_config)
     db.init_db()
+    db.reset_interrupted_processing()
 
     app.register_blueprint(pages)
     app.register_blueprint(api_bp, url_prefix="/api")

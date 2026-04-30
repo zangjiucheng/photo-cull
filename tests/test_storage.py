@@ -253,3 +253,43 @@ def test_init_db_adds_orientation_override_column(tmp_path):
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
 
     assert "orientation_override" in columns
+
+
+def test_reset_interrupted_processing_marks_unscored_rows_pending(tmp_path):
+    configure_tmp(tmp_path)
+    workspace = db.upsert_workspace("ws1", "Workspace", str(tmp_path))
+    db.insert_or_update_photo(
+        photo_id="photo-processing",
+        workspace_id=workspace["id"],
+        name="IMG_9605.dng",
+        path=str(tmp_path / "IMG_9605.dng"),
+        relative_path="IMG_9605.dng",
+        folder="Root",
+        folder_path="",
+        mtime=1,
+        size=100,
+        content_hash="hash-processing",
+    )
+    db.insert_or_update_photo(
+        photo_id="photo-done",
+        workspace_id=workspace["id"],
+        name="IMG_9604.dng",
+        path=str(tmp_path / "IMG_9604.dng"),
+        relative_path="IMG_9604.dng",
+        folder="Root",
+        folder_path="",
+        mtime=1,
+        size=100,
+        content_hash="hash-done",
+    )
+    db.mark_processing("photo-processing")
+    db.mark_done("photo-done", 82)
+    db.mark_processing("photo-done")
+
+    assert db.reset_interrupted_processing() == 1
+
+    processing = db.fetch_photo("photo-processing")
+    done = db.fetch_photo("photo-done")
+    assert processing["status"] == "pending"
+    assert done["status"] == "processing"
+    assert done["score"] == 82

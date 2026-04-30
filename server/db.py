@@ -443,6 +443,20 @@ def reset_auto_scores(photo_ids: Iterable[str]) -> int:
         return conn.total_changes
 
 
+def reset_interrupted_processing() -> int:
+    now = time.time()
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE photos
+            SET status = 'pending', error = NULL, updated_at = ?
+            WHERE status = 'processing' AND score IS NULL
+            """,
+            (now,),
+        )
+        return conn.total_changes
+
+
 def mark_error(photo_id: str, message: object) -> None:
     with connect() as conn:
         conn.execute(
