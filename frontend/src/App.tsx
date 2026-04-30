@@ -84,6 +84,27 @@ export default function App() {
   const fourPlusIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
   const exportQueueIds = useMemo(() => new Set(activeWorkspaceId ? exportQueues[activeWorkspaceId] ?? [] : []), [activeWorkspaceId, exportQueues]);
   const exportQueueList = useMemo(() => Array.from(exportQueueIds), [exportQueueIds]);
+  const similarNavigation = useMemo(() => {
+    if (activeTab !== "duplicates" || !activePhoto) {
+      return null;
+    }
+    for (const [groupIndex, group] of similarGroups.entries()) {
+      const photoIndex = group.photos.findIndex((photo) => photo.id === activePhoto.id);
+      if (photoIndex === -1) {
+        continue;
+      }
+      return {
+        current: photoIndex + 1,
+        total: group.photos.length,
+        groupLabel: `Group ${groupIndex + 1}`,
+        previousId: photoIndex > 0 ? group.photos[photoIndex - 1].id : null,
+        nextId: photoIndex < group.photos.length - 1 ? group.photos[photoIndex + 1].id : null,
+        canRemove: activePhoto.id !== group.keepPhotoId,
+        isMarkedForRemoval: similarDeleteIds.has(activePhoto.id)
+      };
+    }
+    return null;
+  }, [activePhoto, activeTab, similarDeleteIds, similarGroups]);
 
   const applySimilarPayload = useCallback((payload: SimilarPayload) => {
     const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
@@ -496,6 +517,77 @@ export default function App() {
     };
   }, [activeTab, activeWorkspaceId, activeFolderPath, applySimilarPayload, isFindingSimilar, updateStatus]);
 
+  useEffect(() => {
+    if (activeTab !== "duplicates" || !similarNavigation) {
+      return;
+    }
+    const selectVerticalNeighbor = (direction: "up" | "down") => {
+      if (!activePhoto) {
+        return false;
+      }
+      const cards = Array.from(document.querySelectorAll<HTMLElement>(".duplicates-workspace .similar-thumb[data-photo-id]"));
+      const current = cards.find((card) => card.dataset.photoId === activePhoto.id);
+      if (!current) {
+        return false;
+      }
+      const currentRect = current.getBoundingClientRect();
+      const currentX = currentRect.left + currentRect.width / 2;
+      const currentY = currentRect.top + currentRect.height / 2;
+      const candidates = cards
+        .map((card) => {
+          const rect = card.getBoundingClientRect();
+          return {
+            card,
+            id: card.dataset.photoId,
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+          };
+        })
+        .filter((item) => item.id && (direction === "up" ? item.y < currentY - 4 : item.y > currentY + 4))
+        .sort((a, b) => {
+          const rowDistance = direction === "up" ? b.y - a.y : a.y - b.y;
+          if (Math.abs(rowDistance) > 4) {
+            return rowDistance;
+          }
+          return Math.abs(a.x - currentX) - Math.abs(b.x - currentX);
+        });
+      const next = candidates[0];
+      if (!next?.id) {
+        return false;
+      }
+      setActiveId(next.id);
+      next.card.scrollIntoView({ block: "nearest", inline: "nearest" });
+      return true;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditing = target?.closest("input, textarea, select, [contenteditable='true']");
+      if (isEditing) {
+        return;
+      }
+      if (event.key === "ArrowLeft" && similarNavigation.previousId) {
+        event.preventDefault();
+        setActiveId(similarNavigation.previousId);
+      }
+      if (event.key === "ArrowRight" && similarNavigation.nextId) {
+        event.preventDefault();
+        setActiveId(similarNavigation.nextId);
+      }
+      if (event.key === "ArrowUp") {
+        if (selectVerticalNeighbor("up")) {
+          event.preventDefault();
+        }
+      }
+      if (event.key === "ArrowDown") {
+        if (selectVerticalNeighbor("down")) {
+          event.preventDefault();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activePhoto, activeTab, setActiveId, similarNavigation]);
+
   function onToggleSimilarDelete(id: string) {
     setSimilarDeleteIds((prev) => {
       const next = new Set(prev);
@@ -584,6 +676,7 @@ export default function App() {
         similarGroups={similarGroups}
         similarDeleteIds={similarDeleteIds}
         exportQueueIds={exportQueueIds}
+        activePhotoId={activePhoto?.id ?? null}
         isFindingSimilar={isFindingSimilar}
         isDeletingSimilar={isDeletingSimilar}
         similarityProgress={similarityProgress}
@@ -713,8 +806,11 @@ export default function App() {
           activePhoto={activePhoto}
           ratings={ratings}
           exportQueueIds={exportQueueIds}
+          similarNavigation={similarNavigation}
           onRatePhoto={ratePhoto}
           onToggleExportQueue={toggleExportQueue}
+          onSelectPhoto={setActiveId}
+          onToggleSimilarRemove={onToggleSimilarDelete}
           onSaveScoreOverride={saveScoreOverride}
           onSaveOrientationOverride={saveOrientationOverride}
         />

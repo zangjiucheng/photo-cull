@@ -5,6 +5,7 @@ interface DuplicatesWorkspaceProps {
   similarGroups: SimilarGroup[];
   similarDeleteIds: Set<string>;
   exportQueueIds: Set<string>;
+  activePhotoId: string | null;
   isFindingSimilar: boolean;
   isDeletingSimilar: boolean;
   similarityProgress: {
@@ -28,6 +29,7 @@ export function DuplicatesWorkspace({
   similarGroups,
   similarDeleteIds,
   exportQueueIds,
+  activePhotoId,
   isFindingSimilar,
   isDeletingSimilar,
   similarityProgress,
@@ -91,7 +93,11 @@ export function DuplicatesWorkspace({
                   const resolution = candidate ? `${candidate.metadata.width}x${candidate.metadata.height}` : "";
                   const isKeep = group.keepPhotoId === photo.id;
                   return (
-                    <article key={photo.id} className={`similar-thumb ${isChecked ? "marked" : ""}`.trim()}>
+                    <article
+                      key={photo.id}
+                      className={`similar-thumb ${isChecked ? "marked" : ""} ${activePhotoId === photo.id ? "active" : ""}`.trim()}
+                      data-photo-id={photo.id}
+                    >
                       <button className="similar-preview" type="button" onClick={() => onSelectPhoto(photo.id)}>
                         <img src={photo.url} alt={photo.name} loading="lazy" />
                       </button>

@@ -7,8 +7,19 @@ interface InspectorPanelProps {
   activePhoto: Photo | null;
   ratings: Map<string, number>;
   exportQueueIds: Set<string>;
+  similarNavigation?: {
+    current: number;
+    total: number;
+    groupLabel: string;
+    previousId: string | null;
+    nextId: string | null;
+    canRemove: boolean;
+    isMarkedForRemoval: boolean;
+  } | null;
   onRatePhoto: (id: string, rating: number) => void;
   onToggleExportQueue: (id: string) => void;
+  onSelectPhoto: (id: string) => void;
+  onToggleSimilarRemove?: (id: string) => void;
   onSaveScoreOverride: (id: string, manualScore: number | null) => Promise<void>;
   onSaveOrientationOverride: (id: string, orientationOverride: 0 | 90 | 180 | 270 | null) => Promise<void>;
 }
@@ -152,8 +163,11 @@ export function InspectorPanel({
   activePhoto,
   ratings,
   exportQueueIds,
+  similarNavigation,
   onRatePhoto,
   onToggleExportQueue,
+  onSelectPhoto,
+  onToggleSimilarRemove,
   onSaveScoreOverride,
   onSaveOrientationOverride
 }: InspectorPanelProps) {
@@ -163,11 +177,8 @@ export function InspectorPanel({
   const [isSavingOrientation, setIsSavingOrientation] = useState(false);
 
   useEffect(() => {
-    setIsPreviewOpen(false);
-  }, [activePhoto?.id]);
-
-  useEffect(() => {
     if (!activePhoto) {
+      setIsPreviewOpen(false);
       setScoreDraft("");
       return;
     }
@@ -187,6 +198,16 @@ export function InspectorPanel({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setIsPreviewOpen(false);
+        return;
+      }
+      if (event.key === "ArrowLeft" && similarNavigation?.previousId) {
+        event.preventDefault();
+        onSelectPhoto(similarNavigation.previousId);
+        return;
+      }
+      if (event.key === "ArrowRight" && similarNavigation?.nextId) {
+        event.preventDefault();
+        onSelectPhoto(similarNavigation.nextId);
       }
     };
 
@@ -197,7 +218,7 @@ export function InspectorPanel({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isPreviewOpen]);
+  }, [isPreviewOpen, onSelectPhoto, similarNavigation]);
 
   async function handleSaveScoreOverride() {
     if (!activePhoto) {
@@ -273,6 +294,13 @@ export function InspectorPanel({
                   rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
                   onRatePhoto={onRatePhoto}
                 />
+                <Button
+                  className="inspector-queue-button inspector-queue-under-stars"
+                  variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
+                  onClick={() => onToggleExportQueue(activePhoto.id)}
+                >
+                  {exportQueueIds.has(activePhoto.id) ? "In Queue" : "Add Queue"}
+                </Button>
                 <div className="metric-grid">
                   <div className="metric"><span>AI Score</span><strong>{activePhoto.aiScore}</strong></div>
                   <div className="metric"><span>Raw Score</span><strong>{activePhoto.score ?? "-"}</strong></div>
@@ -343,15 +371,6 @@ export function InspectorPanel({
                     })}
                   </div>
                 </div>
-                <div className="inspector-actions">
-                  <Button
-                    className="inspector-queue-button"
-                    variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
-                    onClick={() => onToggleExportQueue(activePhoto.id)}
-                  >
-                    {exportQueueIds.has(activePhoto.id) ? "In Queue" : "Add Queue"}
-                  </Button>
-                </div>
               </div>
             </>
           )}
@@ -370,6 +389,50 @@ export function InspectorPanel({
               ×
             </button>
             <img className="inspector-lightbox-image" src={activePhoto.url} alt={activePhoto.name} />
+            <div className="inspector-lightbox-actions">
+              {similarNavigation && onToggleSimilarRemove ? (
+                <Button
+                  variant={similarNavigation.isMarkedForRemoval ? "destructive" : "outline"}
+                  size="sm"
+                  disabled={!similarNavigation.canRemove}
+                  onClick={() => onToggleSimilarRemove(activePhoto.id)}
+                >
+                  {similarNavigation.isMarkedForRemoval ? "Marked Remove" : similarNavigation.canRemove ? "Remove" : "Keep"}
+                </Button>
+              ) : null}
+              <Button
+                variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => onToggleExportQueue(activePhoto.id)}
+              >
+                {exportQueueIds.has(activePhoto.id) ? "In Queue" : "Queue"}
+              </Button>
+            </div>
+            {similarNavigation ? (
+              <>
+                <button
+                  type="button"
+                  className="inspector-lightbox-nav previous"
+                  disabled={!similarNavigation.previousId}
+                  onClick={() => similarNavigation.previousId && onSelectPhoto(similarNavigation.previousId)}
+                  aria-label="Previous similar photo"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="inspector-lightbox-nav next"
+                  disabled={!similarNavigation.nextId}
+                  onClick={() => similarNavigation.nextId && onSelectPhoto(similarNavigation.nextId)}
+                  aria-label="Next similar photo"
+                >
+                  ›
+                </button>
+                <div className="inspector-lightbox-counter">
+                  {similarNavigation.groupLabel} · {similarNavigation.current}/{similarNavigation.total}
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}

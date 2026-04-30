@@ -1613,6 +1613,11 @@ body {
   background: #fff7f7;
 }
 
+.similar-thumb.active {
+  border-color: #2b9ec1;
+  box-shadow: inset 0 0 0 1px rgba(43, 158, 193, 0.75), 0 0 0 1px rgba(43, 158, 193, 0.28);
+}
+
 .similar-preview {
   border: 0;
   background: transparent;
@@ -2650,6 +2655,10 @@ body {
   margin: 4px 0 8px;
 }
 
+.inspector-queue-under-stars {
+  margin-bottom: 10px;
+}
+
 .metric-grid {
   margin-top: 10px;
   display: grid;
@@ -3016,6 +3025,70 @@ body {
   border-radius: 16px;
   object-fit: contain;
   background: rgba(255, 255, 255, 0.68);
+}
+
+.inspector-lightbox-nav {
+  position: absolute;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(237, 240, 244, 0.38);
+  border-radius: 50%;
+  background: rgba(21, 29, 38, 0.72);
+  color: #f3f7fb;
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+}
+
+.inspector-lightbox-nav:hover:not(:disabled),
+.inspector-lightbox-nav:focus-visible {
+  border-color: rgba(117, 199, 223, 0.86);
+  background: rgba(28, 48, 60, 0.92);
+  outline: none;
+}
+
+.inspector-lightbox-nav:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.inspector-lightbox-nav.previous {
+  left: 18px;
+}
+
+.inspector-lightbox-nav.next {
+  right: 18px;
+}
+
+.inspector-lightbox-counter {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  padding: 5px 9px;
+  border: 1px solid rgba(237, 240, 244, 0.28);
+  border-radius: 999px;
+  background: rgba(21, 29, 38, 0.78);
+  color: #dfe7ee;
+  font-size: 0.76rem;
+  font-weight: 800;
+  transform: translateX(-50%);
+}
+
+.inspector-lightbox-actions {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid rgba(237, 240, 244, 0.24);
+  border-radius: 10px;
+  background: rgba(21, 29, 38, 0.78);
 }
 
 .inspector-lightbox-close {
@@ -3566,6 +3639,11 @@ input[type="range"] {
 .similar-thumb.marked {
   border-color: #9e3b42;
   background: #3a2025;
+}
+
+.similar-thumb.active {
+  border-color: #2b9ec1;
+  box-shadow: inset 0 0 0 1px rgba(43, 158, 193, 0.8), 0 0 0 1px rgba(43, 158, 193, 0.32);
 }
 
 .similar-rank,
