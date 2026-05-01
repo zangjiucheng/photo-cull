@@ -163,7 +163,7 @@ export type ViewMode = "grid" | "list";
 export type RatingFilter = "all" | "unrated" | "1" | "2" | "3" | "4" | "5";
 export type StatusTone = "" | "ok" | "warn" | "error" | "busy";
 export type SortMode = "score-desc" | "score-asc" | "name-asc" | "name-desc" | "mtime-desc" | "mtime-asc";
-export type ToolTab = "browse" | "review" | "duplicates" | "export" | "stats";
+export type ToolTab = "browse" | "review" | "duplicates" | "export" | "stats" | "debug";
 export type WorkspaceTab = ToolTab;
 export type SimilarityScope = "current" | "library";
 
@@ -181,4 +181,5 @@ export interface AiRuntimeStatus {
   detail: string;
   error: string;
   logPath: string;
+  logTail: string[];
 }

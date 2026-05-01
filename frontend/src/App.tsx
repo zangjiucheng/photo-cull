@@ -3,6 +3,7 @@ import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoOrientation, 
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
+import { DebugWorkspace } from "./components/workspaces/DebugWorkspace";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportWorkspace } from "./components/workspaces/ExportWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
@@ -921,6 +922,15 @@ export default function App() {
         keepRate={keepRate}
         reviewRate={reviewRate}
         processingProgress={processingProgress}
+      />
+    );
+  } else if (activeTab === "debug") {
+    workspace = (
+      <DebugWorkspace
+        aiRuntimeStatus={aiRuntimeStatus}
+        isRefreshing={isRefreshing}
+        onRefresh={() => void onRefresh()}
+        onInstallAiRuntime={() => void onInstallAiRuntime()}
       />
     );
   }

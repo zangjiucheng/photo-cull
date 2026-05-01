@@ -8,6 +8,7 @@ const appName = "AI Photo Culling";
 app.setName(appName);
 app.setAboutPanelOptions({ applicationName: appName });
 
+const minAiRuntimePython = { major: 3, minor: 10 };
 const isPackaged = app.isPackaged;
 const repoRoot = isPackaged ? process.resourcesPath : path.resolve(__dirname, "..", "..");
 const backendHost = process.env.FLASK_HOST || "127.0.0.1";
@@ -25,6 +26,7 @@ const appIconPath = path.join(__dirname, "assets", "icon.png");
 let backendProcess = null;
 let backendLogFd = null;
 let mainWindow = null;
+let aiRuntimePublishTimer = null;
 const aiRuntime = {
   installing: false,
   state: "idle",
@@ -161,6 +163,7 @@ function useAiRuntimeBackend() {
 }
 
 function aiRuntimePublicStatus() {
+  const logPath = path.join(app.getPath("userData"), "ai-runtime-install.log");
   return {
     available: isPackaged || fs.existsSync(path.join(runtimeSourcePath, "requirements-ai.txt")),
     installed: runtimeInstalled(),
@@ -170,7 +173,8 @@ function aiRuntimePublicStatus() {
     message: runtimeInstalled() ? "Advanced AI runtime is installed." : aiRuntime.message,
     detail: aiRuntime.detail,
     error: aiRuntime.error,
-    logPath: path.join(app.getPath("userData"), "ai-runtime-install.log"),
+    logPath,
+    logTail: tailFile(logPath),
   };
 }
 
@@ -178,9 +182,31 @@ function publishAiRuntimeStatus() {
   mainWindow?.webContents.send("ai-runtime-status", aiRuntimePublicStatus());
 }
 
+function scheduleAiRuntimeStatusPublish() {
+  if (aiRuntimePublishTimer) {
+    return;
+  }
+  aiRuntimePublishTimer = setTimeout(() => {
+    aiRuntimePublishTimer = null;
+    publishAiRuntimeStatus();
+  }, 500);
+}
+
+function tailFile(filePath, maxLines = 14) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  const content = fs.readFileSync(filePath, "utf8");
+  return content
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-maxLines);
+}
+
 function writeAiRuntimeLog(message) {
   fs.mkdirSync(aiRuntimeDir(), { recursive: true });
   fs.appendFileSync(path.join(app.getPath("userData"), "ai-runtime-install.log"), `${message}\n`);
+  scheduleAiRuntimeStatusPublish();
 }
 
 function runLogged(command, args, options = {}) {
@@ -190,6 +216,7 @@ function runLogged(command, args, options = {}) {
       cwd: options.cwd || runtimeSourcePath,
       env: {
         ...process.env,
+        PATH: runtimeSearchPath(),
         PYTHONUNBUFFERED: "1",
         PIP_DISABLE_PIP_VERSION_CHECK: "1",
         ...(options.env || {}),
@@ -215,12 +242,83 @@ function closeBackendLog() {
   }
 }
 
+function runtimeSearchPath() {
+  const extraPaths = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/Library/Frameworks/Python.framework/Versions/Current/bin",
+  ];
+  return [...extraPaths, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
+}
+
+function pythonVersion(command) {
+  const result = spawnSync(command, [
+    "-c",
+    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
+  ], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: runtimeSearchPath(),
+    },
+  });
+  if (result.status !== 0) {
+    return null;
+  }
+  const match = result.stdout.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) {
+    return null;
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    label: match[0],
+  };
+}
+
+function isSupportedPython(version) {
+  if (!version) {
+    return false;
+  }
+  if (version.major > minAiRuntimePython.major) {
+    return true;
+  }
+  return version.major === minAiRuntimePython.major && version.minor >= minAiRuntimePython.minor;
+}
+
 function systemPythonPath() {
   if (process.env.AI_RUNTIME_PYTHON) {
-    return process.env.AI_RUNTIME_PYTHON;
+    const configuredVersion = pythonVersion(process.env.AI_RUNTIME_PYTHON);
+    writeAiRuntimeLog(`[python] AI_RUNTIME_PYTHON=${process.env.AI_RUNTIME_PYTHON} version=${configuredVersion?.label || "unavailable"}`);
+    if (isSupportedPython(configuredVersion)) {
+      return process.env.AI_RUNTIME_PYTHON;
+    }
+    throw new Error(`AI Runtime requires Python ${minAiRuntimePython.major}.${minAiRuntimePython.minor}+; AI_RUNTIME_PYTHON is ${configuredVersion?.label || "not runnable"}.`);
   }
-  const result = spawnSync("which", ["python3"], { encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim() : "python3";
+
+  const candidates = process.platform === "win32"
+    ? ["python3.13", "python3.12", "python3.11", "python3.10", "python"]
+    : [
+        "python3.13",
+        "python3.12",
+        "python3.11",
+        "python3.10",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
+        "python3",
+      ];
+
+  for (const candidate of candidates) {
+    const version = pythonVersion(candidate);
+    writeAiRuntimeLog(`[python] candidate=${candidate} version=${version?.label || "unavailable"}`);
+    if (isSupportedPython(version)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`AI Runtime requires Python ${minAiRuntimePython.major}.${minAiRuntimePython.minor}+ because numpy/torch do not support the selected older Python. Install Python 3.10 or newer, or set AI_RUNTIME_PYTHON to a compatible Python executable.`);
 }
 
 function findAvailablePort(host) {
@@ -347,6 +445,11 @@ async function installAiRuntime() {
     }
     writeAiRuntimeLog(`\n[${new Date().toISOString()}] Installing AI runtime`);
     const python = systemPythonPath();
+    if (fs.existsSync(aiRuntimeVenvDir())) {
+      setAiRuntimeStatus({ detail: "Removing previous incomplete AI runtime venv" });
+      writeAiRuntimeLog(`[venv] removing existing venv at ${aiRuntimeVenvDir()}`);
+      fs.rmSync(aiRuntimeVenvDir(), { recursive: true, force: true });
+    }
     setAiRuntimeStatus({ detail: `Creating venv with ${python}` });
     await runLogged(python, ["-m", "venv", aiRuntimeVenvDir()], { cwd: runtimeSourcePath });
 

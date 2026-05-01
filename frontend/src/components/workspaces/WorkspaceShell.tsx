@@ -7,7 +7,8 @@ const tabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "review", label: "Review" },
   { id: "duplicates", label: "Similarity" },
   { id: "export", label: "Export" },
-  { id: "stats", label: "Stats" }
+  { id: "stats", label: "Stats" },
+  { id: "debug", label: "Debug" }
 ];
 
 interface WorkspaceShellProps {
@@ -91,7 +92,7 @@ export function WorkspaceShell({
               size="sm"
               onClick={onInstallAiRuntime}
               disabled={aiRuntimeStatus.installing || aiRuntimeStatus.installed}
-              title={aiRuntimeStatus.state === "error" ? aiRuntimeStatus.error || aiRuntimeStatus.message : aiRuntimeStatus.detail || aiRuntimeStatus.message}
+              title="Open Debug tab to view AI Runtime logs"
             >
               {aiRuntimeButtonLabel}
             </Button>

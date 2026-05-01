@@ -910,6 +910,103 @@ body {
   max-width: 960px;
 }
 
+.debug-workspace {
+  max-width: 1120px;
+  height: auto;
+  min-height: 100%;
+  color: #dce5ee;
+}
+
+.debug-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #46505c;
+  border-radius: 8px;
+  background: #20252c;
+  box-shadow: 0 14px 28px rgba(12, 17, 24, 0.16);
+}
+
+.debug-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.debug-panel-head strong {
+  display: block;
+  margin-top: 2px;
+  color: #f3f8fb;
+}
+
+.debug-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debug-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.debug-runtime-grid div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #343d49;
+  border-radius: 8px;
+  background: #161b22;
+}
+
+.debug-runtime-grid span,
+.debug-log-path {
+  color: #aeb8c4;
+  font-size: 0.76rem;
+}
+
+.debug-runtime-grid strong {
+  color: #f3f8fb;
+  font-size: 0.92rem;
+}
+
+.debug-message {
+  padding: 9px 10px;
+  border: 1px solid #315666;
+  border-radius: 8px;
+  background: #142d38;
+  color: #b9e8f4;
+  font-size: 0.84rem;
+}
+
+.debug-message.error {
+  border-color: #724039;
+  background: #341f20;
+  color: #ffb4aa;
+}
+
+.debug-log-path {
+  overflow-wrap: anywhere;
+}
+
+.debug-log {
+  min-height: 280px;
+  max-height: 520px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #343d49;
+  border-radius: 8px;
+  background: #10151c;
+  color: #d9e7f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .inline-stats-hero {
   position: static;
 }
