@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("aiCulling", {
   openFolder: () => ipcRenderer.invoke("open-folder"),
+  chooseOutputFolder: () => ipcRenderer.invoke("choose-output-folder"),
   openWorkspaceFile: () => ipcRenderer.invoke("open-workspace-file"),
   saveWorkspaceFile: (workspace) => ipcRenderer.invoke("save-workspace-file", workspace),
   onSaveWorkspaceFileRequest: (callback) => {

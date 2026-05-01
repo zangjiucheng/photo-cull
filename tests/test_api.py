@@ -505,6 +505,50 @@ def test_empty_export_rejected(client):
     assert response.status_code == 400
 
 
+def test_export_enhance_api_validates_request(client, tmp_path):
+    missing_selection = client.post("/api/export-enhance/jobs", json={"selected_ids": [], "output_folder": str(tmp_path)})
+    assert missing_selection.status_code == 400
+
+    bad_folder = client.post("/api/export-enhance/jobs", json={"selected_ids": ["missing"], "output_folder": str(tmp_path / "missing")})
+    assert bad_folder.status_code == 400
+
+
+def test_export_enhance_api_creates_color_only_job(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    output = tmp_path / "out"
+    output.mkdir()
+
+    response = client.post("/api/export-enhance/jobs", json={
+        "selected_ids": [photo["id"]],
+        "output_folder": str(output),
+        "settings": {"exposure": 0.1, "outputFormat": "jpeg", "quality": 90}
+    })
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total"] == 1
+    fetched = client.get(f"/api/export-enhance/jobs/{payload['id']}")
+    assert fetched.status_code == 200
+
+
+def test_export_enhance_preview_renders_jpeg(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+
+    response = client.post("/api/export-enhance/preview", json={
+        "photo_id": photo["id"],
+        "settings": {"exposure": 0.1, "outputFormat": "jpeg"}
+    })
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("image/jpeg")
+
+
 def test_export_deduplicates_selected_ids(client, tmp_path):
     source = tmp_path / "source"
     make_image(source / "sample.jpg")
@@ -518,3 +562,18 @@ def test_export_deduplicates_selected_ids(client, tmp_path):
     archive_path.write_bytes(response.data)
     with ZipFile(archive_path) as archive:
         assert archive.namelist() == ["sample.jpg"]
+
+
+def test_export_queue_persists_for_workspace(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    make_image(source / "b.jpg", "green")
+    workspace = open_workspace(client, source)
+    photos = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"]
+
+    save = client.put(f"/api/workspaces/{workspace['id']}/export-queue", json={"photo_ids": [photos[1]["id"], photos[0]["id"], photos[0]["id"]]})
+    assert save.status_code == 200
+    assert save.get_json()["ids"] == [photos[1]["id"], photos[0]["id"]]
+
+    library = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()
+    assert library["exportQueue"] == [photos[1]["id"], photos[0]["id"]]

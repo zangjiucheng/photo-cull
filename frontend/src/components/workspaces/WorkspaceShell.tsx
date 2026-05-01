@@ -7,6 +7,7 @@ const tabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "review", label: "Review" },
   { id: "duplicates", label: "Similarity" },
   { id: "export", label: "Export" },
+  { id: "export-enhance", label: "AI Enhance" },
   { id: "stats", label: "Stats" },
   { id: "debug", label: "Debug" }
 ];
@@ -55,6 +56,8 @@ export function WorkspaceShell({
   onInstallAiRuntime,
   onExportQueue
 }: WorkspaceShellProps) {
+  const shellTabClass = `workspace-tab-${activeTab.replace(/[^a-z0-9_-]/gi, "-")}`;
+  const hasInspector = Boolean(inspector);
   const isActive = backgroundProgress?.state === "active";
   const progressDegrees = backgroundProgress ? Math.round((backgroundProgress.percent / 100) * 360) : 0;
   const progressState = backgroundProgress?.state ?? "idle";
@@ -65,7 +68,7 @@ export function WorkspaceShell({
       : "Install AI Runtime";
 
   return (
-    <div className="bridge-shell">
+    <div className={`bridge-shell ${shellTabClass} ${hasInspector ? "" : "without-inspector"}`.trim()}>
       <header className="bridge-topbar">
         <div className="brand-lockup">
           <strong>AI Photo Culling</strong>
@@ -141,7 +144,7 @@ export function WorkspaceShell({
       <main className="bridge-layout">
         <aside className="bridge-sidebar">{sidebar}</aside>
         <section className="bridge-content">{children}</section>
-        <aside className="bridge-inspector">{inspector}</aside>
+        {hasInspector ? <aside className="bridge-inspector">{inspector}</aside> : null}
       </main>
     </div>
   );

@@ -11,6 +11,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   const [pendingCount, setPendingCount] = useState(0);
   const [processingCount, setProcessingCount] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
+  const [serverExportQueue, setServerExportQueue] = useState<string[]>([]);
   const [indexing, setIndexing] = useState<NonNullable<LibraryPayload["summary"]["indexing"]>>({
     active: false,
     indexed: 0,
@@ -54,6 +55,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     setPendingCount(data.summary.pending);
     setProcessingCount(data.summary.processing);
     setExcludedCount(data.summary.excluded ?? 0);
+    setServerExportQueue(data.exportQueue ?? []);
     setIndexing(data.summary.indexing ?? {
       active: false,
       indexed: 0,
@@ -172,6 +174,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
       setPendingCount(0);
       setProcessingCount(0);
       setExcludedCount(0);
+      setServerExportQueue([]);
       setIndexing({
         active: false,
         indexed: 0,
@@ -246,6 +249,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     processingCount,
     indexing,
     excludedCount,
+    serverExportQueue,
     isLibraryReady,
     isLibraryLoading,
     activeFolderPath,

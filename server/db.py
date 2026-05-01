@@ -133,6 +133,23 @@ def init_db() -> None:
             ON similarity_group_cache(workspace_id, updated_at)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS export_queue_items (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(workspace_id, photo_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_export_queue_workspace_position
+            ON export_queue_items(workspace_id, position)
+            """
+        )
 
 
 def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
@@ -267,6 +284,43 @@ def list_photos(workspace_id: str | None = None) -> list[sqlite3.Row]:
             "SELECT * FROM photos WHERE workspace_id = ? ORDER BY relative_path ASC",
             (workspace_id,),
         ).fetchall()
+
+
+def list_export_queue(workspace_id: str) -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT photo_id FROM export_queue_items
+            WHERE workspace_id = ?
+            ORDER BY position ASC, created_at ASC
+            """,
+            (workspace_id,),
+        ).fetchall()
+    return [row["photo_id"] for row in rows]
+
+
+def set_export_queue(workspace_id: str, photo_ids: Iterable[str]) -> list[str]:
+    unique_ids = list(dict.fromkeys(str(photo_id) for photo_id in photo_ids))
+    now = time.time()
+    with connect() as conn:
+        valid_rows = conn.execute(
+            f"""
+            SELECT id FROM photos
+            WHERE workspace_id = ? AND id IN ({",".join("?" for _ in unique_ids) if unique_ids else "NULL"})
+            """,
+            (workspace_id, *unique_ids),
+        ).fetchall() if unique_ids else []
+        valid = {row["id"] for row in valid_rows}
+        filtered = [photo_id for photo_id in unique_ids if photo_id in valid]
+        conn.execute("DELETE FROM export_queue_items WHERE workspace_id = ?", (workspace_id,))
+        conn.executemany(
+            """
+            INSERT INTO export_queue_items (workspace_id, photo_id, position, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [(workspace_id, photo_id, index, now) for index, photo_id in enumerate(filtered)],
+        )
+    return filtered
 
 
 def fetch_similarity_group_cache(

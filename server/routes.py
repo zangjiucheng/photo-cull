@@ -5,7 +5,7 @@ import os
 from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from . import db, events, scoring, similarity, storage
+from . import db, events, export_enhance, scoring, similarity, storage
 
 
 bp = Blueprint("api", __name__)
@@ -117,6 +117,18 @@ def rescore_workspace(workspace_id):
     return jsonify(payload)
 
 
+@bp.route("/workspaces/<workspace_id>/export-queue", methods=["PUT"])
+def set_workspace_export_queue(workspace_id):
+    data = request.get_json(silent=True) or {}
+    photo_ids = data.get("photo_ids", [])
+    if not isinstance(photo_ids, list):
+        return error_response("photo_ids must be a list", 400)
+    try:
+        return jsonify(storage.set_export_queue(workspace_id, [str(photo_id) for photo_id in photo_ids]))
+    except storage.InvalidWorkspaceError as exc:
+        return error_response(str(exc), 404)
+
+
 @bp.route("/library", methods=["GET"])
 def library():
     workspace_id = request.args.get("workspace_id")
@@ -187,6 +199,60 @@ def export():
     unique_ids = list(dict.fromkeys(str(photo_id) for photo_id in selected_ids))
     mem = storage.build_export_zip(unique_ids)
     return send_file(mem, download_name="selected.zip", as_attachment=True)
+
+
+@bp.route("/export-enhance/jobs", methods=["POST"])
+def create_export_enhance_job():
+    data = request.get_json(silent=True) or {}
+    selected_ids = data.get("selected_ids", [])
+    if not isinstance(selected_ids, list) or not selected_ids:
+        return error_response("selected_ids must be a non-empty list", 400)
+    try:
+        settings = export_enhance.parse_settings(data.get("settings"))
+        raw_settings_by_photo = data.get("settings_by_photo") if isinstance(data.get("settings_by_photo"), dict) else {}
+        job = export_enhance.queue.create(
+            selected_ids=[str(photo_id) for photo_id in selected_ids],
+            output_folder=str(data.get("output_folder") or ""),
+            settings=settings,
+            settings_by_photo={
+                str(photo_id): export_enhance.parse_settings(raw_settings)
+                for photo_id, raw_settings in raw_settings_by_photo.items()
+                if isinstance(raw_settings, dict)
+            },
+        )
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+    return jsonify(export_enhance.serialize_job(job))
+
+
+@bp.route("/export-enhance/jobs/<job_id>", methods=["GET"])
+def get_export_enhance_job(job_id):
+    job = export_enhance.queue.get(job_id)
+    if job is None:
+        return error_response("Export enhance job not found", 404)
+    return jsonify(export_enhance.serialize_job(job))
+
+
+@bp.route("/export-enhance/jobs/<job_id>/cancel", methods=["POST"])
+def cancel_export_enhance_job(job_id):
+    job = export_enhance.queue.cancel(job_id)
+    if job is None:
+        return error_response("Export enhance job not found", 404)
+    return jsonify(export_enhance.serialize_job(job))
+
+
+@bp.route("/export-enhance/preview", methods=["POST"])
+def export_enhance_preview():
+    data = request.get_json(silent=True) or {}
+    photo_id = data.get("photo_id")
+    if not photo_id:
+        return error_response("photo_id is required", 400)
+    try:
+        settings = export_enhance.parse_settings(data.get("settings"))
+        preview_path = export_enhance.render_preview(str(photo_id), settings)
+    except (export_enhance.ExportEnhanceError, RuntimeError) as exc:
+        return error_response(str(exc), 400)
+    return send_file(preview_path, mimetype="image/jpeg")
 
 
 @bp.route("/photos/similar", methods=["GET"])

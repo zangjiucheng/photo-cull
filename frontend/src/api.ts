@@ -1,4 +1,4 @@
-import type { ApiPhoto, DeletePhotosPayload, LibraryPayload, PhotoWorkspace, SimilarPayload, SimilarityScope } from "./types";
+import type { ApiPhoto, DeletePhotosPayload, ExportEnhanceJob, ExportEnhanceSettings, LibraryPayload, PhotoWorkspace, SimilarPayload, SimilarityScope } from "./types";
 
 async function parseError(res: Response, fallback: string): Promise<string> {
   const contentType = res.headers.get("Content-Type") || "";
@@ -76,6 +76,14 @@ export async function rescoreWorkspace(workspaceId: string): Promise<LibraryPayl
   return data;
 }
 
+export async function saveExportQueue(workspaceId: string, photoIds: string[]): Promise<{ workspaceId: string; ids: string[] }> {
+  return requestJson<{ workspaceId: string; ids: string[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/export-queue`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_ids: Array.from(new Set(photoIds)) })
+  }, "Failed to save export queue");
+}
+
 export async function fetchWorkspaces(): Promise<PhotoWorkspace[]> {
   const data = await requestJson<{ workspaces: PhotoWorkspace[] }>("/api/workspaces", undefined, "Failed to load workspaces");
   return Array.isArray(data.workspaces) ? data.workspaces : [];
@@ -114,6 +122,42 @@ export async function exportPhotos(selectedIds: string[]): Promise<Blob> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ selected_ids: uniqueIds })
   }, "Export failed");
+}
+
+export async function createExportEnhanceJob(options: {
+  selectedIds: string[];
+  outputFolder: string;
+  settings: ExportEnhanceSettings;
+  settingsByPhoto?: Record<string, ExportEnhanceSettings>;
+}): Promise<ExportEnhanceJob> {
+  return requestJson<ExportEnhanceJob>("/api/export-enhance/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      selected_ids: Array.from(new Set(options.selectedIds)),
+      output_folder: options.outputFolder,
+      settings: options.settings,
+      settings_by_photo: options.settingsByPhoto ?? {}
+    })
+  }, "Failed to start export enhance");
+}
+
+export async function fetchExportEnhanceJob(jobId: string): Promise<ExportEnhanceJob> {
+  return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}`, undefined, "Failed to load export enhance job");
+}
+
+export async function cancelExportEnhanceJob(jobId: string): Promise<ExportEnhanceJob> {
+  return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST"
+  }, "Failed to cancel export enhance job");
+}
+
+export async function renderExportEnhancePreview(photoId: string, settings: ExportEnhanceSettings): Promise<Blob> {
+  return requestBlob("/api/export-enhance/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_id: photoId, settings })
+  }, "Failed to render AI Enhance preview");
 }
 
 export async function updatePhotoDecision(photoId: string, decision: "accepted" | "rejected" | null): Promise<ApiPhoto> {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals, deletePhotos, deleteWorkspace, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos } from "./api";
+import { apiInternals, createExportEnhanceJob, deletePhotos, deleteWorkspace, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos, saveExportQueue } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -29,6 +29,72 @@ describe("api helpers", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/photos/export", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ selected_ids: ["a", "b"] })
+    }));
+    vi.unstubAllGlobals();
+  });
+
+  it("saves persistent export queue ids", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      workspaceId: "ws1",
+      ids: ["a", "b"]
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await saveExportQueue("ws1", ["a", "a", "b"]);
+    expect(payload.ids).toEqual(["a", "b"]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspaces/ws1/export-queue", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ photo_ids: ["a", "b"] })
+    }));
+    vi.unstubAllGlobals();
+  });
+
+  it("starts an export enhance job", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      id: "job1",
+      status: "queued",
+      total: 2,
+      completed: 0,
+      failed: 0,
+      current: null,
+      outputFolder: "/tmp/out",
+      outputs: [],
+      failures: [],
+      createdAt: 1,
+      updatedAt: 1
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const job = await createExportEnhanceJob({
+      selectedIds: ["a", "a", "b"],
+      outputFolder: "/tmp/out",
+      settings: {
+        exposure: 0,
+        contrast: 0,
+        highlights: 0,
+        shadows: 0,
+        saturation: 0,
+        temperature: 0,
+        tint: 0,
+        aiDenoise: false,
+        aiDeblur: false,
+        strength: "medium",
+        sharpen: 0,
+        outputFormat: "jpeg",
+        quality: 92,
+        resizeMaxEdge: null
+      }
+    });
+    expect(job.id).toBe("job1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/export-enhance/jobs", expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining("\"selected_ids\":[\"a\",\"b\"]")
     }));
     vi.unstubAllGlobals();
   });

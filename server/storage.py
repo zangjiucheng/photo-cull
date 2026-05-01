@@ -515,7 +515,17 @@ def build_library_payload(workspace_id: str | None = None) -> dict:
         "folders": folder_items,
         "photos": photos,
         "summary": summary,
+        "exportQueue": db.list_export_queue(workspace_id) if workspace_id else [],
     }
+
+
+def set_export_queue(workspace_id: str, photo_ids: list[str]) -> dict:
+    workspace = db.fetch_workspace(workspace_id)
+    if workspace is None:
+        raise InvalidWorkspaceError("Workspace not found")
+    ids = db.set_export_queue(workspace_id, photo_ids)
+    events.publish("library:update", workspace_id, {"source": "exportQueue", "count": len(ids)})
+    return {"workspaceId": workspace_id, "ids": ids}
 
 
 def build_export_zip(selected_ids: list[str]) -> io.BytesIO:

@@ -148,6 +148,10 @@ function aiRuntimeMarkerPath() {
   return path.join(aiRuntimeDir(), "installed.json");
 }
 
+function aiRuntimeModelDir() {
+  return path.join(aiRuntimeDir(), "models");
+}
+
 function runtimePythonPath() {
   return process.platform === "win32"
     ? path.join(aiRuntimeVenvDir(), "Scripts", "python.exe")
@@ -164,6 +168,7 @@ function useAiRuntimeBackend() {
 
 function aiRuntimePublicStatus() {
   const logPath = path.join(app.getPath("userData"), "ai-runtime-install.log");
+  const restormerDir = path.join(aiRuntimeModelDir(), "restormer");
   return {
     available: isPackaged || fs.existsSync(path.join(runtimeSourcePath, "requirements-ai.txt")),
     installed: runtimeInstalled(),
@@ -175,6 +180,10 @@ function aiRuntimePublicStatus() {
     error: aiRuntime.error,
     logPath,
     logTail: tailFile(logPath),
+    restormerModels: {
+      denoise: fs.existsSync(path.join(restormerDir, "denoise.pth")),
+      deblur: fs.existsSync(path.join(restormerDir, "deblur.pth")),
+    },
   };
 }
 
@@ -376,6 +385,7 @@ function startBackend() {
       FLASK_PORT: String(backendPort),
       DB_PATH: dbPath,
       UPLOAD_FOLDER: uploadFolder,
+      AI_RUNTIME_MODEL_DIR: aiRuntimeModelDir(),
       FLASK_DEBUG: "0",
       PYTHONUNBUFFERED: "1",
     },
@@ -418,7 +428,7 @@ async function restartBackend() {
 }
 
 async function verifyAiRuntime(runtimePython) {
-  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
+  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','einops'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
   await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
 }
 
@@ -573,6 +583,14 @@ async function createWindow() {
 ipcMain.handle("open-folder", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openDirectory"],
+  });
+  return result.canceled ? null : result.filePaths[0] || null;
+});
+
+ipcMain.handle("choose-output-folder", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+    title: "Choose AI Enhance Output Folder",
   });
   return result.canceled ? null : result.filePaths[0] || null;
 });

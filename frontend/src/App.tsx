@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deletePhotos, exportPhotos, findSimilarPhotos, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, exportPhotos, fetchExportEnhanceJob, findSimilarPhotos, renderExportEnhancePreview, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
 import { DebugWorkspace } from "./components/workspaces/DebugWorkspace";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportWorkspace } from "./components/workspaces/ExportWorkspace";
+import { ExportEnhanceWorkspace } from "./components/workspaces/ExportEnhanceWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
 import { WorkspaceLauncher } from "./components/workspaces/WorkspaceLauncher";
 import { StatsWorkspace } from "./components/workspaces/StatsWorkspace";
@@ -17,7 +18,7 @@ import { ShortcutHelpDialog } from "./shortcuts/ShortcutHelpDialog";
 import { shortcutRegistry } from "./shortcuts/registry";
 import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
 import { useShortcuts } from "./shortcuts/useShortcuts";
-import type { AiRuntimeStatus, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
+import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 
@@ -26,6 +27,23 @@ interface SimilarityProgress {
   label: string;
   detail: string;
 }
+
+const defaultExportEnhanceSettings: ExportEnhanceSettings = {
+  exposure: 0,
+  contrast: 0,
+  highlights: 0,
+  shadows: 0,
+  saturation: 0,
+  temperature: 0,
+  tint: 0,
+  aiDenoise: false,
+  aiDeblur: false,
+  strength: "medium",
+  sharpen: 0,
+  outputFormat: "jpeg",
+  quality: 92,
+  resizeMaxEdge: null
+};
 
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
@@ -52,6 +70,18 @@ export default function App() {
   const [isInspectorPreviewOpen, setIsInspectorPreviewOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [exportEnhanceSettings, setExportEnhanceSettings] = useState<ExportEnhanceSettings>(defaultExportEnhanceSettings);
+  const [exportEnhanceSettingsByPhoto, setExportEnhanceSettingsByPhoto] = useState<Record<string, ExportEnhanceSettings>>({});
+  const [exportEnhanceSelectedPhotoId, setExportEnhanceSelectedPhotoId] = useState<string | null>(null);
+  const [exportEnhanceOutputFolder, setExportEnhanceOutputFolder] = useState("");
+  const [exportEnhanceJob, setExportEnhanceJob] = useState<ExportEnhanceJob | null>(null);
+  const [isStartingExportEnhance, setIsStartingExportEnhance] = useState(false);
+  const [renderedPreviewUrl, setRenderedPreviewUrl] = useState<string | null>(null);
+  const [isRenderingPreview, setIsRenderingPreview] = useState(false);
+  const [renderPreviewProgress, setRenderPreviewProgress] = useState(0);
+  const [renderPreviewStage, setRenderPreviewStage] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  const [isEnhancePreviewOpen, setIsEnhancePreviewOpen] = useState(false);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -75,7 +105,8 @@ export default function App() {
     openFolderWorkspace,
     removeWorkspace,
     restoreRemoved,
-    excludedCount
+    excludedCount,
+    serverExportQueue
   } = library;
   const ratingState = usePhotoRatings(photos, updateStatus);
   const { ratings, setRatings, ratePhoto } = ratingState;
@@ -120,6 +151,24 @@ export default function App() {
   const fourPlusIds = photos.filter((photo) => (ratings.get(photo.id) ?? photo.rating ?? 0) >= 4).map((photo) => photo.id);
   const exportQueueIds = useMemo(() => new Set(activeWorkspaceId ? exportQueues[activeWorkspaceId] ?? [] : []), [activeWorkspaceId, exportQueues]);
   const exportQueueList = useMemo(() => Array.from(exportQueueIds), [exportQueueIds]);
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: serverExportQueue }));
+  }, [activeWorkspaceId, serverExportQueue]);
+
+  const commitExportQueue = useCallback((ids: string[], statusMessage?: string) => {
+    if (!activeWorkspaceId) return;
+    const nextIds = Array.from(new Set(ids));
+    setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: nextIds }));
+    void saveExportQueue(activeWorkspaceId, nextIds)
+      .then((payload) => {
+        setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: payload.ids }));
+        if (statusMessage) updateStatus(statusMessage, "ok");
+      })
+      .catch((err) => {
+        updateStatus(err instanceof Error ? err.message : "Failed to save export queue", "error");
+      });
+  }, [activeWorkspaceId, updateStatus]);
   const similarNavigation = useMemo(() => {
     if (activeTab !== "duplicates" || !activePhoto) {
       return null;
@@ -194,21 +243,19 @@ export default function App() {
 
   const toggleExportQueue = useCallback((id: string) => {
     if (!activeWorkspaceId) return;
-    setExportQueues((prev) => {
-      const next = new Set(prev[activeWorkspaceId] ?? []);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return { ...prev, [activeWorkspaceId]: Array.from(next) };
-    });
-  }, [activeWorkspaceId]);
+    const next = new Set(exportQueues[activeWorkspaceId] ?? []);
+    const removing = next.has(id);
+    if (removing) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    commitExportQueue(Array.from(next), removing ? "Removed photo from export queue." : "Added photo to export queue.");
+  }, [activeWorkspaceId, commitExportQueue, exportQueues]);
 
   function addToExportQueue(id: string) {
     if (!activeWorkspaceId) return;
-    setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: Array.from(new Set([...(prev[activeWorkspaceId] ?? []), id])) }));
-    updateStatus("Added photo to export queue.", "ok");
+    commitExportQueue([...(exportQueues[activeWorkspaceId] ?? []), id], "Added photo to export queue.");
   }
 
   function addVisibleToQueue() {
@@ -217,23 +264,12 @@ export default function App() {
       return;
     }
     if (!activeWorkspaceId) return;
-    setExportQueues((prev) => {
-      const next = new Set(prev[activeWorkspaceId] ?? []);
-      for (const photo of visiblePhotos) {
-        next.add(photo.id);
-      }
-      return { ...prev, [activeWorkspaceId]: Array.from(next) };
-    });
-    updateStatus(`Added ${visiblePhotos.length} visible photo(s) to export queue.`, "ok");
+    commitExportQueue([...(exportQueues[activeWorkspaceId] ?? []), ...visiblePhotos.map((photo) => photo.id)], `Added ${visiblePhotos.length} visible photo(s) to export queue.`);
   }
 
   function removeFromExportQueue(id: string) {
     if (!activeWorkspaceId) return;
-    setExportQueues((prev) => {
-      const next = new Set(prev[activeWorkspaceId] ?? []);
-      next.delete(id);
-      return { ...prev, [activeWorkspaceId]: Array.from(next) };
-    });
+    commitExportQueue((exportQueues[activeWorkspaceId] ?? []).filter((photoId) => photoId !== id));
   }
 
   async function onOpenFolder() {
@@ -413,6 +449,182 @@ export default function App() {
       updateStatus(err instanceof Error ? err.message : "Export failed", "error");
     }
   }
+
+  async function onChooseExportEnhanceFolder() {
+    if (!window.aiCulling?.chooseOutputFolder) {
+      const typed = window.prompt("Enter an output folder path");
+      if (typed) setExportEnhanceOutputFolder(typed);
+      return;
+    }
+    const folder = await window.aiCulling.chooseOutputFolder();
+    if (folder) {
+      setExportEnhanceOutputFolder(folder);
+    }
+  }
+
+  const selectExportEnhancePhoto = useCallback((photoId: string) => {
+    setExportEnhanceSettingsByPhoto((current) => ({
+      ...current,
+      [exportEnhanceSelectedPhotoId || photoId]: exportEnhanceSettings
+    }));
+    setExportEnhanceSelectedPhotoId(photoId);
+    setExportEnhanceSettings(exportEnhanceSettingsByPhoto[photoId] ?? defaultExportEnhanceSettings);
+  }, [exportEnhanceSelectedPhotoId, exportEnhanceSettings, exportEnhanceSettingsByPhoto]);
+
+  function updateExportEnhanceSettings(nextSettings: ExportEnhanceSettings) {
+    setExportEnhanceSettings(nextSettings);
+    const targetId = exportEnhanceSelectedPhotoId ?? exportQueueList[0] ?? null;
+    if (!targetId) return;
+    setExportEnhanceSettingsByPhoto((current) => ({ ...current, [targetId]: nextSettings }));
+  }
+
+  const selectExportEnhanceDirection = useCallback((direction: "left" | "right") => {
+    if (!exportQueueList.length) return false;
+    const currentId = exportEnhanceSelectedPhotoId ?? exportQueueList[0];
+    const currentIndex = exportQueueList.indexOf(currentId);
+    const nextIndex = direction === "left"
+      ? Math.max((currentIndex < 0 ? 0 : currentIndex) - 1, 0)
+      : Math.min((currentIndex < 0 ? 0 : currentIndex) + 1, exportQueueList.length - 1);
+    const nextId = exportQueueList[nextIndex];
+    if (!nextId || nextId === currentId) return false;
+    selectExportEnhancePhoto(nextId);
+    return true;
+  }, [exportEnhanceSelectedPhotoId, exportQueueList, selectExportEnhancePhoto]);
+
+  useEffect(() => {
+    if (!exportQueueList.length) {
+      setExportEnhanceSelectedPhotoId(null);
+      setIsEnhancePreviewOpen(false);
+      return;
+    }
+    if (!exportEnhanceSelectedPhotoId || !exportQueueList.includes(exportEnhanceSelectedPhotoId)) {
+      const nextId = exportQueueList[0];
+      setExportEnhanceSelectedPhotoId(nextId);
+      setExportEnhanceSettings(exportEnhanceSettingsByPhoto[nextId] ?? defaultExportEnhanceSettings);
+    }
+  }, [exportEnhanceSelectedPhotoId, exportEnhanceSettingsByPhoto, exportQueueList]);
+
+  useEffect(() => {
+    if (activeTab !== "export-enhance") {
+      setIsEnhancePreviewOpen(false);
+    }
+  }, [activeTab]);
+
+  async function onStartExportEnhance() {
+    if (!exportQueueList.length) {
+      updateStatus("Add photos to the export queue before AI Enhance.", "warn");
+      return;
+    }
+    if (!exportEnhanceOutputFolder) {
+      updateStatus("Choose an output folder before AI Enhance.", "warn");
+      return;
+    }
+    setIsStartingExportEnhance(true);
+    updateStatus("Starting AI Enhance...", "busy");
+    try {
+      const job = await createExportEnhanceJob({
+        selectedIds: exportQueueList,
+        outputFolder: exportEnhanceOutputFolder,
+        settings: exportEnhanceSettings,
+        settingsByPhoto: {
+          ...exportEnhanceSettingsByPhoto,
+          ...(exportEnhanceSelectedPhotoId ? { [exportEnhanceSelectedPhotoId]: exportEnhanceSettings } : {})
+        }
+      });
+      setExportEnhanceJob(job);
+      updateStatus("AI Enhance job started.", "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to start AI Enhance", "error");
+    } finally {
+      setIsStartingExportEnhance(false);
+    }
+  }
+
+  async function onCancelExportEnhance() {
+    if (!exportEnhanceJob) return;
+    try {
+      setExportEnhanceJob(await cancelExportEnhanceJob(exportEnhanceJob.id));
+      updateStatus("AI Enhance cancellation requested.", "warn");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to cancel AI Enhance", "error");
+    }
+  }
+
+  async function onRenderExportEnhancePreview(photoId: string) {
+    setIsRenderingPreview(true);
+    setRenderPreviewProgress(12);
+    setRenderPreviewStage("Preparing preview");
+    setPreviewError("");
+    updateStatus("Rendering AI Enhance preview...", "busy");
+    const timer = window.setInterval(() => {
+      setRenderPreviewProgress((value) => {
+        if (value < 42) {
+          setRenderPreviewStage("Applying color adjustments");
+          return value + 6;
+        }
+        if (value < 76) {
+          setRenderPreviewStage(exportEnhanceSettings.aiDenoise || exportEnhanceSettings.aiDeblur ? "Running AI restoration" : "Rendering preview");
+          return value + 4;
+        }
+        if (value < 92) {
+          setRenderPreviewStage("Preparing image");
+          return value + 2;
+        }
+        return value;
+      });
+    }, 500);
+    try {
+      const blob = await renderExportEnhancePreview(photoId, exportEnhanceSettings);
+      const url = window.URL.createObjectURL(blob);
+      setRenderedPreviewUrl((current) => {
+        if (current) window.URL.revokeObjectURL(current);
+        return url;
+      });
+      setRenderPreviewProgress(100);
+      setRenderPreviewStage("Preview ready");
+      updateStatus("AI Enhance preview rendered.", "ok");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to render AI Enhance preview";
+      setPreviewError(message);
+      updateStatus(message, "error");
+    } finally {
+      window.clearInterval(timer);
+      setIsRenderingPreview(false);
+    }
+  }
+
+  useEffect(() => {
+    setRenderedPreviewUrl((current) => {
+      if (current) window.URL.revokeObjectURL(current);
+      return null;
+    });
+    setPreviewError("");
+    setRenderPreviewProgress(0);
+    setRenderPreviewStage("");
+  }, [exportEnhanceSettings]);
+
+  useEffect(() => () => {
+    if (renderedPreviewUrl) {
+      window.URL.revokeObjectURL(renderedPreviewUrl);
+    }
+  }, [renderedPreviewUrl]);
+
+  useEffect(() => {
+    if (!exportEnhanceJob || !["queued", "running"].includes(exportEnhanceJob.status)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void fetchExportEnhanceJob(exportEnhanceJob.id)
+        .then((job) => {
+          setExportEnhanceJob(job);
+          if (job.status === "done") {
+            updateStatus(`AI Enhance complete: ${job.completed} file(s), ${job.failed} failed.`, job.failed ? "warn" : "ok");
+          }
+        })
+        .catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [exportEnhanceJob, updateStatus]);
 
   async function onRefresh() {
     updateStatus("Refreshing active workspace...", "busy");
@@ -748,6 +960,11 @@ export default function App() {
 
   const appShortcutHandlers = useMemo<ShortcutHandlers>(() => ({
     "global.openPreview": () => {
+      if (activeTab === "export-enhance") {
+        if (!exportQueueList.length) return false;
+        setIsEnhancePreviewOpen((open) => !open);
+        return true;
+      }
       if (!activePhoto || isInspectorPreviewOpen) {
         return false;
       }
@@ -758,13 +975,12 @@ export default function App() {
         return false;
       }
       toggleExportQueue(activePhoto.id);
-      updateStatus(exportQueueIds.has(activePhoto.id) ? "Removed photo from export queue." : "Added photo to export queue.", "ok");
     },
     "global.showHelp": () => {
       setIsShortcutHelpOpen(true);
     },
-    "global.previousPhoto": () => selectGlobalPhotoDirection("left"),
-    "global.nextPhoto": () => selectGlobalPhotoDirection("right"),
+    "global.previousPhoto": () => activeTab === "export-enhance" ? selectExportEnhanceDirection("left") : selectGlobalPhotoDirection("left"),
+    "global.nextPhoto": () => activeTab === "export-enhance" ? selectExportEnhanceDirection("right") : selectGlobalPhotoDirection("right"),
     "global.photoDown": () => selectGlobalPhotoDirection("down"),
     "global.photoUp": () => selectGlobalPhotoDirection("up"),
     "similarity.previous": () => {
@@ -781,7 +997,7 @@ export default function App() {
     },
     "similarity.up": () => selectSimilarityVerticalNeighbor("up"),
     "similarity.down": () => selectSimilarityVerticalNeighbor("down")
-  }), [activePhoto, activeTab, exportQueueIds, isInspectorPreviewOpen, selectGlobalPhotoDirection, selectSimilarityVerticalNeighbor, setActiveId, similarNavigation, toggleExportQueue, updateStatus]);
+  }), [activePhoto, activeTab, exportQueueIds, exportQueueList.length, isInspectorPreviewOpen, selectExportEnhanceDirection, selectGlobalPhotoDirection, selectSimilarityVerticalNeighbor, setActiveId, similarNavigation, toggleExportQueue, updateStatus]);
 
   useShortcuts({
     shortcuts: shortcutRegistry,
@@ -900,10 +1116,36 @@ export default function App() {
         onRemove={removeFromExportQueue}
         onClear={() => {
           if (!activeWorkspaceId) return;
-          setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: [] }));
+          commitExportQueue([], "Cleared export queue.");
         }}
         onExport={onExport}
         onSelectPhoto={setActiveId}
+      />
+    );
+  } else if (activeTab === "export-enhance") {
+    workspace = (
+      <ExportEnhanceWorkspace
+        photos={photos}
+        queuedIds={exportQueueList}
+        selectedPhotoId={exportEnhanceSelectedPhotoId}
+        settings={exportEnhanceSettings}
+        outputFolder={exportEnhanceOutputFolder}
+        job={exportEnhanceJob}
+        isStarting={isStartingExportEnhance}
+        renderedPreviewUrl={renderedPreviewUrl}
+        isRenderingPreview={isRenderingPreview}
+        renderPreviewProgress={renderPreviewProgress}
+        renderPreviewStage={renderPreviewStage}
+        previewError={previewError}
+        isPreviewOpen={isEnhancePreviewOpen}
+        onPreviewOpenChange={setIsEnhancePreviewOpen}
+        onSettingsChange={updateExportEnhanceSettings}
+        onSelectPreviewPhoto={selectExportEnhancePhoto}
+        onChooseFolder={() => void onChooseExportEnhanceFolder()}
+        onOutputFolderChange={setExportEnhanceOutputFolder}
+        onRenderPreview={(photoId) => void onRenderExportEnhancePreview(photoId)}
+        onStart={() => void onStartExportEnhance()}
+        onCancel={() => void onCancelExportEnhance()}
       />
     );
   } else if (activeTab === "stats") {
@@ -1027,7 +1269,7 @@ export default function App() {
             />
           </>
         }
-        inspector={
+        inspector={activeTab === "export-enhance" ? null : (
           <InspectorPanel
             activePhoto={activePhoto}
             ratings={ratings}
@@ -1043,7 +1285,7 @@ export default function App() {
             onSaveScoreOverride={saveScoreOverride}
             onSaveOrientationOverride={saveOrientationOverride}
           />
-        }
+        )}
       >
         {workspace}
       </WorkspaceShell>

@@ -84,6 +84,7 @@ export interface LibraryPayload {
       error?: string | null;
     };
   };
+  exportQueue?: string[];
   rescore?: {
     queued: number;
     reset: number;
@@ -163,7 +164,7 @@ export type ViewMode = "grid" | "list";
 export type RatingFilter = "all" | "unrated" | "1" | "2" | "3" | "4" | "5";
 export type StatusTone = "" | "ok" | "warn" | "error" | "busy";
 export type SortMode = "score-desc" | "score-asc" | "name-asc" | "name-desc" | "mtime-desc" | "mtime-asc";
-export type ToolTab = "browse" | "review" | "duplicates" | "export" | "stats" | "debug";
+export type ToolTab = "browse" | "review" | "duplicates" | "export" | "export-enhance" | "stats" | "debug";
 export type WorkspaceTab = ToolTab;
 export type SimilarityScope = "current" | "library";
 
@@ -182,4 +183,39 @@ export interface AiRuntimeStatus {
   error: string;
   logPath: string;
   logTail: string[];
+  restormerModels?: {
+    denoise: boolean;
+    deblur: boolean;
+  };
+}
+
+export interface ExportEnhanceSettings {
+  exposure: number;
+  contrast: number;
+  highlights: number;
+  shadows: number;
+  saturation: number;
+  temperature: number;
+  tint: number;
+  aiDenoise: boolean;
+  aiDeblur: boolean;
+  strength: "low" | "medium" | "high";
+  sharpen: number;
+  outputFormat: "jpeg" | "tiff";
+  quality: number;
+  resizeMaxEdge: number | null;
+}
+
+export interface ExportEnhanceJob {
+  id: string;
+  status: "queued" | "running" | "done" | "cancelled" | "error" | string;
+  total: number;
+  completed: number;
+  failed: number;
+  current: string | null;
+  outputFolder: string;
+  outputs: string[];
+  failures: Array<{ photo_id?: string; photoId?: string; name: string; error: string }>;
+  createdAt: number;
+  updatedAt: number;
 }
