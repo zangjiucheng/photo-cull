@@ -204,6 +204,23 @@ export interface ExportEnhanceSettings {
   outputFormat: "jpeg" | "tiff";
   quality: number;
   resizeMaxEdge: number | null;
+  photoStyle: PhotoStyle;
+}
+
+export type PhotoStylePreset = "standard" | "bright" | "dramatic" | "warm" | "cool" | "muted";
+
+export interface PhotoStyle {
+  preset: PhotoStylePreset;
+  tone: number;
+  colour: number;
+  palette: number;
+}
+
+export interface StyleMaskPayload {
+  photoId: string;
+  width: number;
+  height: number;
+  dataUrl: string;
 }
 
 export interface ExportEnhanceJob {

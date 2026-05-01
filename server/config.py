@@ -80,4 +80,4 @@ class AppConfig:
             object.__setattr__(self, "render_cache_folder", os.path.join(os.path.dirname(self.db_path), "renders"))
 
 
-ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".dng"}
+ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".dng", ".heic", ".heif", ".hif"}

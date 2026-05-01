@@ -32,6 +32,59 @@ def test_color_processor_clamps_and_changes_pixels():
     assert not np.allclose(out, image)
 
 
+def test_photo_style_palette_zero_preserves_original():
+    image = np.random.default_rng(2).random((12, 10, 3), dtype=np.float32)
+    settings = export_enhance.EnhanceSettings(
+        photo_style=export_enhance.PhotoStyle(preset="dramatic", tone=80, colour=60, palette=0)
+    )
+
+    out = export_enhance.PhotographicStyleProcessor().apply(image, settings)
+
+    assert np.allclose(out, image)
+
+
+def test_photo_style_parse_fallback_and_clamp():
+    settings = export_enhance.parse_settings({
+        "photoStyle": {"preset": "unknown", "tone": 500, "colour": -500, "palette": 150}
+    })
+
+    assert settings.photo_style.preset == "standard"
+    assert settings.photo_style.tone == 100
+    assert settings.photo_style.colour == -100
+    assert settings.photo_style.palette == 100
+
+
+def test_photo_style_processor_skin_protection_reduces_shift():
+    image = np.zeros((8, 8, 3), dtype=np.float32)
+    image[:, :4] = np.array([0.74, 0.48, 0.36], dtype=np.float32)
+    image[:, 4:] = np.array([0.22, 0.44, 0.82], dtype=np.float32)
+    settings = export_enhance.EnhanceSettings(
+        photo_style=export_enhance.PhotoStyle(preset="dramatic", tone=100, colour=100, palette=100)
+    )
+
+    out = export_enhance.PhotographicStyleProcessor().apply(image, settings)
+    skin_shift = np.abs(out[:, :4] - image[:, :4]).mean()
+    background_shift = np.abs(out[:, 4:] - image[:, 4:]).mean()
+
+    assert skin_shift < background_shift
+
+
+def test_semantic_masks_are_rgba_and_clamped():
+    image = np.zeros((6, 7, 3), dtype=np.float32)
+    image[..., 2] = 0.9
+
+    masks = export_enhance.SemanticMaskProvider()._build_masks(image)
+
+    assert masks.shape == (6, 7, 4)
+    assert masks.min() >= 0
+    assert masks.max() <= 1
+
+
+def test_heif_extensions_are_allowed():
+    assert storage.allowed_image("photo.heic")
+    assert storage.allowed_image("photo.heif")
+
+
 def test_tile_inference_identity_preserves_shape_and_values():
     image = np.random.default_rng(1).random((23, 31, 3), dtype=np.float32)
     engine = export_enhance.TileInferenceEngine(tile_size=12, overlap=4)

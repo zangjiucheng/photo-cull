@@ -1,4 +1,4 @@
-import type { ApiPhoto, DeletePhotosPayload, ExportEnhanceJob, ExportEnhanceSettings, LibraryPayload, PhotoWorkspace, SimilarPayload, SimilarityScope } from "./types";
+import type { ApiPhoto, DeletePhotosPayload, ExportEnhanceJob, ExportEnhanceSettings, LibraryPayload, PhotoWorkspace, SimilarPayload, SimilarityScope, StyleMaskPayload } from "./types";
 
 async function parseError(res: Response, fallback: string): Promise<string> {
   const contentType = res.headers.get("Content-Type") || "";
@@ -158,6 +158,14 @@ export async function renderExportEnhancePreview(photoId: string, settings: Expo
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ photo_id: photoId, settings })
   }, "Failed to render enhance preview");
+}
+
+export async function fetchExportEnhanceStyleMasks(photoId: string, maxEdge = 1024): Promise<StyleMaskPayload> {
+  return requestJson<StyleMaskPayload>("/api/export-enhance/style-masks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_id: photoId, max_edge: maxEdge })
+  }, "Failed to load style masks");
 }
 
 export async function updatePhotoDecision(photoId: string, decision: "accepted" | "rejected" | null): Promise<ApiPhoto> {

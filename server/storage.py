@@ -50,6 +50,7 @@ def allowed_image(filename: str) -> bool:
 
 
 def validate_image_file(path: str) -> None:
+    raw_pipeline._register_heif_opener()
     if raw_pipeline.is_raw_image(path):
         try:
             raw_pipeline.validate_image_file(path)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, renderExportEnhancePreview, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, fetchExportEnhanceStyleMasks, findSimilarPhotos, renderExportEnhancePreview, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -17,7 +17,7 @@ import { ShortcutHelpDialog } from "./shortcuts/ShortcutHelpDialog";
 import { shortcutRegistry } from "./shortcuts/registry";
 import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
 import { useShortcuts } from "./shortcuts/useShortcuts";
-import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
+import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, StyleMaskPayload, ViewMode, WorkspaceTab } from "./types";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 
@@ -41,7 +41,13 @@ const defaultExportEnhanceSettings: ExportEnhanceSettings = {
   sharpen: 0,
   outputFormat: "jpeg",
   quality: 92,
-  resizeMaxEdge: null
+  resizeMaxEdge: null,
+  photoStyle: {
+    preset: "standard",
+    tone: 0,
+    colour: 0,
+    palette: 100
+  }
 };
 
 function formatFolderLabel(folder: LibraryFolder): string {
@@ -81,6 +87,8 @@ export default function App() {
   const [renderPreviewStage, setRenderPreviewStage] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [isEnhancePreviewOpen, setIsEnhancePreviewOpen] = useState(false);
+  const [styleMasksByPhoto, setStyleMasksByPhoto] = useState<Record<string, StyleMaskPayload>>({});
+  const [isLoadingStyleMasks, setIsLoadingStyleMasks] = useState(false);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -446,6 +454,10 @@ export default function App() {
 
   function updateExportEnhanceSettings(nextSettings: ExportEnhanceSettings) {
     setExportEnhanceSettings(nextSettings);
+    setRenderedPreviewUrl((current) => {
+      if (current) window.URL.revokeObjectURL(current);
+      return null;
+    });
     const targetId = exportEnhanceSelectedPhotoId ?? exportQueueList[0] ?? null;
     if (!targetId) return;
     setExportEnhanceSettingsByPhoto((current) => ({ ...current, [targetId]: nextSettings }));
@@ -482,6 +494,28 @@ export default function App() {
       setIsEnhancePreviewOpen(false);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "export-enhance" || !exportEnhanceSelectedPhotoId || styleMasksByPhoto[exportEnhanceSelectedPhotoId]) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingStyleMasks(true);
+    fetchExportEnhanceStyleMasks(exportEnhanceSelectedPhotoId)
+      .then((payload) => {
+        if (cancelled) return;
+        setStyleMasksByPhoto((current) => ({ ...current, [payload.photoId]: payload }));
+      })
+      .catch((err) => {
+        if (!cancelled) updateStatus(err instanceof Error ? err.message : "Failed to load style masks", "warn");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingStyleMasks(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, exportEnhanceSelectedPhotoId, styleMasksByPhoto, updateStatus]);
 
   async function onStartExportEnhance() {
     if (!exportQueueList.length) {
@@ -1089,6 +1123,8 @@ export default function App() {
         renderPreviewProgress={renderPreviewProgress}
         renderPreviewStage={renderPreviewStage}
         previewError={previewError}
+        styleMasks={exportEnhanceSelectedPhotoId ? styleMasksByPhoto[exportEnhanceSelectedPhotoId] ?? null : null}
+        isLoadingStyleMasks={isLoadingStyleMasks}
         isPreviewOpen={isEnhancePreviewOpen}
         onPreviewOpenChange={setIsEnhancePreviewOpen}
         onSettingsChange={updateExportEnhanceSettings}

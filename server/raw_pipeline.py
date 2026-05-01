@@ -18,10 +18,27 @@ MAX_DISPLAY_EDGE = 2400
 JPEG_QUALITY = 90
 
 _config = AppConfig()
+_heif_registered = False
 
 
 class InvalidRawImageError(ValueError):
     pass
+
+
+def _register_heif_opener() -> None:
+    global _heif_registered
+    if _heif_registered:
+        return
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener()
+        _heif_registered = True
+    except Exception:
+        _heif_registered = False
+
+
+_register_heif_opener()
 
 
 def configure(config: AppConfig) -> None:
@@ -77,6 +94,7 @@ def _normalize_orientation_override(value: int | None) -> int | None:
 
 
 def _ensure_oriented_raster(path: str, content_hash: str | None = None, orientation_override: int | None = None) -> str:
+    _register_heif_opener()
     override = _normalize_orientation_override(orientation_override)
     if _exif_orientation(path) is None and override is None:
         return path
@@ -147,6 +165,7 @@ def ensure_display_image(path: str, content_hash: str | None = None, orientation
 
 
 def validate_image_file(path: str) -> None:
+    _register_heif_opener()
     if is_raw_image(path):
         validate_raw_file(path)
         return

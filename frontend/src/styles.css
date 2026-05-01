@@ -1095,11 +1095,16 @@ body {
 }
 
 .enhance-preview-frame img,
-.enhance-preview-open img {
+.enhance-preview-open img,
+.enhance-preview-canvas {
   width: 100%;
   max-height: 360px;
   display: block;
   object-fit: contain;
+}
+
+.enhance-preview-canvas {
+  background: #10151c;
 }
 
 .enhance-preview-frame span {
@@ -1139,6 +1144,12 @@ body {
   color: #ffb4aa;
   font-size: 0.76rem;
   line-height: 1.35;
+}
+
+.enhance-preview-note {
+  color: #8fb8c5;
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
 .enhance-render-progress {
@@ -1253,9 +1264,15 @@ body {
   gap: 7px;
   padding: 0;
   border: 0;
+  outline: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
+}
+
+.enhance-preview-card:focus,
+.enhance-preview-card:focus-visible {
+  outline: none;
 }
 
 .enhance-preview-card img {
@@ -1268,6 +1285,11 @@ body {
 }
 
 .enhance-preview-card.active img {
+  border-color: #65c7e4;
+  box-shadow: 0 0 0 1px rgba(101, 199, 228, 0.45);
+}
+
+.enhance-preview-card:focus-visible img {
   border-color: #65c7e4;
   box-shadow: 0 0 0 1px rgba(101, 199, 228, 0.45);
 }
@@ -1339,6 +1361,76 @@ body {
 .enhance-presets button:hover {
   border-color: #5b6878;
   background: #242b35;
+}
+
+.enhance-presets button.active {
+  border-color: #65c7e4;
+  background: #123442;
+  color: #f3f8fb;
+}
+
+.tone-colour-pad {
+  position: relative;
+  min-height: 210px;
+  overflow: hidden;
+  border: 1px solid #343d49;
+  border-radius: 8px;
+  background:
+    linear-gradient(0deg, rgba(24, 38, 62, 0.92), rgba(245, 221, 173, 0.82)),
+    linear-gradient(90deg, rgba(80, 139, 232, 0.78), rgba(229, 149, 86, 0.78));
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.tone-colour-pad:focus-visible {
+  outline: 2px solid #65c7e4;
+  outline-offset: 2px;
+}
+
+.tone-colour-crosshair {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #f3f8fb;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(8, 11, 15, 0.9), 0 6px 18px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.tone-label {
+  position: absolute;
+  color: rgba(243, 248, 251, 0.78);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.tone-label.top {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tone-label.bottom {
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tone-label.left {
+  top: 50%;
+  left: 9px;
+  transform: translateY(-50%);
+}
+
+.tone-label.right {
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
 }
 
 .enhance-field,

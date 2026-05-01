@@ -255,6 +255,19 @@ def export_enhance_preview():
     return send_file(preview_path, mimetype="image/jpeg")
 
 
+@bp.route("/export-enhance/style-masks", methods=["POST"])
+def export_enhance_style_masks():
+    data = request.get_json(silent=True) or {}
+    photo_id = data.get("photo_id")
+    if not photo_id:
+        return error_response("photo_id is required", 400)
+    try:
+        payload = export_enhance.render_style_masks(str(photo_id), int(data.get("max_edge") or 1024))
+    except (export_enhance.ExportEnhanceError, RuntimeError, ValueError) as exc:
+        return error_response(str(exc), 400)
+    return jsonify(payload)
+
+
 @bp.route("/photos/similar", methods=["GET"])
 def similar_photos():
     include_clip = request.args.get("include_clip", "1") not in {"0", "false", "False"}
