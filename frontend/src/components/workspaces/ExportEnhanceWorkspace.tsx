@@ -334,7 +334,7 @@ export function ExportEnhanceWorkspace({
         <div className="workspace-actions">
           <Button variant="outline" onClick={onChooseFolder}>Output Folder</Button>
           <Button variant="default" onClick={onStart} disabled={isStarting || running || !queuedPhotos.length || !outputFolder}>
-            {isStarting ? "Starting..." : "Start Enhance"}
+            {isStarting ? "Starting Enhance & Export..." : "Start Enhance & Export"}
           </Button>
         </div>
       </div>

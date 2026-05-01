@@ -1250,7 +1250,6 @@ export default function App() {
       <WorkspaceShell
         activeTab={activeTab}
         currentPath={activeWorkspace ? `${activeWorkspace.name} / ${activeFolder ? formatFolderLabel(activeFolder) : "All Photos"}` : "No Workspace"}
-        exportQueueCount={exportQueueList.length}
         isRefreshing={isRefreshing}
         isRescoring={isRescoring}
         backgroundProgress={backgroundProgress}
@@ -1259,7 +1258,6 @@ export default function App() {
         onRefresh={() => void onRefresh()}
         onRefreshScores={() => void onRefreshScores()}
         onInstallAiRuntime={() => void onInstallAiRuntime()}
-        onOpenEnhanceExport={() => setActiveTab("export-enhance")}
         sidebar={
           <>
             {workspaceControls}
