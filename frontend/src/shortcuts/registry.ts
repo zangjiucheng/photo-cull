@@ -4,6 +4,15 @@ export const shortcutRegistry: ShortcutDefinition[] = [
   { id: "global.openPreview", scope: "global", key: " ", label: "Space", description: "Enlarge active photo", category: "Global" },
   { id: "global.toggleQueue", scope: "global", key: "q", label: "Q", description: "Toggle active photo in export queue", category: "Global" },
   { id: "global.showHelp", scope: "global", key: "/", shiftKey: true, label: "Shift+/", description: "Show keyboard shortcuts", category: "Global" },
+  ...["Browse", "Review", "Similarity", "Enhance & Export", "Stats", "Debug"].map((label, index) => ({
+    id: `global.switchTab${index + 1}`,
+    scope: "global" as const,
+    key: String(index + 1),
+    metaKey: true,
+    label: `Cmd+${index + 1}`,
+    description: `Switch to ${label}`,
+    category: "Global" as const
+  })),
   { id: "global.previousPhoto", scope: "global", key: "h", label: "H", description: "Select photo left", category: "Global" },
   { id: "global.nextPhoto", scope: "global", key: "l", label: "L", description: "Select photo right", category: "Global" },
   { id: "global.photoDown", scope: "global", key: "j", label: "J", description: "Select photo below", category: "Global" },

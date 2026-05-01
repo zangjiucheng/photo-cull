@@ -20,6 +20,7 @@ import { useShortcuts } from "./shortcuts/useShortcuts";
 import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, StyleMaskPayload, ViewMode, WorkspaceTab } from "./types";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
+const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "debug"];
 
 interface SimilarityProgress {
   percent: number;
@@ -959,6 +960,15 @@ export default function App() {
     return scopes;
   }, [activeTab]);
 
+  const switchTabByNumber = useCallback((index: number) => {
+    const tab = WORKSPACE_TABS[index];
+    if (!tab || tab === activeTab) {
+      return false;
+    }
+    setActiveTab(tab);
+    return true;
+  }, [activeTab]);
+
   const appShortcutHandlers = useMemo<ShortcutHandlers>(() => ({
     "global.openPreview": () => {
       if (activeTab === "export-enhance") {
@@ -984,6 +994,12 @@ export default function App() {
     "global.nextPhoto": () => activeTab === "export-enhance" ? selectExportEnhanceDirection("right") : selectGlobalPhotoDirection("right"),
     "global.photoDown": () => selectGlobalPhotoDirection("down"),
     "global.photoUp": () => selectGlobalPhotoDirection("up"),
+    "global.switchTab1": () => switchTabByNumber(0),
+    "global.switchTab2": () => switchTabByNumber(1),
+    "global.switchTab3": () => switchTabByNumber(2),
+    "global.switchTab4": () => switchTabByNumber(3),
+    "global.switchTab5": () => switchTabByNumber(4),
+    "global.switchTab6": () => switchTabByNumber(5),
     "similarity.previous": () => {
       if (!similarNavigation?.previousId) {
         return false;
@@ -998,7 +1014,7 @@ export default function App() {
     },
     "similarity.up": () => selectSimilarityVerticalNeighbor("up"),
     "similarity.down": () => selectSimilarityVerticalNeighbor("down")
-  }), [activePhoto, activeTab, exportQueueIds, exportQueueList.length, isInspectorPreviewOpen, selectExportEnhanceDirection, selectGlobalPhotoDirection, selectSimilarityVerticalNeighbor, setActiveId, similarNavigation, toggleExportQueue, updateStatus]);
+  }), [activePhoto, activeTab, exportQueueIds, exportQueueList.length, isInspectorPreviewOpen, selectExportEnhanceDirection, selectGlobalPhotoDirection, selectSimilarityVerticalNeighbor, setActiveId, similarNavigation, switchTabByNumber, toggleExportQueue, updateStatus]);
 
   useShortcuts({
     shortcuts: shortcutRegistry,
