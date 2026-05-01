@@ -205,7 +205,7 @@ class RestormerEngine:
 
     def ensure_ready(self, tasks: list[str]) -> None:
         if importlib.util.find_spec("torch") is None:
-            raise ExportEnhanceError("AI Runtime with PyTorch is required for AI Enhance.")
+            raise ExportEnhanceError("AI Runtime with PyTorch is required for Enhance & Export.")
         if importlib.util.find_spec("einops") is None:
             raise ExportEnhanceError("AI Runtime is missing einops. Reinstall AI Runtime.")
         self.model_dir.mkdir(parents=True, exist_ok=True)

@@ -139,17 +139,17 @@ export async function createExportEnhanceJob(options: {
       settings: options.settings,
       settings_by_photo: options.settingsByPhoto ?? {}
     })
-  }, "Failed to start export enhance");
+  }, "Failed to start Enhance & Export");
 }
 
 export async function fetchExportEnhanceJob(jobId: string): Promise<ExportEnhanceJob> {
-  return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}`, undefined, "Failed to load export enhance job");
+  return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}`, undefined, "Failed to load Enhance & Export job");
 }
 
 export async function cancelExportEnhanceJob(jobId: string): Promise<ExportEnhanceJob> {
   return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}/cancel`, {
     method: "POST"
-  }, "Failed to cancel export enhance job");
+  }, "Failed to cancel Enhance & Export job");
 }
 
 export async function renderExportEnhancePreview(photoId: string, settings: ExportEnhanceSettings): Promise<Blob> {
@@ -157,7 +157,7 @@ export async function renderExportEnhancePreview(photoId: string, settings: Expo
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ photo_id: photoId, settings })
-  }, "Failed to render AI Enhance preview");
+  }, "Failed to render enhance preview");
 }
 
 export async function updatePhotoDecision(photoId: string, decision: "accepted" | "rejected" | null): Promise<ApiPhoto> {

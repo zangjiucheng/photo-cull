@@ -113,7 +113,7 @@ export function ExportEnhanceWorkspace({
     <div className="workspace-panel export-enhance-workspace">
       <div className="workspace-head enhance-head">
         <div>
-          <span className="panel-kicker">AI Enhance</span>
+          <span className="panel-kicker">Enhance & Export</span>
           <h2>{queuedPhotos.length} queued photo(s)</h2>
           <p>Apply color, optional Restormer restoration, and save enhanced files to a folder.</p>
         </div>
@@ -125,12 +125,12 @@ export function ExportEnhanceWorkspace({
         </div>
       </div>
 
-      <section className="enhance-preview-zone" aria-label="AI Enhance color preview">
+      <section className="enhance-preview-zone" aria-label="Enhance and export color preview">
         {previewPhoto ? (
           <>
             <div className="enhance-preview-main">
               <div className="enhance-preview-frame">
-                <button type="button" className="enhance-preview-open" onClick={() => onPreviewOpenChange(true)} aria-label="Open AI Enhance preview">
+                <button type="button" className="enhance-preview-open" onClick={() => onPreviewOpenChange(true)} aria-label="Open enhance preview">
                   <img src={renderedPreviewUrl ?? previewPhoto.url} alt={previewPhoto.name} style={renderedPreviewUrl ? undefined : { filter: previewFilter }} />
                 </button>
                 {renderedPreviewUrl ? null : <span style={{ background: `rgba(${previewOverlayColor}, ${previewOverlayOpacity})` }} />}
@@ -161,12 +161,12 @@ export function ExportEnhanceWorkspace({
             </div>
           </>
         ) : (
-          <div className="enhance-preview-empty">Add photos to the export queue to preview AI Enhance inputs.</div>
+          <div className="enhance-preview-empty">Add photos to the export queue to preview enhance inputs.</div>
         )}
       </section>
 
       {isPreviewOpen && previewPhoto ? (
-        <div className="enhance-lightbox" role="dialog" aria-modal="true" aria-label="AI Enhance enlarged preview" onClick={() => onPreviewOpenChange(false)}>
+        <div className="enhance-lightbox" role="dialog" aria-modal="true" aria-label="Enhance enlarged preview" onClick={() => onPreviewOpenChange(false)}>
           <button className="enhance-lightbox-close" type="button" onClick={() => onPreviewOpenChange(false)} aria-label="Close preview">Close</button>
           <button
             className="enhance-lightbox-nav left"
@@ -257,7 +257,7 @@ export function ExportEnhanceWorkspace({
 
       <section className="enhance-progress">
         <div className="enhance-progress-head">
-          <strong>{job ? `Job ${job.status}` : "No AI Enhance job yet"}</strong>
+          <strong>{job ? `Job ${job.status}` : "No Enhance & Export job yet"}</strong>
           {running ? <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button> : null}
         </div>
         <div className="enhance-progress-bar"><span style={{ width: `${progress}%` }} /></div>

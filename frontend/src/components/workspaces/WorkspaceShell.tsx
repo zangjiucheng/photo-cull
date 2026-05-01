@@ -6,8 +6,7 @@ const tabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: "browse", label: "Browse" },
   { id: "review", label: "Review" },
   { id: "duplicates", label: "Similarity" },
-  { id: "export", label: "Export" },
-  { id: "export-enhance", label: "AI Enhance" },
+  { id: "export-enhance", label: "Enhance & Export" },
   { id: "stats", label: "Stats" },
   { id: "debug", label: "Debug" }
 ];
@@ -36,7 +35,7 @@ interface WorkspaceShellProps {
   onRefresh: () => void;
   onRefreshScores?: () => void;
   onInstallAiRuntime?: () => void;
-  onExportQueue: () => void;
+  onOpenEnhanceExport: () => void;
 }
 
 export function WorkspaceShell({
@@ -54,7 +53,7 @@ export function WorkspaceShell({
   onRefresh,
   onRefreshScores,
   onInstallAiRuntime,
-  onExportQueue
+  onOpenEnhanceExport
 }: WorkspaceShellProps) {
   const shellTabClass = `workspace-tab-${activeTab.replace(/[^a-z0-9_-]/gi, "-")}`;
   const hasInspector = Boolean(inspector);
@@ -100,7 +99,7 @@ export function WorkspaceShell({
               {aiRuntimeButtonLabel}
             </Button>
           ) : null}
-          <Button variant="default" size="sm" onClick={onExportQueue}>Export Queue ({exportQueueCount})</Button>
+          <Button variant="default" size="sm" onClick={onOpenEnhanceExport}>Enhance & Export ({exportQueueCount})</Button>
           {backgroundProgress ? (
             <div
               className={`scoring-progress ${progressState}`}

@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, exportPhotos, fetchExportEnhanceJob, findSimilarPhotos, renderExportEnhancePreview, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, renderExportEnhancePreview, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
 import { DebugWorkspace } from "./components/workspaces/DebugWorkspace";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
-import { ExportWorkspace } from "./components/workspaces/ExportWorkspace";
 import { ExportEnhanceWorkspace } from "./components/workspaces/ExportEnhanceWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
 import { WorkspaceLauncher } from "./components/workspaces/WorkspaceLauncher";
@@ -267,11 +266,6 @@ export default function App() {
     commitExportQueue([...(exportQueues[activeWorkspaceId] ?? []), ...visiblePhotos.map((photo) => photo.id)], `Added ${visiblePhotos.length} visible photo(s) to export queue.`);
   }
 
-  function removeFromExportQueue(id: string) {
-    if (!activeWorkspaceId) return;
-    commitExportQueue((exportQueues[activeWorkspaceId] ?? []).filter((photoId) => photoId !== id));
-  }
-
   async function onOpenFolder() {
     updateStatus("Opening folder...", "busy");
     try {
@@ -429,27 +423,6 @@ export default function App() {
     });
   }
 
-  async function onExport() {
-    if (!exportQueueList.length) {
-      updateStatus("Add photos to the export queue before exporting.", "warn");
-      return;
-    }
-
-    updateStatus("Building ZIP export...", "busy");
-    try {
-      const blob = await exportPhotos(exportQueueList);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "selected.zip";
-      a.click();
-      window.URL.revokeObjectURL(url);
-      updateStatus(`Exported ${exportQueueList.length} queued photo(s).`, "ok");
-    } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Export failed", "error");
-    }
-  }
-
   async function onChooseExportEnhanceFolder() {
     if (!window.aiCulling?.chooseOutputFolder) {
       const typed = window.prompt("Enter an output folder path");
@@ -512,15 +485,15 @@ export default function App() {
 
   async function onStartExportEnhance() {
     if (!exportQueueList.length) {
-      updateStatus("Add photos to the export queue before AI Enhance.", "warn");
+      updateStatus("Add photos to the export queue before Enhance & Export.", "warn");
       return;
     }
     if (!exportEnhanceOutputFolder) {
-      updateStatus("Choose an output folder before AI Enhance.", "warn");
+      updateStatus("Choose an output folder before Enhance & Export.", "warn");
       return;
     }
     setIsStartingExportEnhance(true);
-    updateStatus("Starting AI Enhance...", "busy");
+    updateStatus("Starting Enhance & Export...", "busy");
     try {
       const job = await createExportEnhanceJob({
         selectedIds: exportQueueList,
@@ -532,9 +505,9 @@ export default function App() {
         }
       });
       setExportEnhanceJob(job);
-      updateStatus("AI Enhance job started.", "ok");
+      updateStatus("Enhance & Export job started.", "ok");
     } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Failed to start AI Enhance", "error");
+      updateStatus(err instanceof Error ? err.message : "Failed to start Enhance & Export", "error");
     } finally {
       setIsStartingExportEnhance(false);
     }
@@ -544,9 +517,9 @@ export default function App() {
     if (!exportEnhanceJob) return;
     try {
       setExportEnhanceJob(await cancelExportEnhanceJob(exportEnhanceJob.id));
-      updateStatus("AI Enhance cancellation requested.", "warn");
+      updateStatus("Enhance & Export cancellation requested.", "warn");
     } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Failed to cancel AI Enhance", "error");
+      updateStatus(err instanceof Error ? err.message : "Failed to cancel Enhance & Export", "error");
     }
   }
 
@@ -555,7 +528,7 @@ export default function App() {
     setRenderPreviewProgress(12);
     setRenderPreviewStage("Preparing preview");
     setPreviewError("");
-    updateStatus("Rendering AI Enhance preview...", "busy");
+    updateStatus("Rendering enhance preview...", "busy");
     const timer = window.setInterval(() => {
       setRenderPreviewProgress((value) => {
         if (value < 42) {
@@ -582,9 +555,9 @@ export default function App() {
       });
       setRenderPreviewProgress(100);
       setRenderPreviewStage("Preview ready");
-      updateStatus("AI Enhance preview rendered.", "ok");
+      updateStatus("Enhance preview rendered.", "ok");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to render AI Enhance preview";
+      const message = err instanceof Error ? err.message : "Failed to render enhance preview";
       setPreviewError(message);
       updateStatus(message, "error");
     } finally {
@@ -618,7 +591,7 @@ export default function App() {
         .then((job) => {
           setExportEnhanceJob(job);
           if (job.status === "done") {
-            updateStatus(`AI Enhance complete: ${job.completed} file(s), ${job.failed} failed.`, job.failed ? "warn" : "ok");
+            updateStatus(`Enhance & Export complete: ${job.completed} file(s), ${job.failed} failed.`, job.failed ? "warn" : "ok");
           }
         })
         .catch(() => undefined);
@@ -908,11 +881,6 @@ export default function App() {
       return selectPhotoByOffset(ids, offset, ".review-workspace .bridge-gallery");
     }
 
-    if (activeTab === "export") {
-      const offset = direction === "left" || direction === "up" ? -1 : 1;
-      return selectPhotoByOffset(exportQueueList, offset, ".export-list");
-    }
-
     const librarySelectedOnly = activeTab === "stats";
     if (librarySelectedOnly) {
       const ids = folderPhotos.map((photo) => photo.id);
@@ -927,7 +895,6 @@ export default function App() {
     return selectPhotoByOffset(ids, offset, ".browse-workspace .bridge-gallery");
   }, [
     activeTab,
-    exportQueueList,
     folderPhotos,
     getGridColumnCount,
     isInspectorPreviewOpen,
@@ -1107,21 +1074,6 @@ export default function App() {
         onAddToExportQueue={addToExportQueue}
       />
     );
-  } else if (activeTab === "export") {
-    workspace = (
-      <ExportWorkspace
-        photos={photos}
-        queuedIds={exportQueueList}
-        activePhotoId={activePhoto?.id ?? null}
-        onRemove={removeFromExportQueue}
-        onClear={() => {
-          if (!activeWorkspaceId) return;
-          commitExportQueue([], "Cleared export queue.");
-        }}
-        onExport={onExport}
-        onSelectPhoto={setActiveId}
-      />
-    );
   } else if (activeTab === "export-enhance") {
     workspace = (
       <ExportEnhanceWorkspace
@@ -1255,7 +1207,7 @@ export default function App() {
         onRefresh={() => void onRefresh()}
         onRefreshScores={() => void onRefreshScores()}
         onInstallAiRuntime={() => void onInstallAiRuntime()}
-        onExportQueue={() => void onExport()}
+        onOpenEnhanceExport={() => setActiveTab("export-enhance")}
         sidebar={
           <>
             {workspaceControls}

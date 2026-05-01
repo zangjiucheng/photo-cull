@@ -229,7 +229,7 @@ def create_export_enhance_job():
 def get_export_enhance_job(job_id):
     job = export_enhance.queue.get(job_id)
     if job is None:
-        return error_response("Export enhance job not found", 404)
+        return error_response("Enhance & Export job not found", 404)
     return jsonify(export_enhance.serialize_job(job))
 
 
@@ -237,7 +237,7 @@ def get_export_enhance_job(job_id):
 def cancel_export_enhance_job(job_id):
     job = export_enhance.queue.cancel(job_id)
     if job is None:
-        return error_response("Export enhance job not found", 404)
+        return error_response("Enhance & Export job not found", 404)
     return jsonify(export_enhance.serialize_job(job))
 
 
