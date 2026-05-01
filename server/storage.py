@@ -14,7 +14,7 @@ from PIL import Image, UnidentifiedImageError
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-from . import db, events, raw_pipeline, scoring
+from . import db, events, raw_pipeline, scoring, similarity
 from .config import ALLOWED_EXTS, AppConfig
 
 
@@ -139,7 +139,18 @@ def list_workspaces() -> list[dict]:
 
 
 def delete_workspace(workspace_id: str) -> bool:
-    return db.delete_workspace(workspace_id)
+    refs = db.workspace_cache_refs(workspace_id)
+    deleted = db.delete_workspace(workspace_id)
+    if not deleted:
+        return False
+
+    scoring.discard_jobs(refs["photoIds"])
+    raw_pipeline.delete_cached_renders(refs["contentHashes"])
+    similarity.clear_similarity_cache()
+    with _scan_lock:
+        _scan_jobs.pop(workspace_id, None)
+    events.publish("library:update", workspace_id, {"source": "workspace", "status": "deleted"})
+    return True
 
 
 def _idle_scan_state() -> dict:

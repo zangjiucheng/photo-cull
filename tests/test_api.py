@@ -186,6 +186,39 @@ def test_dng_preview_uses_cached_jpeg_and_export_keeps_original(client, tmp_path
         assert zip_file.read("sample.dng") == b"fake-dng"
 
 
+def test_delete_workspace_clears_similarity_and_render_caches(client, tmp_path, monkeypatch):
+    fake_rawpy(monkeypatch)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "a.dng").write_bytes(b"fake-dng-a")
+    (source / "b.dng").write_bytes(b"fake-dng-b")
+    workspace = open_workspace(client, source)
+    photos = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"]
+
+    for photo in photos:
+        image = client.get(f"/api/photos/{photo['id']}/image")
+        assert image.status_code == 200
+    assert list(Path(db.get_config().render_cache_folder).glob("*.jpg"))
+
+    similar = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")
+    assert similar.status_code == 200
+    assert similar.get_json()["cache"] == {"hit": False, "source": "computed"}
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM similarity_group_cache WHERE workspace_id = ?", (workspace["id"],)).fetchone()[0] == 1
+
+    delete = client.delete(f"/api/workspaces/{workspace['id']}")
+    assert delete.status_code == 200
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM photos WHERE workspace_id = ?", (workspace["id"],)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM similarity_group_cache WHERE workspace_id = ?", (workspace["id"],)).fetchone()[0] == 0
+    assert not list(Path(db.get_config().render_cache_folder).glob("*.jpg"))
+
+    recreated = open_workspace(client, source)
+    cache_only = client.get(f"/api/photos/similar?workspace_id={recreated['id']}&include_clip=0&scope=library&cache_only=1")
+    assert cache_only.status_code == 200
+    assert cache_only.get_json()["cache"] == {"hit": False, "source": "none"}
+
+
 def test_multiple_workspaces_isolate_same_relative_path(client, tmp_path):
     first_root = tmp_path / "first"
     second_root = tmp_path / "second"

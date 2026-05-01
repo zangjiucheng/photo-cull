@@ -232,6 +232,28 @@ def delete_workspace(workspace_id: str) -> bool:
     return True
 
 
+def workspace_cache_refs(workspace_id: str) -> dict[str, list[str]]:
+    with connect() as conn:
+        photo_rows = conn.execute(
+            "SELECT id, content_hash FROM photos WHERE workspace_id = ?",
+            (workspace_id,),
+        ).fetchall()
+        excluded_rows = conn.execute(
+            "SELECT content_hash FROM excluded_photos WHERE workspace_id = ?",
+            (workspace_id,),
+        ).fetchall()
+    photo_ids = [row["id"] for row in photo_rows]
+    content_hashes = {
+        row["content_hash"]
+        for row in [*photo_rows, *excluded_rows]
+        if row["content_hash"]
+    }
+    return {
+        "photoIds": photo_ids,
+        "contentHashes": sorted(content_hashes),
+    }
+
+
 def fetch_photo(photo_id: str) -> sqlite3.Row | None:
     with connect() as conn:
         return conn.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()

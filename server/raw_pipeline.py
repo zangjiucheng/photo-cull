@@ -160,3 +160,18 @@ def validate_image_file(path: str) -> None:
 
 def display_path_for_row(row: Any) -> str:
     return ensure_display_image(row["path"], row["content_hash"], row["orientation_override"])
+
+
+def delete_cached_renders(content_hashes: set[str] | list[str]) -> int:
+    deleted = 0
+    for content_hash in set(content_hashes):
+        if not content_hash:
+            continue
+        for suffix in ("", "-oriented", "-override-90", "-override-180", "-override-270"):
+            target_path = os.path.join(_config.render_cache_folder, f"{content_hash}{suffix}.jpg")
+            try:
+                os.remove(target_path)
+                deleted += 1
+            except FileNotFoundError:
+                continue
+    return deleted
