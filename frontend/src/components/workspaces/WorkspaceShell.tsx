@@ -2,13 +2,13 @@ import type { CSSProperties, ReactNode } from "react";
 import type { AiRuntimeStatus, WorkspaceTab } from "../../types";
 import { Button } from "../ui/button";
 
-const tabs: Array<{ id: WorkspaceTab; label: string }> = [
-  { id: "browse", label: "Browse" },
-  { id: "review", label: "Review" },
-  { id: "duplicates", label: "Similarity" },
-  { id: "export-enhance", label: "Enhance & Export" },
-  { id: "stats", label: "Stats" },
-  { id: "debug", label: "Debug" }
+const tabs: Array<{ id: WorkspaceTab; label: string; shortcut: string; detail: string }> = [
+  { id: "browse", label: "Browse", shortcut: "Cmd+1", detail: "Browse and filter the active photo library." },
+  { id: "review", label: "Review", shortcut: "Cmd+2", detail: "Review photos, rate picks, and manage queue decisions." },
+  { id: "duplicates", label: "Similarity", shortcut: "Cmd+3", detail: "Find visually similar groups and choose what to keep." },
+  { id: "export-enhance", label: "Enhance & Export", shortcut: "Cmd+4", detail: "Apply styles, AI restoration, and export selected photos." },
+  { id: "stats", label: "Stats", shortcut: "Cmd+5", detail: "Check library progress, ratings, and export queue counts." },
+  { id: "debug", label: "Debug", shortcut: "Cmd+6", detail: "Inspect AI Runtime status and background logs." }
 ];
 
 interface WorkspaceShellProps {
@@ -76,8 +76,14 @@ export function WorkspaceShell({
               className={`workspace-tab ${activeTab === tab.id ? "active" : ""}`.trim()}
               onClick={() => onTabChange(tab.id)}
               aria-current={activeTab === tab.id ? "page" : undefined}
+              aria-describedby={`workspace-tab-tip-${tab.id}`}
             >
-              {tab.label}
+              <span>{tab.label}</span>
+              <span className="workspace-tab-tooltip" id={`workspace-tab-tip-${tab.id}`} role="tooltip">
+                <strong>{tab.label}</strong>
+                <span>{tab.detail}</span>
+                <kbd>{tab.shortcut}</kbd>
+              </span>
             </button>
           ))}
         </nav>

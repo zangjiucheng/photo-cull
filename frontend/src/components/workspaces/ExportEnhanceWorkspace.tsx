@@ -443,7 +443,10 @@ export function ExportEnhanceWorkspace({
         </div>
 
         <div className="enhance-panel">
-          <div className="enhance-panel-head"><strong>Tone / Colour</strong><span>{settings.photoStyle.tone} / {settings.photoStyle.colour}</span></div>
+          <div className="enhance-panel-head">
+            <strong>Tone / Colour</strong>
+            <span>Tone {settings.photoStyle.tone} · Colour {settings.photoStyle.colour}</span>
+          </div>
           <ToneColourPad style={settings.photoStyle} onChange={updateStyle} />
           <Field label="Palette" value={settings.photoStyle.palette} min={0} max={100} step={1} onChange={(value) => updateStyle({ ...settings.photoStyle, palette: value })} />
         </div>

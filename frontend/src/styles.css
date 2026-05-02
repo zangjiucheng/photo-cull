@@ -68,6 +68,7 @@ body {
 }
 
 .workspace-tab {
+  position: relative;
   height: 30px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -76,6 +77,56 @@ body {
   color: #c7d0da;
   font-weight: 700;
   cursor: pointer;
+}
+
+.workspace-tab-tooltip {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  z-index: 40;
+  width: 220px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 11px;
+  border: 1px solid #48515f;
+  border-radius: 8px;
+  background: #171c23;
+  color: #dce5ee;
+  box-shadow: 0 16px 36px rgba(5, 8, 12, 0.38);
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.workspace-tab-tooltip strong {
+  color: #f3f8fb;
+  font-size: 0.78rem;
+}
+
+.workspace-tab-tooltip span {
+  color: #aeb8c4;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.workspace-tab-tooltip kbd {
+  width: max-content;
+  padding: 3px 7px;
+  border: 1px solid #3b4654;
+  border-radius: 6px;
+  background: #0f141b;
+  color: #8fd4e8;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.workspace-tab:hover .workspace-tab-tooltip,
+.workspace-tab:focus-visible .workspace-tab-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .workspace-tab:hover,
