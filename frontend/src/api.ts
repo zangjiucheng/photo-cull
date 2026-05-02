@@ -84,6 +84,21 @@ export async function saveExportQueue(workspaceId: string, photoIds: string[]): 
   }, "Failed to save export queue");
 }
 
+export async function saveExportEnhanceSettings(
+  workspaceId: string,
+  settingsByPhoto: Record<string, ExportEnhanceSettings>
+): Promise<{ workspaceId: string; settingsByPhoto: Record<string, ExportEnhanceSettings> }> {
+  return requestJson<{ workspaceId: string; settingsByPhoto: Record<string, ExportEnhanceSettings> }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/export-enhance-settings`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings_by_photo: settingsByPhoto })
+    },
+    "Failed to save Enhance & Export edits"
+  );
+}
+
 export async function fetchWorkspaces(): Promise<PhotoWorkspace[]> {
   const data = await requestJson<{ workspaces: PhotoWorkspace[] }>("/api/workspaces", undefined, "Failed to load workspaces");
   return Array.isArray(data.workspaces) ? data.workspaces : [];

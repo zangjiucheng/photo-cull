@@ -1159,7 +1159,9 @@ body {
 
 .enhance-preview-open {
   width: 100%;
-  display: block;
+  height: var(--enhance-preview-height, 360px);
+  display: grid;
+  place-items: center;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1170,13 +1172,41 @@ body {
 .enhance-preview-open img,
 .enhance-preview-canvas {
   width: 100%;
-  max-height: 360px;
+  height: 100%;
+  max-height: none;
   display: block;
   object-fit: contain;
 }
 
 .enhance-preview-canvas {
   background: #10151c;
+}
+
+.enhance-preview-size-control {
+  width: 100%;
+}
+
+.enhance-preview-resize {
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  cursor: ns-resize;
+}
+
+.enhance-preview-resize span {
+  width: 74px;
+  height: 4px;
+  border-radius: 999px;
+  background: #46505c;
+  box-shadow: 0 1px 0 rgba(243, 248, 251, 0.08) inset;
+}
+
+.enhance-preview-resize:hover span,
+.enhance-preview-resize:focus-visible span {
+  background: #65c7e4;
 }
 
 .compare-original-target {
@@ -1371,6 +1401,9 @@ body {
   grid-auto-columns: minmax(96px, 124px);
   gap: 10px;
   overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  overscroll-behavior-x: contain;
 }
 
 .enhance-preview-card {

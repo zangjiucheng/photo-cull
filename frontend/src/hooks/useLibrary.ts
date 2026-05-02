@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteWorkspace, fetchWorkspaceLibrary, openWorkspace, refreshLibrary, rescoreWorkspace, restorePhotos } from "../api";
 import { normalizeScores } from "../core";
-import type { LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
+import type { ExportEnhanceSettings, LibraryFolder, LibraryPayload, Photo, PhotoWorkspace, StatusTone } from "../types";
 
 export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => void) {
   const [workspaces, setWorkspaces] = useState<PhotoWorkspace[]>([]);
@@ -12,6 +12,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   const [processingCount, setProcessingCount] = useState(0);
   const [excludedCount, setExcludedCount] = useState(0);
   const [serverExportQueue, setServerExportQueue] = useState<string[]>([]);
+  const [serverExportEnhanceSettings, setServerExportEnhanceSettings] = useState<Record<string, ExportEnhanceSettings>>({});
   const [indexing, setIndexing] = useState<NonNullable<LibraryPayload["summary"]["indexing"]>>({
     active: false,
     indexed: 0,
@@ -56,6 +57,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     setProcessingCount(data.summary.processing);
     setExcludedCount(data.summary.excluded ?? 0);
     setServerExportQueue(data.exportQueue ?? []);
+    setServerExportEnhanceSettings(data.exportEnhanceSettings ?? {});
     setIndexing(data.summary.indexing ?? {
       active: false,
       indexed: 0,
@@ -175,6 +177,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
       setProcessingCount(0);
       setExcludedCount(0);
       setServerExportQueue([]);
+      setServerExportEnhanceSettings({});
       setIndexing({
         active: false,
         indexed: 0,
@@ -250,6 +253,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     indexing,
     excludedCount,
     serverExportQueue,
+    serverExportEnhanceSettings,
     isLibraryReady,
     isLibraryLoading,
     activeFolderPath,

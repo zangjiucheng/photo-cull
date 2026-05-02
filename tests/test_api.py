@@ -549,6 +549,31 @@ def test_export_enhance_preview_renders_jpeg(client, tmp_path):
     assert response.headers["Content-Type"].startswith("image/jpeg")
 
 
+def test_export_enhance_settings_are_persistent(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+
+    saved = client.put(f"/api/workspaces/{workspace['id']}/export-enhance-settings", json={
+        "settings_by_photo": {
+            photo["id"]: {
+                "photoStyle": {"preset": "warm", "tone": 24, "colour": 12, "palette": 70},
+                "aiDenoise": True,
+                "aiDenoiseStrength": "low",
+                "outputFormat": "jpeg",
+            }
+        }
+    })
+
+    assert saved.status_code == 200
+    payload = saved.get_json()
+    assert payload["settingsByPhoto"][photo["id"]]["photoStyle"]["preset"] == "warm"
+    library = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()
+    assert library["exportEnhanceSettings"][photo["id"]]["photoStyle"]["tone"] == 24
+    assert library["exportEnhanceSettings"][photo["id"]]["aiDenoise"] is True
+
+
 def test_export_deduplicates_selected_ids(client, tmp_path):
     source = tmp_path / "source"
     make_image(source / "sample.jpg")

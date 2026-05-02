@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image
 
 from server import db, export_enhance, storage
+from server import raw_pipeline
 from server.config import AppConfig
 
 
@@ -18,6 +19,34 @@ def configure_tmp(tmp_path: Path) -> AppConfig:
 def make_image(path: Path, color: str = "blue") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (8, 8), color).save(path)
+
+
+def fake_rawpy_for_export(monkeypatch):
+    from io import BytesIO
+    from types import SimpleNamespace
+
+    thumb_buffer = BytesIO()
+    Image.new("RGB", (4, 3), "green").save(thumb_buffer, format="JPEG")
+
+    class FakeRaw:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            return False
+
+        def extract_thumb(self):
+            return SimpleNamespace(format="jpeg", data=thumb_buffer.getvalue())
+
+        def postprocess(self, **_kwargs):
+            return np.full((10, 20, 3), 128, dtype=np.uint8)
+
+    module = SimpleNamespace(
+        ThumbFormat=SimpleNamespace(JPEG="jpeg", BITMAP="bitmap"),
+        imread=lambda _path: FakeRaw(),
+    )
+    monkeypatch.setattr(raw_pipeline.importlib.util, "find_spec", lambda name: object() if name == "rawpy" else None)
+    monkeypatch.setattr(raw_pipeline.importlib, "import_module", lambda name: module if name == "rawpy" else __import__(name))
 
 
 def test_color_processor_clamps_and_changes_pixels():
@@ -68,6 +97,31 @@ def test_upscale_settings_parse_and_validate():
         raise AssertionError("Expected invalid upscale scale to fail")
 
 
+def test_ai_denoise_settings_parse_and_validate():
+    settings = export_enhance.parse_settings({"aiDenoise": True, "aiDenoiseStrength": "high"})
+
+    assert settings.ai_denoise is True
+    assert settings.ai_denoise_strength == "high"
+
+    try:
+        export_enhance.parse_settings({"aiDenoise": True, "aiDenoiseStrength": "extreme"})
+    except export_enhance.ExportEnhanceError as exc:
+        assert "aiDenoiseStrength" in str(exc)
+    else:
+        raise AssertionError("Expected invalid denoise strength to fail")
+
+
+def test_ai_denoise_engine_preserves_shape_and_range():
+    image = np.random.default_rng(6).random((10, 12, 3), dtype=np.float32)
+
+    out = export_enhance.AIDenoiseEngine().apply(image, "medium")
+
+    assert out.shape == image.shape
+    assert out.dtype == np.float32
+    assert out.min() >= 0
+    assert out.max() <= 1
+
+
 def test_realesrgan_source_root_is_importable(tmp_path):
     engine = export_enhance.RealESRGANEngine(model_dir=str(tmp_path / "models"))
     package_dir = engine.source_dir / "RealESRGAN"
@@ -105,6 +159,19 @@ def test_semantic_masks_are_rgba_and_clamped():
     assert masks.max() <= 1
 
 
+def test_semantic_mask_cache_keeps_preview_and_full_size_separate():
+    provider = export_enhance.SemanticMaskProvider()
+    row = {"path": "DJI_0352.DNG"}
+    preview = np.zeros((720, 960, 3), dtype=np.float32)
+    full = np.zeros((3000, 4000, 3), dtype=np.float32)
+
+    preview_masks = provider.masks_for_row(row, preview)
+    full_masks = provider.masks_for_row(row, full)
+
+    assert preview_masks.shape == (720, 960, 4)
+    assert full_masks.shape == (3000, 4000, 4)
+
+
 def test_heif_extensions_are_allowed():
     assert storage.allowed_image("photo.heic")
     assert storage.allowed_image("photo.heif")
@@ -133,6 +200,33 @@ def test_export_enhance_color_only_job_writes_files(tmp_path):
     assert finished.completed == 1
     assert Path(finished.outputs[0]).name == "a_enhanced.jpg"
     assert Path(finished.outputs[0]).exists()
+
+
+def test_export_enhance_dng_uses_full_raw_render_not_embedded_thumbnail(tmp_path, monkeypatch):
+    configure_tmp(tmp_path)
+    fake_rawpy_for_export(monkeypatch)
+    source = tmp_path / "source"
+    dng_path = source / "a.dng"
+    dng_path.parent.mkdir(parents=True)
+    dng_path.write_bytes(b"fake-dng")
+    workspace = storage.create_workspace(str(source))
+    storage.wait_for_scan(workspace["id"])
+    row = db.list_photos(workspace["id"])[0]
+    output = tmp_path / "out"
+    output.mkdir()
+
+    job = export_enhance.queue.create(
+        selected_ids=[row["id"]],
+        output_folder=str(output),
+        settings=export_enhance.EnhanceSettings(),
+    )
+    while export_enhance.queue.get(job.id).status in {"queued", "running"}:
+        pass
+    finished = export_enhance.queue.get(job.id)
+
+    assert finished.status == "done"
+    with Image.open(finished.outputs[0]) as img:
+        assert img.size == (20, 10)
 
 
 def test_export_writer_saves_tiff_16_bit(tmp_path):

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiInternals, createExportEnhanceJob, deletePhotos, deleteWorkspace, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos, saveExportQueue } from "./api";
+import { apiInternals, createExportEnhanceJob, deletePhotos, deleteWorkspace, exportPhotos, findSimilarPhotos, openWorkspace, rescoreWorkspace, restorePhotos, saveExportEnhanceSettings, saveExportQueue } from "./api";
 
 describe("api helpers", () => {
   it("surfaces JSON error messages", async () => {
@@ -52,6 +52,64 @@ describe("api helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("saves persistent enhance edit settings", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      workspaceId: "ws1",
+      settingsByPhoto: {
+        a: {
+          exposure: 0,
+          contrast: 0,
+          highlights: 0,
+          shadows: 0,
+          saturation: 0,
+          temperature: 0,
+          tint: 0,
+          aiDenoise: true,
+          aiDenoiseStrength: "medium",
+          upscale: false,
+          upscaleScale: 2,
+          sharpen: 0,
+          outputFormat: "jpeg",
+          quality: 92,
+          resizeMaxEdge: null,
+          photoStyle: { preset: "warm", tone: 10, colour: 2, palette: 80 }
+        }
+      }
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await saveExportEnhanceSettings("ws1", {
+      a: {
+        exposure: 0,
+        contrast: 0,
+        highlights: 0,
+        shadows: 0,
+        saturation: 0,
+        temperature: 0,
+        tint: 0,
+        aiDenoise: true,
+        aiDenoiseStrength: "medium",
+        upscale: false,
+        upscaleScale: 2,
+        sharpen: 0,
+        outputFormat: "jpeg",
+        quality: 92,
+        resizeMaxEdge: null,
+        photoStyle: { preset: "warm", tone: 10, colour: 2, palette: 80 }
+      }
+    });
+
+    expect(payload.settingsByPhoto.a.photoStyle.preset).toBe("warm");
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspaces/ws1/export-enhance-settings", expect.objectContaining({
+      method: "PUT",
+      body: expect.stringContaining("\"settings_by_photo\"")
+    }));
+    vi.unstubAllGlobals();
+  });
+
   it("starts an export enhance job", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       id: "job1",
@@ -82,6 +140,8 @@ describe("api helpers", () => {
         saturation: 0,
         temperature: 0,
         tint: 0,
+        aiDenoise: false,
+        aiDenoiseStrength: "medium",
         upscale: false,
         upscaleScale: 2,
         sharpen: 0,

@@ -543,6 +543,7 @@ def build_library_payload(workspace_id: str | None = None) -> dict:
         "photos": photos,
         "summary": summary,
         "exportQueue": db.list_export_queue(workspace_id) if workspace_id else [],
+        "exportEnhanceSettings": db.list_export_enhance_settings(workspace_id) if workspace_id else {},
     }
 
 

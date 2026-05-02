@@ -136,6 +136,25 @@ def _render_raw_to_jpeg(path: str, target_path: str, orientation_override: int |
         raise InvalidRawImageError("File is not a valid DNG image") from exc
 
 
+def load_full_raw_image(path: str, orientation_override: int | None = None) -> Image.Image:
+    if not is_raw_image(path):
+        raise InvalidRawImageError("File is not a RAW image")
+    if not os.path.exists(path):
+        raise InvalidRawImageError("RAW file does not exist")
+
+    rawpy = _load_rawpy()
+    override = _normalize_orientation_override(orientation_override)
+    try:
+        with rawpy.imread(path) as raw:
+            rgb = raw.postprocess(output_bps=8, use_camera_wb=True)
+        img = Image.fromarray(np.asarray(rgb, dtype=np.uint8), "RGB")
+        if override:
+            img = img.rotate(-override, expand=True)
+        return img.convert("RGB")
+    except Exception as exc:
+        raise InvalidRawImageError("File is not a valid DNG image") from exc
+
+
 def validate_raw_file(path: str) -> None:
     if not is_raw_image(path):
         return

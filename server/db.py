@@ -150,6 +150,24 @@ def init_db() -> None:
             ON export_queue_items(workspace_id, position)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS export_enhance_settings (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                settings TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(photo_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_export_enhance_settings_workspace
+            ON export_enhance_settings(workspace_id, updated_at)
+            """
+        )
 
 
 def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
@@ -321,6 +339,58 @@ def set_export_queue(workspace_id: str, photo_ids: Iterable[str]) -> list[str]:
             [(workspace_id, photo_id, index, now) for index, photo_id in enumerate(filtered)],
         )
     return filtered
+
+
+def list_export_enhance_settings(workspace_id: str) -> dict[str, Any]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT photo_id, settings FROM export_enhance_settings
+            WHERE workspace_id = ?
+            """,
+            (workspace_id,),
+        ).fetchall()
+    result: dict[str, Any] = {}
+    for row in rows:
+        try:
+            result[row["photo_id"]] = json.loads(row["settings"])
+        except json.JSONDecodeError:
+            continue
+    return result
+
+
+def set_export_enhance_settings(workspace_id: str, settings_by_photo: dict[str, Any]) -> dict[str, Any]:
+    now = time.time()
+    requested_ids = list(dict.fromkeys(str(photo_id) for photo_id in settings_by_photo.keys()))
+    with connect() as conn:
+        valid_rows = conn.execute(
+            f"""
+            SELECT id FROM photos
+            WHERE workspace_id = ? AND id IN ({",".join("?" for _ in requested_ids) if requested_ids else "NULL"})
+            """,
+            (workspace_id, *requested_ids),
+        ).fetchall() if requested_ids else []
+        valid_ids = {row["id"] for row in valid_rows}
+        conn.execute("DELETE FROM export_enhance_settings WHERE workspace_id = ?", (workspace_id,))
+        rows = [
+            (
+                workspace_id,
+                photo_id,
+                json.dumps(settings_by_photo[photo_id], sort_keys=True),
+                now,
+                now,
+            )
+            for photo_id in requested_ids
+            if photo_id in valid_ids and settings_by_photo.get(photo_id) is not None
+        ]
+        conn.executemany(
+            """
+            INSERT INTO export_enhance_settings (workspace_id, photo_id, settings, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+    return list_export_enhance_settings(workspace_id)
 
 
 def fetch_similarity_group_cache(

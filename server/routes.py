@@ -201,6 +201,28 @@ def export():
     return send_file(mem, download_name="selected.zip", as_attachment=True)
 
 
+@bp.route("/workspaces/<workspace_id>/export-enhance-settings", methods=["PUT"])
+def save_export_enhance_settings(workspace_id):
+    if db.fetch_workspace(workspace_id) is None:
+        return error_response("Workspace not found", 404)
+    data = request.get_json(silent=True) or {}
+    raw_settings_by_photo = data.get("settings_by_photo")
+    if not isinstance(raw_settings_by_photo, dict):
+        return error_response("settings_by_photo must be an object", 400)
+    try:
+        settings_by_photo = {
+            str(photo_id): export_enhance.serialize_settings(export_enhance.parse_settings(raw_settings))
+            for photo_id, raw_settings in raw_settings_by_photo.items()
+            if isinstance(raw_settings, dict)
+        }
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+    return jsonify({
+        "workspaceId": workspace_id,
+        "settingsByPhoto": db.set_export_enhance_settings(workspace_id, settings_by_photo),
+    })
+
+
 @bp.route("/export-enhance/jobs", methods=["POST"])
 def create_export_enhance_job():
     data = request.get_json(silent=True) or {}

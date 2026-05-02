@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent } from "react";
+import type { CSSProperties, PointerEvent } from "react";
 import type { ExportEnhanceJob, ExportEnhanceSettings, Photo, PhotoStyle, PhotoStylePreset, StyleMaskPayload } from "../../types";
 import { Button } from "../ui/button";
 
@@ -20,6 +20,9 @@ interface ExportEnhanceWorkspaceProps {
   isLoadingStyleMasks: boolean;
   isPreviewOpen: boolean;
   onSettingsChange: (settings: ExportEnhanceSettings) => void;
+  canUndo: boolean;
+  onUndo: () => void;
+  onReset: () => void;
   onSelectPreviewPhoto: (photoId: string) => void;
   onChooseFolder: () => void;
   onOutputFolderChange: (path: string) => void;
@@ -286,6 +289,9 @@ export function ExportEnhanceWorkspace({
   isLoadingStyleMasks,
   isPreviewOpen,
   onSettingsChange,
+  canUndo,
+  onUndo,
+  onReset,
   onSelectPreviewPhoto,
   onChooseFolder,
   onOutputFolderChange,
@@ -304,6 +310,24 @@ export function ExportEnhanceWorkspace({
   const previewPhoto = queuedPhotos.find((photo) => photo.id === selectedPhotoId) ?? queuedPhotos[0] ?? null;
   const currentIndex = previewPhoto ? queuedPhotos.findIndex((photo) => photo.id === previewPhoto.id) : -1;
   const [previewFallback, setPreviewFallback] = useState("");
+  const [previewSize, setPreviewSize] = useState(360);
+  const previewStyle = { "--enhance-preview-height": `${previewSize}px` } as CSSProperties;
+
+  const startPreviewResize = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startSize = previewSize;
+    const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
+      const nextSize = Math.max(240, Math.min(900, startSize + moveEvent.clientY - startY));
+      setPreviewSize(nextSize);
+    };
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  };
 
   useEffect(() => {
     if (!isPreviewOpen) return undefined;
@@ -334,6 +358,8 @@ export function ExportEnhanceWorkspace({
           <p>Apply photographic styles, sharpening, and save enhanced files to a folder.</p>
         </div>
         <div className="workspace-actions">
+          <Button variant="outline" onClick={onUndo} disabled={!canUndo}>Undo</Button>
+          <Button variant="outline" onClick={onReset} disabled={!previewPhoto}>Reset Adjustments</Button>
           <Button variant="outline" onClick={onClearQueue} disabled={running || !queuedPhotos.length}>Unqueue All</Button>
           <Button variant="outline" onClick={onChooseFolder}>Output Folder</Button>
           <Button variant="default" onClick={onStart} disabled={isStarting || running || !queuedPhotos.length || !outputFolder}>
@@ -342,7 +368,7 @@ export function ExportEnhanceWorkspace({
         </div>
       </div>
 
-      <section className="enhance-preview-zone" aria-label="Enhance and export color preview">
+      <section className="enhance-preview-zone" style={previewStyle} aria-label="Enhance and export color preview">
         {previewPhoto ? (
           <>
             <div className="enhance-preview-main">
@@ -385,8 +411,16 @@ export function ExportEnhanceWorkspace({
                 {previewError ? <span className="enhance-preview-error">{previewError}</span> : null}
               </div>
             </div>
+            <button
+              type="button"
+              className="enhance-preview-resize"
+              onPointerDown={startPreviewResize}
+              aria-label="Resize preview area"
+            >
+              <span />
+            </button>
             <div className="enhance-preview-strip">
-              {queuedPhotos.slice(0, 12).map((photo) => (
+              {queuedPhotos.map((photo) => (
                 <button className={`enhance-preview-card ${photo.id === previewPhoto.id ? "active" : ""}`.trim()} key={photo.id} type="button" onClick={() => onSelectPreviewPhoto(photo.id)}>
                   <img src={photo.url} alt={photo.name} loading="lazy" />
                   <span title={photo.name}>{photo.name}</span>
@@ -462,7 +496,15 @@ export function ExportEnhanceWorkspace({
         </div>
 
         <div className="enhance-panel">
-          <div className="enhance-panel-head"><strong>AI Upscale</strong></div>
+          <div className="enhance-panel-head"><strong>AI Scale</strong></div>
+          <label className="enhance-check"><input type="checkbox" checked={settings.aiDenoise} onChange={(event) => update("aiDenoise", event.target.checked)} /> AI Denoise</label>
+          <label className="enhance-select">Denoise strength
+            <select value={settings.aiDenoiseStrength} onChange={(event) => update("aiDenoiseStrength", event.target.value as ExportEnhanceSettings["aiDenoiseStrength"])} disabled={!settings.aiDenoise}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
           <label className="enhance-check"><input type="checkbox" checked={settings.upscale} onChange={(event) => update("upscale", event.target.checked)} /> Real-ESRGAN Upscale</label>
           <label className="enhance-select">Scale
             <select value={settings.upscaleScale} onChange={(event) => update("upscaleScale", Number(event.target.value) as ExportEnhanceSettings["upscaleScale"])} disabled={!settings.upscale}>

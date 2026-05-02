@@ -23,6 +23,7 @@ from . import db, events, raw_pipeline
 
 STYLE_PRESETS = {"standard", "bright", "dramatic", "warm", "cool", "muted"}
 UPSCALE_SCALES = {2, 4}
+DENOISE_STRENGTHS = {"low", "medium", "high"}
 REALESRGAN_SOURCE_BASE = "https://raw.githubusercontent.com/ai-forever/Real-ESRGAN/main/RealESRGAN"
 REALESRGAN_SOURCE_FILES = ("__init__.py", "model.py", "rrdbnet_arch.py", "arch_utils.py", "utils.py")
 
@@ -48,6 +49,8 @@ class EnhanceSettings:
     saturation: float = 0.0
     temperature: float = 0.0
     tint: float = 0.0
+    ai_denoise: bool = False
+    ai_denoise_strength: str = "medium"
     upscale: bool = False
     upscale_scale: int = 2
     sharpen: float = 0.0
@@ -117,6 +120,9 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         raise ExportEnhanceError("upscaleScale must be 2 or 4")
     if upscale_scale not in UPSCALE_SCALES:
         raise ExportEnhanceError("upscaleScale must be 2 or 4")
+    denoise_strength = str(settings.get("aiDenoiseStrength", settings.get("ai_denoise_strength", "medium"))).lower()
+    if denoise_strength not in DENOISE_STRENGTHS:
+        raise ExportEnhanceError("aiDenoiseStrength must be low, medium, or high")
     return EnhanceSettings(
         exposure=_float_setting(settings, "exposure", 0.0, -3.0, 3.0),
         contrast=_float_setting(settings, "contrast", 0.0, -1.0, 1.0),
@@ -125,6 +131,8 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         saturation=_float_setting(settings, "saturation", 0.0, -1.0, 1.0),
         temperature=_float_setting(settings, "temperature", 0.0, -1.0, 1.0),
         tint=_float_setting(settings, "tint", 0.0, -1.0, 1.0),
+        ai_denoise=bool(settings.get("aiDenoise", settings.get("ai_denoise", False))),
+        ai_denoise_strength=denoise_strength,
         upscale=bool(settings.get("upscale", False)),
         upscale_scale=upscale_scale,
         sharpen=_float_setting(settings, "sharpen", 0.0, 0.0, 1.0),
@@ -140,16 +148,47 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
     )
 
 
+def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
+    return {
+        "exposure": settings.exposure,
+        "contrast": settings.contrast,
+        "highlights": settings.highlights,
+        "shadows": settings.shadows,
+        "saturation": settings.saturation,
+        "temperature": settings.temperature,
+        "tint": settings.tint,
+        "aiDenoise": settings.ai_denoise,
+        "aiDenoiseStrength": settings.ai_denoise_strength,
+        "upscale": settings.upscale,
+        "upscaleScale": settings.upscale_scale,
+        "sharpen": settings.sharpen,
+        "outputFormat": settings.output_format,
+        "quality": settings.quality,
+        "resizeMaxEdge": settings.resize_max_edge,
+        "photoStyle": {
+            "preset": settings.photo_style.preset,
+            "tone": settings.photo_style.tone,
+            "colour": settings.photo_style.colour,
+            "palette": settings.photo_style.palette,
+        },
+    }
+
+
 class ImageLoader:
-    def load(self, row: Any) -> tuple[np.ndarray, bytes | None, str]:
+    def load(self, row: Any, *, full_raw: bool = True) -> tuple[np.ndarray, bytes | None, str]:
         source_path = row["path"]
-        path = raw_pipeline.display_path_for_row(row)
         exif = None
         try:
             with Image.open(source_path) as source:
                 exif = source.info.get("exif")
         except Exception:
             exif = None
+        if full_raw and raw_pipeline.is_raw_image(source_path):
+            rgb = raw_pipeline.load_full_raw_image(source_path, row["orientation_override"])
+            arr = np.asarray(rgb, dtype=np.float32) / 255.0
+            return arr, exif, source_path
+
+        path = raw_pipeline.display_path_for_row(row)
         with Image.open(path) as image:
             rgb = ImageOps.exif_transpose(image).convert("RGB")
             arr = np.asarray(rgb, dtype=np.float32) / 255.0
@@ -209,24 +248,25 @@ def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
 
 class SemanticMaskProvider:
     def __init__(self):
-        self._cache: dict[tuple[str, int], np.ndarray] = {}
+        self._cache: dict[tuple[str, int, int, int], np.ndarray] = {}
         self._lock = threading.Lock()
         self._torch_plugin_checked = False
         self._torch_plugin: Any | None = None
 
     def masks_for_row(self, row: Any, image: np.ndarray | None = None, max_edge: int | None = None) -> np.ndarray:
         source = str(row["path"])
-        cache_key = (source, max_edge or 0)
-        with self._lock:
-            cached = self._cache.get(cache_key)
-        if cached is not None:
-            return cached.copy()
         if image is None:
             image, _exif, _source = ImageLoader().load(row)
         if max_edge and max(image.shape[:2]) > max_edge:
             pil = Image.fromarray((image * 255.0 + 0.5).astype(np.uint8), "RGB")
             pil.thumbnail((max_edge, max_edge), Image.Resampling.BILINEAR)
             image = np.asarray(pil, dtype=np.float32) / 255.0
+        height, width = image.shape[:2]
+        cache_key = (source, max_edge or 0, height, width)
+        with self._lock:
+            cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached.copy()
         masks = self._build_masks(image)
         with self._lock:
             self._cache[cache_key] = masks.copy()
@@ -436,6 +476,44 @@ class RealESRGANEngine:
         return (np.asarray(out.convert("RGB"), dtype=np.float32) / 255.0).astype(np.float32)
 
 
+class AIDenoiseEngine:
+    _strength: dict[str, tuple[float, float]] = {
+        "low": (3.0, 0.35),
+        "medium": (6.0, 0.55),
+        "high": (10.0, 0.75),
+    }
+
+    def apply(self, image: np.ndarray, strength: str) -> np.ndarray:
+        h, blend = self._strength.get(strength, self._strength["medium"])
+        source = np.clip(image.astype(np.float32), 0.0, 1.0)
+        uint = (source * 255.0 + 0.5).astype(np.uint8)
+        denoised = self._opencv_denoise(uint, h)
+        if denoised is None:
+            denoised = self._pil_denoise(uint, strength)
+        restored = np.asarray(denoised, dtype=np.float32) / 255.0
+        return np.clip(source * (1.0 - blend) + restored * blend, 0.0, 1.0).astype(np.float32)
+
+    def _opencv_denoise(self, uint: np.ndarray, h: float) -> np.ndarray | None:
+        try:
+            import cv2
+
+            bgr = cv2.cvtColor(uint, cv2.COLOR_RGB2BGR)
+            out = cv2.fastNlMeansDenoisingColored(bgr, None, h, h, 7, 21)
+            return cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
+        except Exception:
+            return None
+
+    def _pil_denoise(self, uint: np.ndarray, strength: str) -> np.ndarray:
+        pil = Image.fromarray(uint, "RGB")
+        if strength == "high":
+            pil = pil.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.SMOOTH_MORE)
+        elif strength == "medium":
+            pil = pil.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.SMOOTH)
+        else:
+            pil = pil.filter(ImageFilter.SMOOTH)
+        return np.asarray(pil.convert("RGB"), dtype=np.uint8)
+
+
 class ExportWriter:
     def write(self, image: np.ndarray, row: Any, output_folder: str, settings: EnhanceSettings, exif: bytes | None) -> str:
         os.makedirs(output_folder, exist_ok=True)
@@ -482,6 +560,7 @@ class JobQueue:
         self._color = ColorProcessor()
         self._masks = SemanticMaskProvider()
         self._style = PhotographicStyleProcessor(self._masks)
+        self._denoise = AIDenoiseEngine()
         self._upscale = RealESRGANEngine()
         self._writer = ExportWriter()
 
@@ -550,6 +629,8 @@ class JobQueue:
                 image, exif, _source = self._loader.load(row)
                 image = self._color.apply(image, settings)
                 image = self._style.apply(image, settings, row)
+                if settings.ai_denoise:
+                    image = self._denoise.apply(image, settings.ai_denoise_strength)
                 if settings.upscale:
                     image = self._upscale.apply(image, settings.upscale_scale)
                 output = self._writer.write(image, row, job.output_folder, settings, exif)
@@ -604,13 +685,15 @@ def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 160
     row = db.fetch_photo(photo_id)
     if row is None:
         raise ExportEnhanceError("Photo not found")
-    image, _exif, _source = queue._loader.load(row)
+    image, _exif, _source = queue._loader.load(row, full_raw=False)
     if max(image.shape[:2]) > max_edge:
         pil = Image.fromarray((image * 255.0 + 0.5).astype(np.uint8), "RGB")
         pil.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
         image = np.asarray(pil, dtype=np.float32) / 255.0
     image = queue._color.apply(image, settings)
     image = queue._style.apply(image, settings, row)
+    if settings.ai_denoise:
+        image = queue._denoise.apply(image, settings.ai_denoise_strength)
     if settings.upscale:
         image = queue._upscale.apply(image, settings.upscale_scale)
     if settings.sharpen:

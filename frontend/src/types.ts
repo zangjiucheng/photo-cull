@@ -85,6 +85,7 @@ export interface LibraryPayload {
     };
   };
   exportQueue?: string[];
+  exportEnhanceSettings?: Record<string, ExportEnhanceSettings>;
   rescore?: {
     queued: number;
     reset: number;
@@ -193,6 +194,8 @@ export interface ExportEnhanceSettings {
   saturation: number;
   temperature: number;
   tint: number;
+  aiDenoise: boolean;
+  aiDenoiseStrength: "low" | "medium" | "high";
   upscale: boolean;
   upscaleScale: 2 | 4;
   sharpen: number;
