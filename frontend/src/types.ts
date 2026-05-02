@@ -193,6 +193,8 @@ export interface ExportEnhanceSettings {
   saturation: number;
   temperature: number;
   tint: number;
+  upscale: boolean;
+  upscaleScale: 2 | 4;
   sharpen: number;
   outputFormat: "jpeg" | "tiff";
   quality: number;

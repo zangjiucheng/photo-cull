@@ -343,28 +343,35 @@ export function ExportEnhanceWorkspace({
         {previewPhoto ? (
           <>
             <div className="enhance-preview-main">
-              <div className="enhance-preview-frame">
-                <button type="button" className="enhance-preview-open" onClick={() => onPreviewOpenChange(true)} aria-label="Open enhance preview">
-                  {renderedPreviewUrl ? (
-                    <img src={renderedPreviewUrl} alt={previewPhoto.name} />
-                  ) : (
+              <div className="enhance-preview-stage">
+                <div className="enhance-preview-frame">
+                  <span className="enhance-preview-label">Live style</span>
+                  <button type="button" className="enhance-preview-open" onClick={() => onPreviewOpenChange(true)} aria-label="Open enhance preview">
                     <PhotographicStyleCanvas
                       photo={previewPhoto}
                       style={settings.photoStyle}
                       masks={styleMasks}
                       onUnavailable={setPreviewFallback}
                     />
-                  )}
-                </button>
+                  </button>
+                </div>
+                <div className="enhance-preview-frame rendered">
+                  <span className="enhance-preview-label">Rendered preview</span>
+                  <button type="button" className="enhance-preview-open compare-original-target" onClick={() => onPreviewOpenChange(true)} aria-label="Open rendered preview">
+                    <img src={renderedPreviewUrl ?? previewPhoto.url} alt={renderedPreviewUrl ? `${previewPhoto.name} rendered preview` : previewPhoto.name} />
+                    {renderedPreviewUrl ? <img className="compare-original-image" src={previewPhoto.url} alt={`${previewPhoto.name} original`} /> : null}
+                  </button>
+                </div>
               </div>
               <div className="enhance-preview-meta">
                 <span className="panel-kicker">Photographic Style</span>
                 <strong>{previewPhoto.name}</strong>
-                <p>{renderedPreviewUrl ? "Showing rendered preview from the backend pipeline." : "WebGL2 preview updates from Tone, Colour, Palette, and semantic masks."}</p>
+                <p>Live preview updates immediately. Rendered preview on the right uses the backend export pipeline.</p>
                 {isLoadingStyleMasks ? <span className="enhance-preview-note">Loading semantic masks...</span> : null}
                 {previewFallback ? <span className="enhance-preview-error">{previewFallback}</span> : null}
-                <Button variant="outline" size="sm" onClick={() => onRenderPreview(previewPhoto.id)} disabled={isRenderingPreview}>
+                <Button className="compare-original-target" variant="outline" size="sm" onClick={() => onRenderPreview(previewPhoto.id)} disabled={isRenderingPreview}>
                   {isRenderingPreview ? "Rendering..." : "Render Preview"}
+                  <span className="compare-original-tooltip">Hover rendered preview to see original</span>
                 </Button>
                 {isRenderingPreview ? (
                   <div className="enhance-render-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={renderPreviewProgress}>
@@ -452,8 +459,19 @@ export function ExportEnhanceWorkspace({
         </div>
 
         <div className="enhance-panel">
-          <div className="enhance-panel-head"><strong>Output</strong></div>
+          <div className="enhance-panel-head"><strong>AI Upscale</strong></div>
+          <label className="enhance-check"><input type="checkbox" checked={settings.upscale} onChange={(event) => update("upscale", event.target.checked)} /> Real-ESRGAN Upscale</label>
+          <label className="enhance-select">Scale
+            <select value={settings.upscaleScale} onChange={(event) => update("upscaleScale", Number(event.target.value) as ExportEnhanceSettings["upscaleScale"])} disabled={!settings.upscale}>
+              <option value={2}>2x</option>
+              <option value={4}>4x</option>
+            </select>
+          </label>
           <Field label="Sharpen" value={settings.sharpen} min={0} max={1} step={0.05} onChange={(value) => update("sharpen", value)} />
+        </div>
+
+        <div className="enhance-panel">
+          <div className="enhance-panel-head"><strong>Output</strong></div>
           <label className="enhance-select">Format
             <select value={settings.outputFormat} onChange={(event) => update("outputFormat", event.target.value as ExportEnhanceSettings["outputFormat"])}>
               <option value="jpeg">JPEG</option>

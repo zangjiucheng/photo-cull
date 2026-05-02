@@ -423,7 +423,7 @@ async function restartBackend() {
 }
 
 async function verifyAiRuntime(runtimePython) {
-  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
+  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','cv2','huggingface_hub'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
   await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
 }
 

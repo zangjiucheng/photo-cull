@@ -36,6 +36,8 @@ const defaultExportEnhanceSettings: ExportEnhanceSettings = {
   saturation: 0,
   temperature: 0,
   tint: 0,
+  upscale: false,
+  upscaleScale: 2,
   sharpen: 0,
   outputFormat: "jpeg",
   quality: 92,
@@ -568,7 +570,7 @@ export default function App() {
           return value + 6;
         }
         if (value < 76) {
-          setRenderPreviewStage("Rendering preview");
+          setRenderPreviewStage(exportEnhanceSettings.upscale ? "Running AI upscale" : "Rendering preview");
           return value + 4;
         }
         if (value < 92) {

@@ -82,6 +82,8 @@ describe("api helpers", () => {
         saturation: 0,
         temperature: 0,
         tint: 0,
+        upscale: false,
+        upscaleScale: 2,
         sharpen: 0,
         outputFormat: "jpeg",
         quality: 92,

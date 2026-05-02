@@ -54,6 +54,31 @@ def test_photo_style_parse_fallback_and_clamp():
     assert settings.photo_style.palette == 100
 
 
+def test_upscale_settings_parse_and_validate():
+    settings = export_enhance.parse_settings({"upscale": True, "upscaleScale": 4})
+
+    assert settings.upscale is True
+    assert settings.upscale_scale == 4
+
+    try:
+        export_enhance.parse_settings({"upscale": True, "upscaleScale": 3})
+    except export_enhance.ExportEnhanceError as exc:
+        assert "upscaleScale" in str(exc)
+    else:
+        raise AssertionError("Expected invalid upscale scale to fail")
+
+
+def test_realesrgan_source_root_is_importable(tmp_path):
+    engine = export_enhance.RealESRGANEngine(model_dir=str(tmp_path / "models"))
+    package_dir = engine.source_dir / "RealESRGAN"
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("class RealESRGAN: pass\n", encoding="utf-8")
+
+    source_root = str(engine.source_dir)
+
+    assert source_root.endswith("source")
+
+
 def test_photo_style_processor_skin_protection_reduces_shift():
     image = np.zeros((8, 8, 3), dtype=np.float32)
     image[:, :4] = np.array([0.74, 0.48, 0.36], dtype=np.float32)

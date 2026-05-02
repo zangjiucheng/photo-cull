@@ -4,10 +4,12 @@ import importlib
 import base64
 import io
 import os
+import sys
 import tempfile
 import threading
 import time
 import traceback
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +22,9 @@ from . import db, events, raw_pipeline
 
 
 STYLE_PRESETS = {"standard", "bright", "dramatic", "warm", "cool", "muted"}
+UPSCALE_SCALES = {2, 4}
+REALESRGAN_SOURCE_BASE = "https://raw.githubusercontent.com/ai-forever/Real-ESRGAN/main/RealESRGAN"
+REALESRGAN_SOURCE_FILES = ("__init__.py", "model.py", "rrdbnet_arch.py", "arch_utils.py", "utils.py")
 
 
 class ExportEnhanceError(ValueError):
@@ -43,6 +48,8 @@ class EnhanceSettings:
     saturation: float = 0.0
     temperature: float = 0.0
     tint: float = 0.0
+    upscale: bool = False
+    upscale_scale: int = 2
     sharpen: float = 0.0
     output_format: str = "jpeg"
     quality: int = 92
@@ -104,6 +111,12 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         resize_max_edge = int(resize)
         if resize_max_edge < 256:
             raise ExportEnhanceError("resizeMaxEdge must be at least 256")
+    try:
+        upscale_scale = int(settings.get("upscaleScale", settings.get("upscale_scale", 2)))
+    except (TypeError, ValueError):
+        raise ExportEnhanceError("upscaleScale must be 2 or 4")
+    if upscale_scale not in UPSCALE_SCALES:
+        raise ExportEnhanceError("upscaleScale must be 2 or 4")
     return EnhanceSettings(
         exposure=_float_setting(settings, "exposure", 0.0, -3.0, 3.0),
         contrast=_float_setting(settings, "contrast", 0.0, -1.0, 1.0),
@@ -112,6 +125,8 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         saturation=_float_setting(settings, "saturation", 0.0, -1.0, 1.0),
         temperature=_float_setting(settings, "temperature", 0.0, -1.0, 1.0),
         tint=_float_setting(settings, "tint", 0.0, -1.0, 1.0),
+        upscale=bool(settings.get("upscale", False)),
+        upscale_scale=upscale_scale,
         sharpen=_float_setting(settings, "sharpen", 0.0, 0.0, 1.0),
         output_format=output_format,
         quality=quality,
@@ -344,6 +359,83 @@ class PhotographicStyleProcessor:
         return np.clip(gray[..., None] + (image - gray[..., None]) * factor[..., None], 0.0, 1.0)
 
 
+class RealESRGANEngine:
+    def __init__(self, model_dir: str | None = None):
+        self._model_dir_override = model_dir
+        self._models: dict[int, Any] = {}
+
+    @property
+    def model_dir(self) -> Path:
+        base = self._model_dir_override or os.getenv("AI_RUNTIME_MODEL_DIR") or os.path.join(os.path.dirname(db.get_config().db_path), "ai-runtime", "models")
+        return Path(base) / "real-esrgan"
+
+    @property
+    def source_dir(self) -> Path:
+        return self.model_dir / "source"
+
+    def _device(self):
+        import torch
+
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
+    def _load_model(self, scale: int):
+        if scale in self._models:
+            return self._models[scale]
+        if importlib.util.find_spec("torch") is None:
+            raise ExportEnhanceError("AI Runtime with PyTorch is required for Real-ESRGAN Upscale.")
+        if importlib.util.find_spec("cv2") is None or importlib.util.find_spec("huggingface_hub") is None:
+            raise ExportEnhanceError("AI Runtime is missing Real-ESRGAN dependencies. Reinstall AI Runtime.")
+        self._ensure_source()
+        self._patch_huggingface_cache_download()
+        source_root = str(self.source_dir)
+        if source_root not in sys.path:
+            sys.path.insert(0, source_root)
+        from RealESRGAN import RealESRGAN
+
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        weight_path = self.model_dir / f"RealESRGAN_x{scale}.pth"
+        model = RealESRGAN(self._device(), scale=scale)
+        model.load_weights(str(weight_path), download=True)
+        self._models[scale] = model
+        return model
+
+    def _ensure_source(self) -> None:
+        package_dir = self.source_dir / "RealESRGAN"
+        package_dir.mkdir(parents=True, exist_ok=True)
+        for filename in REALESRGAN_SOURCE_FILES:
+            target = package_dir / filename
+            if target.exists() and target.stat().st_size > 0:
+                continue
+            urllib.request.urlretrieve(f"{REALESRGAN_SOURCE_BASE}/{filename}", target)
+
+    def _patch_huggingface_cache_download(self) -> None:
+        import huggingface_hub
+
+        if hasattr(huggingface_hub, "cached_download"):
+            return
+
+        def cached_download(url, cache_dir=None, force_filename=None, **_kwargs):
+            target_dir = Path(cache_dir or self.model_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            filename = force_filename or Path(str(url).split("?")[0]).name
+            target = target_dir / filename
+            if not target.exists() or target.stat().st_size == 0:
+                urllib.request.urlretrieve(url, target)
+            return str(target)
+
+        huggingface_hub.cached_download = cached_download
+
+    def apply(self, image: np.ndarray, scale: int) -> np.ndarray:
+        model = self._load_model(scale)
+        pil = Image.fromarray((np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8), "RGB")
+        out = model.predict(pil)
+        return (np.asarray(out.convert("RGB"), dtype=np.float32) / 255.0).astype(np.float32)
+
+
 class ExportWriter:
     def write(self, image: np.ndarray, row: Any, output_folder: str, settings: EnhanceSettings, exif: bytes | None) -> str:
         os.makedirs(output_folder, exist_ok=True)
@@ -390,6 +482,7 @@ class JobQueue:
         self._color = ColorProcessor()
         self._masks = SemanticMaskProvider()
         self._style = PhotographicStyleProcessor(self._masks)
+        self._upscale = RealESRGANEngine()
         self._writer = ExportWriter()
 
     def create(
@@ -457,6 +550,8 @@ class JobQueue:
                 image, exif, _source = self._loader.load(row)
                 image = self._color.apply(image, settings)
                 image = self._style.apply(image, settings, row)
+                if settings.upscale:
+                    image = self._upscale.apply(image, settings.upscale_scale)
                 output = self._writer.write(image, row, job.output_folder, settings, exif)
                 with self._lock:
                     job.outputs.append(output)
@@ -516,6 +611,8 @@ def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 160
         image = np.asarray(pil, dtype=np.float32) / 255.0
     image = queue._color.apply(image, settings)
     image = queue._style.apply(image, settings, row)
+    if settings.upscale:
+        image = queue._upscale.apply(image, settings.upscale_scale)
     if settings.sharpen:
         pil = Image.fromarray((image * 255.0 + 0.5).astype(np.uint8), "RGB")
         pil = pil.filter(ImageFilter.UnsharpMask(radius=1.0, percent=int(60 + settings.sharpen * 90), threshold=3))
