@@ -27,6 +27,7 @@ interface ExportEnhanceWorkspaceProps {
   onPreviewOpenChange: (open: boolean) => void;
   onStart: () => void;
   onCancel: () => void;
+  onClearQueue: () => void;
 }
 
 const stylePresets: Array<{ id: PhotoStylePreset; label: string }> = [
@@ -291,7 +292,8 @@ export function ExportEnhanceWorkspace({
   onRenderPreview,
   onPreviewOpenChange,
   onStart,
-  onCancel
+  onCancel,
+  onClearQueue
 }: ExportEnhanceWorkspaceProps) {
   const byId = new Map(photos.map((photo) => [photo.id, photo]));
   const queuedPhotos = queuedIds.map((id) => byId.get(id)).filter((photo): photo is Photo => Boolean(photo));
@@ -332,6 +334,7 @@ export function ExportEnhanceWorkspace({
           <p>Apply photographic styles, sharpening, and save enhanced files to a folder.</p>
         </div>
         <div className="workspace-actions">
+          <Button variant="outline" onClick={onClearQueue} disabled={running || !queuedPhotos.length}>Unqueue All</Button>
           <Button variant="outline" onClick={onChooseFolder}>Output Folder</Button>
           <Button variant="default" onClick={onStart} disabled={isStarting || running || !queuedPhotos.length || !outputFolder}>
             {isStarting ? "Starting Enhance & Export..." : "Start Enhance & Export"}

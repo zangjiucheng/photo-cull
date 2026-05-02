@@ -274,6 +274,33 @@ export default function App() {
     commitExportQueue([...(exportQueues[activeWorkspaceId] ?? []), ...visiblePhotos.map((photo) => photo.id)], `Added ${visiblePhotos.length} visible photo(s) to export queue.`);
   }
 
+  function removeVisibleFromQueue() {
+    if (!activeWorkspaceId) return;
+    const visibleIds = new Set(visiblePhotos.map((photo) => photo.id));
+    if (!visibleIds.size) {
+      updateStatus("No visible photos to remove from queue.", "warn");
+      return;
+    }
+    const currentIds = exportQueues[activeWorkspaceId] ?? [];
+    const nextIds = currentIds.filter((id) => !visibleIds.has(id));
+    const removedCount = currentIds.length - nextIds.length;
+    if (!removedCount) {
+      updateStatus("No visible photos are in the export queue.", "warn");
+      return;
+    }
+    commitExportQueue(nextIds, `Removed ${removedCount} visible photo(s) from export queue.`);
+  }
+
+  function clearExportQueue() {
+    if (!activeWorkspaceId) return;
+    const currentIds = exportQueues[activeWorkspaceId] ?? [];
+    if (!currentIds.length) {
+      updateStatus("Export queue is already empty.", "warn");
+      return;
+    }
+    commitExportQueue([], `Removed ${currentIds.length} photo(s) from export queue.`);
+  }
+
   async function onOpenFolder() {
     updateStatus("Opening folder...", "busy");
     try {
@@ -1088,6 +1115,7 @@ export default function App() {
       folderPhotosCount={folderPhotos.length}
       keepRate={keepRate}
       onAddVisibleToQueue={addVisibleToQueue}
+      onRemoveVisibleFromQueue={removeVisibleFromQueue}
     />
   );
 
@@ -1149,6 +1177,7 @@ export default function App() {
         onRenderPreview={(photoId) => void onRenderExportEnhancePreview(photoId)}
         onStart={() => void onStartExportEnhance()}
         onCancel={() => void onCancelExportEnhance()}
+        onClearQueue={clearExportQueue}
       />
     );
   } else if (activeTab === "stats") {

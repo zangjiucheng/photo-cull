@@ -24,6 +24,7 @@ interface BrowseWorkspaceProps {
   onAutoRateByScore: () => void;
   onToggleExportQueue: (id: string) => void;
   onAddVisibleToQueue: () => void;
+  onRemoveVisibleFromQueue: () => void;
 }
 
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
@@ -34,7 +35,10 @@ export function BrowseWorkspace(props: BrowseWorkspaceProps) {
           <span className="panel-kicker">Browse</span>
           <h2>Current Folder</h2>
         </div>
-        <button className="link-button" onClick={props.onAddVisibleToQueue}>Add Visible to Queue</button>
+        <div className="workspace-actions">
+          <button className="link-button" onClick={props.onRemoveVisibleFromQueue}>Unqueue Visible</button>
+          <button className="link-button" onClick={props.onAddVisibleToQueue}>Add Visible to Queue</button>
+        </div>
       </div>
       <FilterBar {...props} visibleCount={props.photos.length} totalCount={props.folderPhotosCount} />
       <div className="browse-content-scroll">
