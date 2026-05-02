@@ -183,10 +183,6 @@ export interface AiRuntimeStatus {
   error: string;
   logPath: string;
   logTail: string[];
-  restormerModels?: {
-    denoise: boolean;
-    deblur: boolean;
-  };
 }
 
 export interface ExportEnhanceSettings {
@@ -197,9 +193,6 @@ export interface ExportEnhanceSettings {
   saturation: number;
   temperature: number;
   tint: number;
-  aiDenoise: boolean;
-  aiDeblur: boolean;
-  strength: "low" | "medium" | "high";
   sharpen: number;
   outputFormat: "jpeg" | "tiff";
   quality: number;

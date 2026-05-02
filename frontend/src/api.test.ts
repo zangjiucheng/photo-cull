@@ -82,13 +82,16 @@ describe("api helpers", () => {
         saturation: 0,
         temperature: 0,
         tint: 0,
-        aiDenoise: false,
-        aiDeblur: false,
-        strength: "medium",
         sharpen: 0,
         outputFormat: "jpeg",
         quality: 92,
-        resizeMaxEdge: null
+        resizeMaxEdge: null,
+        photoStyle: {
+          preset: "standard",
+          tone: 0,
+          colour: 0,
+          palette: 100
+        }
       }
     });
     expect(job.id).toBe("job1");

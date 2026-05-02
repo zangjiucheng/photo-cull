@@ -64,14 +64,6 @@ export function DebugWorkspace({
             <span>Installing</span>
             <strong>{aiRuntimeStatus?.installing ? "Yes" : "No"}</strong>
           </div>
-          <div>
-            <span>Restormer Denoise</span>
-            <strong>{aiRuntimeStatus?.restormerModels?.denoise ? "Ready" : "Missing"}</strong>
-          </div>
-          <div>
-            <span>Restormer Deblur</span>
-            <strong>{aiRuntimeStatus?.restormerModels?.deblur ? "Ready" : "Missing"}</strong>
-          </div>
         </div>
 
         <div className={`debug-message ${aiRuntimeStatus?.state === "error" ? "error" : ""}`.trim()}>

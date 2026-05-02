@@ -36,9 +36,6 @@ const defaultExportEnhanceSettings: ExportEnhanceSettings = {
   saturation: 0,
   temperature: 0,
   tint: 0,
-  aiDenoise: false,
-  aiDeblur: false,
-  strength: "medium",
   sharpen: 0,
   outputFormat: "jpeg",
   quality: 92,
@@ -571,7 +568,7 @@ export default function App() {
           return value + 6;
         }
         if (value < 76) {
-          setRenderPreviewStage(exportEnhanceSettings.aiDenoise || exportEnhanceSettings.aiDeblur ? "Running AI restoration" : "Rendering preview");
+          setRenderPreviewStage("Rendering preview");
           return value + 4;
         }
         if (value < 92) {

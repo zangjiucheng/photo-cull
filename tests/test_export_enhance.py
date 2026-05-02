@@ -85,25 +85,6 @@ def test_heif_extensions_are_allowed():
     assert storage.allowed_image("photo.heif")
 
 
-def test_tile_inference_identity_preserves_shape_and_values():
-    image = np.random.default_rng(1).random((23, 31, 3), dtype=np.float32)
-    engine = export_enhance.TileInferenceEngine(tile_size=12, overlap=4)
-
-    out = engine.run(image, lambda patch: patch)
-
-    assert out.shape == image.shape
-    assert np.allclose(out, image, atol=1e-5)
-
-
-def test_restormer_corrupt_weight_is_removed(tmp_path):
-    engine = export_enhance.RestormerEngine(model_dir=str(tmp_path / "models"))
-    target = engine.model_dir / "denoise.pth"
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"not-a-checkpoint")
-
-    assert engine._looks_like_checkpoint(target) is False
-
-
 def test_export_enhance_color_only_job_writes_files(tmp_path):
     configure_tmp(tmp_path)
     source = tmp_path / "source"

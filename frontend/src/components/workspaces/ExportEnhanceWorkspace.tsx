@@ -329,7 +329,7 @@ export function ExportEnhanceWorkspace({
         <div>
           <span className="panel-kicker">Enhance & Export</span>
           <h2>{queuedPhotos.length} queued photo(s)</h2>
-          <p>Apply color, optional Restormer restoration, and save enhanced files to a folder.</p>
+          <p>Apply photographic styles, sharpening, and save enhanced files to a folder.</p>
         </div>
         <div className="workspace-actions">
           <Button variant="outline" onClick={onChooseFolder}>Output Folder</Button>
@@ -452,21 +452,8 @@ export function ExportEnhanceWorkspace({
         </div>
 
         <div className="enhance-panel">
-          <div className="enhance-panel-head"><strong>AI Restore</strong></div>
-          <label className="enhance-check"><input type="checkbox" checked={settings.aiDenoise} onChange={(event) => update("aiDenoise", event.target.checked)} /> AI Denoise</label>
-          <label className="enhance-check"><input type="checkbox" checked={settings.aiDeblur} onChange={(event) => update("aiDeblur", event.target.checked)} /> AI Deblur</label>
-          <label className="enhance-select">Strength
-            <select value={settings.strength} onChange={(event) => update("strength", event.target.value as ExportEnhanceSettings["strength"])}>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-          <Field label="Sharpen" value={settings.sharpen} min={0} max={1} step={0.05} onChange={(value) => update("sharpen", value)} />
-        </div>
-
-        <div className="enhance-panel">
           <div className="enhance-panel-head"><strong>Output</strong></div>
+          <Field label="Sharpen" value={settings.sharpen} min={0} max={1} step={0.05} onChange={(value) => update("sharpen", value)} />
           <label className="enhance-select">Format
             <select value={settings.outputFormat} onChange={(event) => update("outputFormat", event.target.value as ExportEnhanceSettings["outputFormat"])}>
               <option value="jpeg">JPEG</option>

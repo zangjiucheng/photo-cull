@@ -168,7 +168,6 @@ function useAiRuntimeBackend() {
 
 function aiRuntimePublicStatus() {
   const logPath = path.join(app.getPath("userData"), "ai-runtime-install.log");
-  const restormerDir = path.join(aiRuntimeModelDir(), "restormer");
   return {
     available: isPackaged || fs.existsSync(path.join(runtimeSourcePath, "requirements-ai.txt")),
     installed: runtimeInstalled(),
@@ -180,10 +179,6 @@ function aiRuntimePublicStatus() {
     error: aiRuntime.error,
     logPath,
     logTail: tailFile(logPath),
-    restormerModels: {
-      denoise: fs.existsSync(path.join(restormerDir, "denoise.pth")),
-      deblur: fs.existsSync(path.join(restormerDir, "deblur.pth")),
-    },
   };
 }
 
@@ -428,7 +423,7 @@ async function restartBackend() {
 }
 
 async function verifyAiRuntime(runtimePython) {
-  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','einops'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
+  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
   await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
 }
 
