@@ -196,6 +196,35 @@ def test_scan_skips_hash_for_unchanged_file(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_scan_preserves_score_cache_when_workspace_root_is_unavailable(tmp_path, monkeypatch):
+    configure_tmp(tmp_path)
+    monkeypatch.setattr("server.scoring.enqueue_scoring", lambda _photo_id, _path: None)
+    workspace_root = tmp_path / "source"
+    image_path = workspace_root / "photo.jpg"
+    make_image(image_path)
+    workspace = storage.create_workspace(str(workspace_root))
+    storage.wait_for_scan(workspace["id"])
+    row = db.list_photos(workspace["id"])[0]
+    db.mark_done(row["id"], 92.5, {"reason": "cached"})
+
+    offline_root = tmp_path / "source-offline"
+    workspace_root.rename(offline_root)
+    storage.scan_workspace(workspace["id"], force_gc=True)
+
+    cached_row = db.fetch_photo(row["id"])
+    assert cached_row is not None
+    assert cached_row["score"] == 92.5
+    assert cached_row["status"] == "done"
+
+    offline_root.rename(workspace_root)
+    storage.scan_workspace(workspace["id"], force_gc=True)
+
+    restored_row = db.fetch_photo(row["id"])
+    assert restored_row is not None
+    assert restored_row["score"] == 92.5
+    assert restored_row["status"] == "done"
+
+
 def test_scan_dng_queues_cached_display_image_for_scoring(tmp_path, monkeypatch):
     config = configure_tmp(tmp_path)
     fake_rawpy(monkeypatch)

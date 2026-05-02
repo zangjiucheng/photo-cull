@@ -394,7 +394,9 @@ def save_upload(file_obj: FileStorage) -> dict | None:
 
 
 def gc_missing_photos(workspace_id: str | None = None) -> int:
-    rows = db.list_photos(workspace_id)
+    if workspace_id is not None and not _workspace_root_available(workspace_id):
+        return 0
+    rows = _photos_with_available_workspace_roots(workspace_id)
     missing = [row["id"] for row in rows if not os.path.exists(resolve_disk_path(row["path"]))]
     removed = db.delete_photos(missing)
     if removed:
@@ -403,8 +405,29 @@ def gc_missing_photos(workspace_id: str | None = None) -> int:
 
 
 def collect_missing_photo_ids(workspace_id: str | None = None) -> list[str]:
-    rows = db.list_photos(workspace_id)
+    if workspace_id is not None and not _workspace_root_available(workspace_id):
+        return []
+    rows = _photos_with_available_workspace_roots(workspace_id)
     return [row["id"] for row in rows if not os.path.exists(resolve_disk_path(row["path"]))]
+
+
+def _workspace_root_available(workspace_id: str) -> bool:
+    workspace = db.fetch_workspace(workspace_id)
+    return bool(workspace and os.path.isdir(resolve_disk_path(workspace["root_path"])))
+
+
+def _photos_with_available_workspace_roots(workspace_id: str | None = None):
+    rows = db.list_photos(workspace_id)
+    if workspace_id is not None:
+        return rows
+
+    workspaces = {row["id"]: row for row in db.list_workspaces()}
+    available_workspace_ids = {
+        wid
+        for wid, workspace in workspaces.items()
+        if os.path.isdir(resolve_disk_path(workspace["root_path"]))
+    }
+    return [row for row in rows if row["workspace_id"] in available_workspace_ids]
 
 
 def maybe_run_gc(workspace_id: str | None = None, force: bool = False) -> int:
@@ -422,6 +445,10 @@ def scan_workspace(workspace_id: str, force_gc: bool = False, update_progress: b
     if workspace is None:
         raise InvalidWorkspaceError("Workspace not found")
 
+    root_path = resolve_disk_path(workspace["root_path"])
+    if not os.path.isdir(root_path):
+        return
+
     photo_rows = db.list_photos(workspace_id)
     moved_photo_candidates = [
         row for row in photo_rows
@@ -436,7 +463,6 @@ def scan_workspace(workspace_id: str, force_gc: bool = False, update_progress: b
     ]
     matched_photo_ids: set[str] = set()
     matched_excluded_paths: set[str] = set()
-    root_path = workspace["root_path"]
     for root, dirs, files in os.walk(root_path):
         dirs[:] = [dirname for dirname in dirs if not dirname.startswith(".")]
         for file_name in sorted(files):
