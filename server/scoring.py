@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import hashlib
 import math
 import os
 import threading
@@ -22,8 +23,9 @@ _running_jobs: set[str] = set()
 _jobs_lock = threading.Lock()
 _metrics: dict[str, "LoadedMetric"] = {}
 _metric_errors: dict[str, str] = {}
-_score_mode = "multi:balanced"
+_score_mode = "multi:fast"
 _metrics_loaded = False
+_loaded_profile = ""
 
 
 @dataclass
@@ -42,6 +44,20 @@ BALANCED_PROFILE = {
     "distortion": {"candidates": ["brisque", "niqe"], "weight": 0.20},
 }
 
+FAST_PROFILE = {
+    "distortion": {"candidates": ["brisque", "niqe"], "weight": 0.25},
+}
+
+SCORING_PROFILES = {
+    "fast": FAST_PROFILE,
+    "balanced": BALANCED_PROFILE,
+}
+
+HEURISTIC_WEIGHT_BY_PROFILE = {
+    "fast": 0.75,
+    "balanced": 0.10,
+}
+
 FALLBACK_RANGES: dict[str, tuple[float, float]] = {
     "topiq_nr": (0.0, 1.0),
     "musiq": (0.0, 100.0),
@@ -53,14 +69,29 @@ FALLBACK_RANGES: dict[str, tuple[float, float]] = {
 
 
 def configure(config: AppConfig) -> None:
-    global _config, _executor, _metrics, _metric_errors, _score_mode, _metrics_loaded
+    global _config, _executor, _metrics, _metric_errors, _score_mode, _metrics_loaded, _loaded_profile
     _config = config
     _executor.shutdown(wait=False, cancel_futures=True)
     _executor = ThreadPoolExecutor(max_workers=_config.score_workers)
     _metrics = {}
     _metric_errors = {}
-    _score_mode = "multi:balanced"
+    _score_mode = "multi:fast"
     _metrics_loaded = False
+    _loaded_profile = ""
+
+
+def _resolve_profile(profile: str | None = None) -> str:
+    configured = (profile or os.getenv("IQA_PROFILE", "fast")).strip().lower()
+    if configured in {"off", "none", "heuristic", "heuristics"}:
+        return "heuristic"
+    return configured if configured in SCORING_PROFILES else "fast"
+
+
+def _resolve_iqa_max_edge() -> int:
+    try:
+        return max(0, int(os.getenv("IQA_MAX_EDGE", "1024")))
+    except ValueError:
+        return 1024
 
 
 def _resolve_device() -> str:
@@ -92,13 +123,20 @@ def _coerce_score_range(value: object) -> tuple[float, float] | None:
     return None
 
 
-def load_metrics(profile: str = "balanced") -> None:
-    global _metrics, _metric_errors, _score_mode, _metrics_loaded
-    if _metrics_loaded:
+def load_metrics(profile: str | None = None) -> None:
+    global _metrics, _metric_errors, _score_mode, _metrics_loaded, _loaded_profile
+    resolved_profile = _resolve_profile(profile)
+    if _metrics_loaded and _loaded_profile == resolved_profile:
         return
+    _metrics = {}
+    _metric_errors = {}
     _metrics_loaded = True
+    _loaded_profile = resolved_profile
+    if resolved_profile == "heuristic":
+        _score_mode = "heuristic:fast"
+        return
     if importlib.util.find_spec("pyiqa") is None:
-        _score_mode = "heuristic:enhanced"
+        _score_mode = f"heuristic:{resolved_profile}"
         return
 
     try:
@@ -107,7 +145,8 @@ def load_metrics(profile: str = "balanced") -> None:
         device = _resolve_device()
         loaded: dict[str, LoadedMetric] = {}
         errors: dict[str, str] = {}
-        for group, config in BALANCED_PROFILE.items():
+        active_profile = SCORING_PROFILES[resolved_profile]
+        for group, config in active_profile.items():
             for name in config["candidates"]:
                 if name not in available:
                     continue
@@ -130,11 +169,13 @@ def load_metrics(profile: str = "balanced") -> None:
         _metrics = loaded
         _metric_errors = errors
         metric_names = [metric.name for metric in loaded.values()]
-        _score_mode = f"multi:{profile}[{','.join([*metric_names, 'heuristics'])}]" if metric_names else "heuristic:enhanced"
+        max_edge = _resolve_iqa_max_edge()
+        suffix = f";maxEdge={max_edge}" if max_edge else ""
+        _score_mode = f"multi:{resolved_profile}[{','.join([*metric_names, 'heuristics'])}{suffix}]" if metric_names else f"heuristic:{resolved_profile}"
     except Exception as exc:
         _metrics = {}
         _metric_errors = {"pyiqa": str(exc)[:300]}
-        _score_mode = "heuristic:enhanced"
+        _score_mode = f"heuristic:{resolved_profile}"
 
 
 def score_mode() -> str:
@@ -143,6 +184,42 @@ def score_mode() -> str:
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
+
+
+def _thumbnail_rgb(img: Image.Image, max_edge: int | None = None) -> Image.Image:
+    rgb = img.convert("RGB")
+    edge = _resolve_iqa_max_edge() if max_edge is None else max_edge
+    if edge and max(rgb.size) > edge:
+        rgb.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+    return rgb
+
+
+def _resized_metric_path(path: str) -> str:
+    max_edge = _resolve_iqa_max_edge()
+    if not max_edge:
+        return path
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return path
+    cache_key = hashlib.sha1(f"{path}:{stat.st_mtime_ns}:{stat.st_size}:{max_edge}".encode("utf-8")).hexdigest()
+    cache_dir = os.path.join(_config.render_cache_folder, "scores")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:
+        return path
+    cached_path = os.path.join(cache_dir, f"{cache_key}.jpg")
+    if os.path.exists(cached_path):
+        return cached_path
+    try:
+        with Image.open(path) as img:
+            rgb = _thumbnail_rgb(img, max_edge)
+            if rgb.size == img.size and img.mode == "RGB" and path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                return path
+            rgb.save(cached_path, "JPEG", quality=90, optimize=True)
+        return cached_path
+    except Exception:
+        return path
 
 
 def normalize_metric_score(
@@ -170,7 +247,7 @@ def normalize_metric_score(
 
 
 def heuristic_details(img: Image.Image) -> dict[str, float]:
-    rgb = img.convert("RGB")
+    rgb = _thumbnail_rgb(img)
     arr = np.asarray(rgb, dtype=np.float32)
     gray = arr.mean(axis=2)
     gradients = np.gradient(gray)
@@ -206,17 +283,19 @@ def _score_to_float(score: object) -> float:
 
 
 def score_image_multi(path: str) -> tuple[float, dict[str, Any]]:
-    load_metrics()
+    profile = _resolve_profile()
+    load_metrics(profile)
     with Image.open(path) as img:
         heuristics = heuristic_details(img)
 
     details: dict[str, Any] = {
-        "mode": "multi:balanced" if _metrics else "heuristic:enhanced",
+        "mode": f"multi:{profile}" if _metrics else f"heuristic:{profile}",
         "metrics": {},
         "heuristics": heuristics,
         "errors": dict(_metric_errors),
     }
     weighted: list[tuple[float, float]] = []
+    metric_path = _resized_metric_path(path) if _metrics else path
 
     for metric in _metrics.values():
         metric_detail: dict[str, Any] = {
@@ -226,7 +305,7 @@ def score_image_multi(path: str) -> tuple[float, dict[str, Any]]:
             "scoreRange": list(metric.score_range) if metric.score_range else list(FALLBACK_RANGES.get(metric.name, (0.0, 100.0))),
         }
         try:
-            raw_value = _score_to_float(metric.model(path))
+            raw_value = _score_to_float(metric.model(metric_path))
             normalized = normalize_metric_score(metric.name, raw_value, metric.lower_better, metric.score_range)
             metric_detail.update({
                 "raw": round(raw_value, 6),
@@ -242,7 +321,7 @@ def score_image_multi(path: str) -> tuple[float, dict[str, Any]]:
             details["errors"][metric.name] = str(exc)[:300]
         details["metrics"][metric.name] = metric_detail
 
-    weighted.append((float(heuristics["normalized"]), 0.10))
+    weighted.append((float(heuristics["normalized"]), HEURISTIC_WEIGHT_BY_PROFILE.get(profile, 0.75)))
     total_weight = sum(weight for _value, weight in weighted)
     final_score = sum(value * weight for value, weight in weighted) / total_weight if total_weight else float(heuristics["normalized"])
     final_score = round(_clamp(final_score), 2)

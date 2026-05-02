@@ -63,6 +63,6 @@ def test_score_image_multi_uses_heuristic_without_pyiqa(tmp_path, monkeypatch):
     score_value, details = scoring.score_image_multi(str(image_path))
 
     assert 0 <= score_value <= 100
-    assert details["mode"] == "heuristic:enhanced"
+    assert details["mode"] == "heuristic:fast"
     assert details["metrics"] == {}
     assert "sharpness" in details["heuristics"]

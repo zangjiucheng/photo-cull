@@ -60,7 +60,7 @@ def resolve_max_content_length() -> int:
 
 
 def resolve_score_workers() -> int:
-    return int(os.getenv("SCORE_WORKERS", "2"))
+    return int(os.getenv("SCORE_WORKERS", "1"))
 
 
 @dataclass(frozen=True)
