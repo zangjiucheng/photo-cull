@@ -29,6 +29,9 @@ frontend/dist/
 frontend/.electron-dev/
 static/dist/
 
+# Unignore frontend source lib (overrides global gitignore `lib/` rules)
+!frontend/src/lib/
+
 # Logs
 *.log
 
