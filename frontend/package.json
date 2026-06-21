@@ -69,6 +69,7 @@
       "category": "public.app-category.photography",
       "icon": "icon.png",
       "target": [
+        "dmg",
         "zip"
       ]
     }
