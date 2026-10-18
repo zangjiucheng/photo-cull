@@ -5,6 +5,7 @@ import math
 from collections import OrderedDict
 import base64
 import io
+import json
 import os
 import sys
 import threading
@@ -103,6 +104,8 @@ class ExportJob:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     cancel_requested: bool = False
+    # photo_id -> "pending" | "done" | "failed", mirrored in export_job_items.
+    item_status: dict[str, str] = field(default_factory=dict)
 
 
 def _float_setting(settings: dict[str, Any], key: str, default: float, low: float, high: float) -> float:
@@ -811,6 +814,9 @@ class ExportWriter:
             output_path = Path(output_folder) / f"{stem}_enhanced_{counter}{suffix}"
             counter += 1
 
+        # Write next to the target and rename when complete, so an interrupted export never leaves
+        # a truncated file under the final name.
+        final_path, output_path = output_path, output_path.with_name(output_path.name + ".partial")
         out = np.clip(image, 0.0, 1.0)
         if settings.resize_max_edge:
             out = editing.resize_float(out, settings.resize_max_edge)
@@ -821,7 +827,11 @@ class ExportWriter:
             pil = Image.fromarray((out * 255.0 + 0.5).astype(np.uint8), "RGB")
             save_kwargs = {"quality": settings.quality, "subsampling": 0, "optimize": True,
                            "icc_profile": editing.SRGB_ICC, "exif": safe_exif.tobytes()}
-            pil.save(output_path, "JPEG", **save_kwargs)
+            try:
+                pil.save(output_path, "JPEG", **save_kwargs)
+            except BaseException:
+                output_path.unlink(missing_ok=True)
+                raise
         else:
             arr16 = (out * 65535.0 + 0.5).astype(np.uint16)
             import tifffile
@@ -831,9 +841,14 @@ class ExportWriter:
             for tag in (271, 272, 306, 315, 33432):
                 if tag in safe_exif:
                     tags.append((tag, "s", 0, str(safe_exif[tag]), False))
-            tifffile.imwrite(output_path, arr16, photometric="rgb", metadata=None, extratags=tags, software="Photo Cull")
-            editing.attach_tiff_capture(output_path, safe_exif)
-        return str(output_path)
+            try:
+                tifffile.imwrite(output_path, arr16, photometric="rgb", metadata=None, extratags=tags, software="Photo Cull")
+                editing.attach_tiff_capture(output_path, safe_exif)
+            except BaseException:
+                output_path.unlink(missing_ok=True)
+                raise
+        os.replace(output_path, final_path)
+        return str(final_path)
 
 
 class JobQueue:
@@ -898,24 +913,78 @@ class JobQueue:
         rows = [row for row in rows if row is not None]
         if not rows:
             raise ExportEnhanceError("No selected photos were found")
-        job = ExportJob(
-            id=f"enhance-{uuid4().hex}",
-            selected_ids=[row["id"] for row in rows],
-            output_folder=output_folder,
-            settings=settings,
-            settings_by_photo=settings_by_photo or {},
-            workspace_id=rows[0]["workspace_id"],
-            total=len(rows),
-        )
+        settings_by_photo = settings_by_photo or {}
+        job_id = f"enhance-{uuid4().hex}"
+        # Each item stores the recipe it was queued with, so a resumed export renders the same
+        # result even if the photo was edited in the meantime.
+        db.insert_export_job(job_id, rows[0]["workspace_id"], output_folder, [
+            {"photo_id": row["id"], "name": row["name"],
+             "settings": serialize_settings(settings_by_photo.get(row["id"], settings))}
+            for row in rows
+        ])
+        job = self._hydrate(job_id)
         with self._lock:
             self._jobs[job.id] = job
         self._executor.submit(self._run, job.id)
         self._publish(job)
         return job
 
+    def _hydrate(self, job_id: str) -> ExportJob | None:
+        found = db.fetch_export_job(job_id)
+        if found is None:
+            return None
+        row, items = found
+        job = ExportJob(
+            id=row["id"],
+            selected_ids=[item["photo_id"] for item in items],
+            output_folder=row["output_folder"],
+            settings=EnhanceSettings(),
+            settings_by_photo={item["photo_id"]: parse_settings(json.loads(item["settings"])) for item in items},
+            workspace_id=row["workspace_id"],
+            status=row["status"],
+            total=len(items),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+        job.processing_notes = list(json.loads(row["processing_notes"] or "[]"))
+        job.item_status = {item["photo_id"]: item["status"] for item in items}
+        job.outputs = [item["output_path"] for item in items if item["status"] == "done" and item["output_path"]]
+        job.failures = [ExportFailure(photo_id=item["photo_id"], name=item["name"], error=item["error"] or "")
+                        for item in items if item["status"] == "failed"]
+        job.completed = len(job.outputs)
+        job.failed = len(job.failures)
+        return job
+
     def get(self, job_id: str) -> ExportJob | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+        return job or self._hydrate(job_id)
+
+    def list(self, workspace_id: str, limit: int = 10) -> list[ExportJob]:
+        return [job for job in (self.get(job_id) for job_id in db.list_export_job_ids(workspace_id, limit)) if job]
+
+    def resume(self, job_id: str, retry_failed: bool = False) -> ExportJob | None:
+        """Continue an interrupted or cancelled export; completed photos are never written again."""
+        with self._lock:
+            live = self._jobs.get(job_id)
+            if live and live.status in ("queued", "running"):
+                return live
+        if retry_failed:
+            db.requeue_failed_export_items(job_id)
+        job = self._hydrate(job_id)
+        if job is None:
+            return None
+        if "pending" not in job.item_status.values():
+            return job
+        if not os.path.isdir(job.output_folder):
+            raise ExportEnhanceError("Output folder does not exist")
+        job.status = "queued"
+        db.update_export_job(job.id, status="queued")
+        with self._lock:
+            self._jobs[job.id] = job
+        self._executor.submit(self._run, job.id)
+        self._publish(job)
+        return job
 
     def cancel(self, job_id: str) -> ExportJob | None:
         with self._lock:
@@ -927,11 +996,11 @@ class JobQueue:
             self._publish(job)
         return job
 
-    def _decode_ahead(self, job: ExportJob, index: int) -> None:
+    def _decode_ahead(self, job: ExportJob, photo_ids: list[str], index: int) -> None:
         """Decode the next photo while the current one is processed (RAW decode is the longest stage)."""
-        if index >= len(job.selected_ids) or job.cancel_requested:
+        if index >= len(photo_ids) or job.cancel_requested:
             return
-        row = db.fetch_photo(job.selected_ids[index])
+        row = db.fetch_photo(photo_ids[index])
         settings = job.settings_by_photo.get(row["id"], job.settings) if row is not None else None
         if settings is not None and settings.recipe_version >= 2:
             self._submit_prefetch(("export", row["id"]), lambda: self._export_loader.load(row))
@@ -941,8 +1010,9 @@ class JobQueue:
         if job is None:
             return
         self._update(job, status="running")
-        for index, photo_id in enumerate(job.selected_ids):
-            self._decode_ahead(job, index + 1)
+        pending = [photo_id for photo_id in job.selected_ids if job.item_status.get(photo_id, "pending") == "pending"]
+        for index, photo_id in enumerate(pending):
+            self._decode_ahead(job, pending, index + 1)
             if job.cancel_requested:
                 self._update(job, status="cancelled", current=None)
                 return
@@ -965,10 +1035,13 @@ class JobQueue:
                         note = f"Noise reduction: {engine}"
                         if note not in job.processing_notes:
                             job.processing_notes.append(note)
+                            db.update_export_job(job.id, processing_notes=list(job.processing_notes))
                 if settings.upscale:
                     image = self._upscale.apply(image, settings.upscale_scale)
                 output = self._writer.write(image, row, job.output_folder, settings, exif)
+                db.update_export_item(job.id, photo_id, "done", output_path=output)
                 with self._lock:
+                    job.item_status[photo_id] = "done"
                     job.outputs.append(output)
                     job.completed += 1
                     job.updated_at = time.time()
@@ -979,7 +1052,9 @@ class JobQueue:
         self._update(job, status="done", current=None)
 
     def _record_failure(self, job: ExportJob, photo_id: str, name: str, error: str) -> None:
+        db.update_export_item(job.id, photo_id, "failed", error=error[:500])
         with self._lock:
+            job.item_status[photo_id] = "failed"
             job.failures.append(ExportFailure(photo_id=photo_id, name=name, error=error[:500]))
             job.failed += 1
             job.updated_at = time.time()
@@ -990,6 +1065,8 @@ class JobQueue:
             for key, value in updates.items():
                 setattr(job, key, value)
             job.updated_at = time.time()
+        if "status" in updates:
+            db.update_export_job(job.id, status=updates["status"])
         self._publish(job)
 
     def _publish(self, job: ExportJob) -> None:
@@ -997,6 +1074,7 @@ class JobQueue:
 
 
 def serialize_job(job: ExportJob) -> dict[str, Any]:
+    pending = sum(1 for status in job.item_status.values() if status == "pending")
     return {
         "id": job.id,
         "status": job.status,
@@ -1008,6 +1086,9 @@ def serialize_job(job: ExportJob) -> dict[str, Any]:
         "outputs": list(job.outputs),
         "failures": [failure.__dict__ for failure in job.failures],
         "processingNotes": list(job.processing_notes),
+        "pending": pending,
+        # Interrupted (restart) or cancelled jobs can continue with the photos not yet written.
+        "resumable": job.status in ("interrupted", "cancelled") and pending > 0,
         "createdAt": job.created_at,
         "updatedAt": job.updated_at,
     }

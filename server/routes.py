@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+from uuid import uuid4
 
 from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
@@ -246,6 +248,90 @@ def create_export_enhance_job():
     except export_enhance.ExportEnhanceError as exc:
         return error_response(str(exc), 400)
     return jsonify(export_enhance.serialize_job(job))
+
+
+@bp.route("/export-enhance/jobs", methods=["GET"])
+def list_export_enhance_jobs():
+    workspace_id = request.args.get("workspace_id", "")
+    if db.fetch_workspace(workspace_id) is None:
+        return error_response("Workspace not found", 404)
+    return jsonify({"jobs": [export_enhance.serialize_job(job) for job in export_enhance.queue.list(workspace_id)]})
+
+
+@bp.route("/export-enhance/jobs/<job_id>/resume", methods=["POST"])
+def resume_export_enhance_job(job_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        job = export_enhance.queue.resume(job_id, retry_failed=bool(data.get("retry_failed")))
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+    if job is None:
+        return error_response("Enhance & Export job not found", 404)
+    return jsonify(export_enhance.serialize_job(job))
+
+
+@bp.route("/photos/<photo_id>/snapshots", methods=["GET", "POST"])
+def photo_snapshots(photo_id):
+    if db.fetch_photo(photo_id) is None:
+        return error_response("Photo not found", 404)
+    if request.method == "GET":
+        return jsonify({"snapshots": db.list_snapshots(photo_id)})
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()[:80]
+    if not name:
+        return error_response("name is required", 400)
+    try:
+        settings = export_enhance.serialize_settings(export_enhance.parse_settings(data.get("settings")))
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+    return jsonify(db.insert_snapshot(f"snap-{uuid4().hex}", photo_id, name, settings)), 201
+
+
+@bp.route("/snapshots/<snapshot_id>", methods=["PATCH", "DELETE"])
+def snapshot(snapshot_id):
+    if request.method == "DELETE":
+        return jsonify({"deleted": db.delete_snapshot(snapshot_id)})
+    name = str((request.get_json(silent=True) or {}).get("name") or "").strip()[:80]
+    if not name:
+        return error_response("name is required", 400)
+    renamed = db.rename_snapshot(snapshot_id, name)
+    return jsonify(renamed) if renamed else error_response("Snapshot not found", 404)
+
+
+@bp.route("/presets", methods=["GET", "POST"])
+def presets():
+    if request.method == "GET":
+        return jsonify({"presets": db.list_presets()})
+    data = request.get_json(silent=True) or {}
+    # A list imports several presets at once (preset files and the one-time localStorage move).
+    entries = data.get("presets") if isinstance(data.get("presets"), list) else [data]
+    saved = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()[:80]
+        if not name:
+            return error_response("Every preset needs a name", 400)
+        try:
+            settings = export_enhance.serialize_settings(export_enhance.parse_settings(entry.get("settings")))
+        except export_enhance.ExportEnhanceError as exc:
+            return error_response(f"{name}: {exc}", 400)
+        saved.append(db.upsert_preset(f"preset-{uuid4().hex}", name, settings))
+    return jsonify({"presets": db.list_presets(), "saved": saved})
+
+
+@bp.route("/presets/<preset_id>", methods=["PATCH", "DELETE"])
+def preset(preset_id):
+    if request.method == "DELETE":
+        return jsonify({"deleted": db.delete_preset(preset_id), "presets": db.list_presets()})
+    name = str((request.get_json(silent=True) or {}).get("name") or "").strip()[:80]
+    if not name:
+        return error_response("name is required", 400)
+    try:
+        renamed = db.rename_preset(preset_id, name)
+    except sqlite3.IntegrityError:
+        return error_response(f"A preset named \u201c{name}\u201d already exists", 409)
+    return jsonify({"preset": renamed, "presets": db.list_presets()}) if renamed else error_response("Preset not found", 404)
 
 
 @bp.route("/export-enhance/jobs/<job_id>", methods=["GET"])

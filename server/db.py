@@ -168,6 +168,64 @@ def init_db() -> None:
             ON export_enhance_settings(workspace_id, updated_at)
             """
         )
+        # Export jobs and their items persist so an interrupted export can be resumed after a
+        # restart. Each item keeps the recipe it was queued with; photo_id has no foreign key so
+        # history survives photos removed from the workspace.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS export_jobs (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+                output_folder TEXT NOT NULL,
+                status TEXT NOT NULL,
+                processing_notes TEXT NOT NULL DEFAULT '[]',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS export_job_items (
+                job_id TEXT NOT NULL REFERENCES export_jobs(id) ON DELETE CASCADE,
+                photo_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                settings TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                output_path TEXT,
+                error TEXT,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(job_id, photo_id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_export_jobs_workspace ON export_jobs(workspace_id, created_at)")
+        # Named edit versions: a recipe snapshot per photo, never a copy of the RAW.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photo_snapshots (
+                id TEXT PRIMARY KEY,
+                photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                settings TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_photo_snapshots_photo ON photo_snapshots(photo_id, created_at)")
+        # Personal editing presets live in the library database so backups include them.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS presets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                settings TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
 
 
 def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
@@ -795,3 +853,145 @@ def count_photos_by_status(status: str | None = None) -> int:
         if status is None:
             return conn.execute("SELECT COUNT(*) AS c FROM photos").fetchone()["c"]
         return conn.execute("SELECT COUNT(*) AS c FROM photos WHERE status = ?", (status,)).fetchone()["c"]
+
+
+# ---- export jobs --------------------------------------------------------------------------
+
+def insert_export_job(job_id: str, workspace_id: str | None, output_folder: str, items: list[dict[str, Any]]) -> None:
+    now = time.time()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO export_jobs (id, workspace_id, output_folder, status, created_at, updated_at) VALUES (?, ?, ?, 'queued', ?, ?)",
+            (job_id, workspace_id, output_folder, now, now),
+        )
+        conn.executemany(
+            "INSERT INTO export_job_items (job_id, photo_id, position, name, settings, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [(job_id, item["photo_id"], index, item["name"], json.dumps(item["settings"], sort_keys=True), now)
+             for index, item in enumerate(items)],
+        )
+
+
+def update_export_job(job_id: str, *, status: str | None = None, processing_notes: list[str] | None = None) -> None:
+    with connect() as conn:
+        if status is not None:
+            conn.execute("UPDATE export_jobs SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), job_id))
+        if processing_notes is not None:
+            conn.execute("UPDATE export_jobs SET processing_notes = ?, updated_at = ? WHERE id = ?",
+                         (json.dumps(processing_notes), time.time(), job_id))
+
+
+def update_export_item(job_id: str, photo_id: str, status: str, output_path: str | None = None, error: str | None = None) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE export_job_items SET status = ?, output_path = ?, error = ?, updated_at = ? WHERE job_id = ? AND photo_id = ?",
+            (status, output_path, error, time.time(), job_id, photo_id),
+        )
+
+
+def requeue_failed_export_items(job_id: str) -> int:
+    with connect() as conn:
+        return conn.execute(
+            "UPDATE export_job_items SET status = 'pending', error = NULL, updated_at = ? WHERE job_id = ? AND status = 'failed'",
+            (time.time(), job_id),
+        ).rowcount
+
+
+def fetch_export_job(job_id: str) -> tuple[sqlite3.Row, list[sqlite3.Row]] | None:
+    with connect() as conn:
+        job = conn.execute("SELECT * FROM export_jobs WHERE id = ?", (job_id,)).fetchone()
+        if job is None:
+            return None
+        items = conn.execute("SELECT * FROM export_job_items WHERE job_id = ? ORDER BY position ASC", (job_id,)).fetchall()
+    return job, items
+
+
+def list_export_job_ids(workspace_id: str, limit: int = 10) -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM export_jobs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, limit),
+        ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def mark_interrupted_export_jobs() -> int:
+    """Jobs left queued or running by a previous process can be resumed, not silently restarted."""
+    with connect() as conn:
+        return conn.execute(
+            "UPDATE export_jobs SET status = 'interrupted', updated_at = ? WHERE status IN ('queued', 'running')",
+            (time.time(),),
+        ).rowcount
+
+
+# ---- snapshots ----------------------------------------------------------------------------
+
+def row_to_snapshot(row: sqlite3.Row) -> dict[str, Any]:
+    return {"id": row["id"], "photoId": row["photo_id"], "name": row["name"],
+            "settings": json.loads(row["settings"]), "createdAt": row["created_at"]}
+
+
+def list_snapshots(photo_id: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM photo_snapshots WHERE photo_id = ? ORDER BY created_at DESC", (photo_id,)).fetchall()
+    return [row_to_snapshot(row) for row in rows]
+
+
+def insert_snapshot(snapshot_id: str, photo_id: str, name: str, settings: Any) -> dict[str, Any]:
+    with connect() as conn:
+        conn.execute("INSERT INTO photo_snapshots (id, photo_id, name, settings, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (snapshot_id, photo_id, name, json.dumps(settings, sort_keys=True), time.time()))
+        row = conn.execute("SELECT * FROM photo_snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    return row_to_snapshot(row)
+
+
+def rename_snapshot(snapshot_id: str, name: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        conn.execute("UPDATE photo_snapshots SET name = ? WHERE id = ?", (name, snapshot_id))
+        row = conn.execute("SELECT * FROM photo_snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    return row_to_snapshot(row) if row else None
+
+
+def delete_snapshot(snapshot_id: str) -> bool:
+    with connect() as conn:
+        return conn.execute("DELETE FROM photo_snapshots WHERE id = ?", (snapshot_id,)).rowcount > 0
+
+
+# ---- presets ------------------------------------------------------------------------------
+
+def row_to_preset(row: sqlite3.Row) -> dict[str, Any]:
+    return {"id": row["id"], "name": row["name"], "settings": json.loads(row["settings"]),
+            "createdAt": row["created_at"], "updatedAt": row["updated_at"]}
+
+
+def list_presets() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM presets ORDER BY name COLLATE NOCASE ASC").fetchall()
+    return [row_to_preset(row) for row in rows]
+
+
+def upsert_preset(preset_id: str, name: str, settings: Any) -> dict[str, Any]:
+    """Insert or replace by name, so saving a look under an existing name updates it."""
+    now = time.time()
+    with connect() as conn:
+        existing = conn.execute("SELECT id FROM presets WHERE name = ?", (name,)).fetchone()
+        if existing:
+            conn.execute("UPDATE presets SET settings = ?, updated_at = ? WHERE id = ?",
+                         (json.dumps(settings, sort_keys=True), now, existing["id"]))
+            preset_id = existing["id"]
+        else:
+            conn.execute("INSERT INTO presets (id, name, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                         (preset_id, name, json.dumps(settings, sort_keys=True), now, now))
+        row = conn.execute("SELECT * FROM presets WHERE id = ?", (preset_id,)).fetchone()
+    return row_to_preset(row)
+
+
+def rename_preset(preset_id: str, name: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        conn.execute("UPDATE presets SET name = ?, updated_at = ? WHERE id = ?", (name, time.time(), preset_id))
+        row = conn.execute("SELECT * FROM presets WHERE id = ?", (preset_id,)).fetchone()
+    return row_to_preset(row) if row else None
+
+
+def delete_preset(preset_id: str) -> bool:
+    with connect() as conn:
+        return conn.execute("DELETE FROM presets WHERE id = ?", (preset_id,)).rowcount > 0
