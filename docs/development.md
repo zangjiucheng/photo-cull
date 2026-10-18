@@ -83,3 +83,17 @@ To preview locally:
 ```bash
 python3 -m http.server 8000 --directory site
 ```
+
+## Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `DB_PATH` | Override the SQLite database path |
+| `UPLOAD_FOLDER` | Upload folder for the browser backend; managed by the app on desktop |
+| `RAW_RENDER_CACHE` | RAW browse preview cache folder |
+| `FLASK_HOST` / `FLASK_PORT` | Browser backend bind address and port; development default `127.0.0.1:5050` |
+| `AI_CULLING_DISABLE_UPDATES` | Set to `1` to disable update checks |
+
+## Code layout
+
+`frontend/src` is the React / TypeScript UI, `frontend/electron` the desktop shell (including the updater), and `server` the Flask backend, RAW processing, and export queue.

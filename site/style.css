@@ -114,6 +114,8 @@ h3 { font-size: 18px; }
 
 /* Editing */
 .editing { display: grid; grid-template-columns: 1fr; gap: 40px; margin-top: 48px; align-items: start; }
+.shot-film { margin-top: 40px; }
+.shot-film video { display: block; width: 100%; height: auto; background: #000; }
 .shot-pad { max-width: 300px; width: 100%; justify-self: center; padding: 10px; background: var(--bg); }
 .shot-pad img { width: 100%; }
 .editing-text h3 + p { margin-top: 8px; }
