@@ -9,6 +9,15 @@ Implemented on `feat/raw-finishing`; not yet included in a packaged release.
 - Explicit engine/base-profile versions; old recipes retain the current look.
 - Shared resident cache budget and bounded/cancelable pending prefetch.
 
-Project backup, named snapshots, resumable export, direct crop handles and reference batch matching remain scheduled in Linear. Real high-ISO night, 48MP, extended desktop/memory, optional-model and user aesthetic acceptance remain open under PER-367.
+Library recovery (`feat/library-recovery`):
+
+- Library backup and verified restore (checksum, SQLite integrity, schema upgrade), keeping the previous library as a copy; reconnect workspaces whose folder moved.
+- Presets live in the library (moved once from this device's local storage) with rename and JSON import/export.
+- Named per-photo versions that store recipes only.
+- Resumable exports: recipes recorded per photo, atomic file writes, resume after a crash without rewriting finished files, retry only failures.
+- Direct crop handles on the whole-image view and two-point horizon leveling.
+- Same-scene exposure matching to a reference photo, previewed before applying, capped at ±1 EV, highlight-aware, skipping night/silhouette mismatches.
+
+Real high-ISO night, 48MP, extended desktop/memory, optional-model and user aesthetic acceptance remain open under PER-367.
 
 See [validation](../validation/raw-finishing.md) and [controls](../editing.md).

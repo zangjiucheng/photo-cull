@@ -67,3 +67,13 @@ Removing a workspace from the recent list, or removing photos from a workspace i
 ## Your data
 
 Desktop data lives in `~/Library/Application Support/AI Photo Culling/` on macOS and `%APPDATA%\AI Photo Culling\` on Windows: the SQLite workspace database (ratings, scores, edit recipes), preview caches, and logs. Back up the database together with your photo folders. A workspace file saved with **File → Save Workspace File...** (`⌘S` / `Ctrl+S`) only stores folder references, not photos or edits. Updating the app keeps this data.
+
+## Back up and restore
+
+Use **File → Back Up Library...** to save a backup of the library: ratings, scores, edits, versions, presets and export history. The backup is a zip with a consistent copy of the database and a manifest of what it contains. Original photos are never included; keep backing those up separately.
+
+**File → Restore Library...** checks the backup (format, checksum and database integrity) and shows what it contains before anything changes. Restoring replaces the current library, which is first saved as a copy next to it (`ai_culling.before-restore-<date>.db`). Backups from older versions are upgraded automatically.
+
+## Reconnecting moved folders
+
+If a workspace's folder has moved, was renamed, or its disk is not connected, the start screen shows **Folder not found** with a **Locate...** button. Choose the folder's new location; the app checks that the photos are really there before reconnecting, and your ratings and edits carry over.

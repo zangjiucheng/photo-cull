@@ -31,6 +31,7 @@
 - **18 styles.** Undertones, Moods and Black & White looks, inspired by Apple Photos, each with a strength slider.
 - **Finishing controls (development).** Native 100% detail, an edited-crop histogram, a manual local gradient, selective color and a neutral-gray white-balance picker. See [unreleased changes](docs/releases/unreleased.md).
 - **Clean export.** sRGB JPEG or 16-bit TIFF with ICC profile and capture metadata (no GPS). Originals are never touched.
+- **Recoverable.** Library backups with verified restore, named versions of each edit, and exports that resume after a crash.
 - **Local and fast.** Everything runs on your computer and updates itself from GitHub Releases.
 
 ## Install

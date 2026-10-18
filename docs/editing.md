@@ -71,7 +71,14 @@ Styles are grouped like Apple Photos and each one is previewed on the current ph
 
 ## Crop & straighten
 
-Opening this section shows a rule-of-thirds grid. Pick **Original**, **1:1**, **4:3**, **3:2**, **16:9**, or **9:16**, then set **Straighten** (±15°), **Crop size**, and **Horizontal / Vertical position**. After rotation the crop is kept inside the image so no black corners appear. **Reset crop** clears it. Cropping is non-destructive.
+While this section is open the preview shows the whole photo at the current angle, with the crop drawn on top:
+
+- Drag inside the frame to move it; drag an edge or corner to resize. Hold `Shift` on a corner to keep the shape.
+- Pick **Original**, **1:1**, **4:3**, **3:2**, **16:9**, or **9:16** for a centered crop of that ratio.
+- **Level horizon**: click two points along the horizon and the photo is rotated so that line is level (up to ±15°). **Straighten** sets the angle by hand.
+- **Crop size** and **Horizontal / Vertical position** adjust the crop numerically.
+
+The crop always stays inside the image, so no empty corners appear after rotating. **Reset crop** clears it. Cropping is non-destructive; closing the section shows the cropped result again.
 
 ## Copy adjustments & presets
 
@@ -79,9 +86,14 @@ Choose which groups to copy: **Light**, **Color**, **Style**, **Detail**, **Expo
 
 - **Copy** / **Paste** between photos.
 - **Apply to queue** applies the selected groups to every queued photo.
-- Save the current look as a personal preset ("Name this look"). Presets are stored on this device and also respect the selected groups.
+- **Match exposure to this photo** brightens or darkens the other queued photos so their midtones match the current one. It only changes exposure (white balance, crop and everything else stay), caps each change at ±1 EV, holds back when brightening would clip highlights, and skips photos from a different kind of scene (night, silhouette) or still on the legacy engine. You see the proposed change for every photo, and why any were skipped, before choosing **Apply**; each photo can be undone on its own.
+- Save the current look as a personal preset ("Name this look"). Presets apply the selected groups, can be renamed, deleted, and exported to or imported from a JSON file, and are stored in the library database, so library backups include them.
 
 By default each photo keeps its own exposure, white balance, and crop.
+
+## Versions
+
+Save the current edit of a photo as a named version, for example before trying a different look. A version stores only the recipe, never a copy of the RAW. Click a version to restore it; restoring is a normal edit, so undo brings back what you had. Versions can be renamed and deleted, and are included in library backups.
 
 ## Noise reduction & upscale
 
@@ -94,6 +106,8 @@ Optional and off by default. Noise reduction is a traditional filter (OpenCV non
 - **Folder**: the destination.
 
 Export uses each photo's own saved recipe, embeds an sRGB ICC profile, keeps camera, exposure, date, and author metadata, and omits GPS, XMP, and MakerNote. Existing filenames are never overwritten, and originals stay intact. Export settings are per photo too; copy the **Export settings** group to sync them across the queue.
+
+Exports survive interruptions. Each queued photo's recipe is recorded when the export starts, and files are written under a temporary name and renamed when complete, so a crash never leaves a half-written file behind. If the app quits or crashes mid-export, the next launch shows **Resume export** for the photos not yet written; finished files are never written again. **Retry failed** re-runs only the photos that failed.
 
 ## Undo, reset, and history
 
