@@ -70,7 +70,7 @@ export default function App() {
   const enhanceByPhotoRef = useRef(exportEnhanceSettingsByPhoto);
   enhanceByPhotoRef.current = exportEnhanceSettingsByPhoto;
   const [exportEnhanceSelectedPhotoId, setExportEnhanceSelectedPhotoId] = useState<string | null>(null);
-  const [exportEnhanceOutputFolder, setExportEnhanceOutputFolder] = useState("");
+  const [exportEnhanceOutputFolder, setExportEnhanceOutputFolderState] = useState("");
   const [exportEnhanceJob, setExportEnhanceJob] = useState<ExportEnhanceJob | null>(null);
   const [isStartingExportEnhance, setIsStartingExportEnhance] = useState(false);
   const [exportEnhanceRedoStacks, setExportEnhanceRedoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
@@ -105,6 +105,27 @@ export default function App() {
     serverExportQueue,
     serverExportEnhanceSettings
   } = library;
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  activeWorkspaceIdRef.current = activeWorkspaceId;
+  // Remember the export folder per workspace on this device so it survives a restart.
+  const outputFolderKey = (workspaceId: string) => `photo-cull.export-folder.${workspaceId}`;
+  const setExportEnhanceOutputFolder = useCallback((folder: string) => {
+    setExportEnhanceOutputFolderState(folder);
+    if (!activeWorkspaceIdRef.current) return;
+    try {
+      localStorage.setItem(outputFolderKey(activeWorkspaceIdRef.current), folder);
+    } catch {
+      // Remembering the folder is a convenience; the export still works without it.
+    }
+  }, []);
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    try {
+      setExportEnhanceOutputFolderState(localStorage.getItem(outputFolderKey(activeWorkspaceId)) ?? "");
+    } catch {
+      setExportEnhanceOutputFolderState("");
+    }
+  }, [activeWorkspaceId]);
   const ratingState = usePhotoRatings(photos, updateStatus);
   const { ratings, setRatings, ratePhoto } = ratingState;
   const { activeFolder, folderPhotos, visiblePhotos, activePhoto } = usePhotoFilters(photos, folders, {
@@ -360,6 +381,9 @@ export default function App() {
     const currentIds = exportQueues[activeWorkspaceId] ?? [];
     if (!currentIds.length) {
       updateStatus("Export queue is already empty.", "warn");
+      return;
+    }
+    if (currentIds.length > 1 && !window.confirm(`Remove all ${currentIds.length} photos from the export queue? Their edits are kept.`)) {
       return;
     }
     commitExportQueue([], `Removed ${currentIds.length} photo(s) from export queue.`);

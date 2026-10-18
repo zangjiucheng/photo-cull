@@ -449,7 +449,13 @@ class ImageLoader:
     def load_legacy(self, row: Any):
         if raw_pipeline.is_raw_image(row["path"]):
             rgb = raw_pipeline.load_full_raw_image(row["path"], row["orientation_override"])
-            return np.asarray(rgb, dtype=np.float32) / 255, None, row["path"]
+            # Keep the capture metadata (camera, exposure, date) for legacy exports too.
+            try:
+                with Image.open(row["path"]) as source:
+                    exif = source.getexif().tobytes()
+            except Exception:
+                exif = None
+            return np.asarray(rgb, dtype=np.float32) / 255, exif, row["path"]
         with Image.open(row["path"]) as source:
             exif = source.info.get("exif")
         with Image.open(raw_pipeline.display_path_for_row(row)) as image:
@@ -753,11 +759,35 @@ class RealESRGANEngine:
 
         huggingface_hub.cached_download = cached_download
 
+    TILE = 512
+    OVERLAP = 16
+
     def apply(self, image: np.ndarray, scale: int) -> np.ndarray:
         model = self._load_model(scale)
-        pil = Image.fromarray((np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8), "RGB")
-        out = model.predict(pil)
-        return (np.asarray(out.convert("RGB"), dtype=np.float32) / 255.0).astype(np.float32)
+        return upscale_tiled(image, scale, lambda pil: model.predict(pil), self.TILE, self.OVERLAP)
+
+
+def upscale_tiled(image: np.ndarray, scale: int, predict, tile: int = 512, overlap: int = 16) -> np.ndarray:
+    """Upscale in overlapping tiles so model memory depends on the tile size, not the photo.
+
+    Sending a whole 12 MP photo to Real-ESRGAN at once took the backend to ~20 GB. Each tile is
+    padded by `overlap` source pixels on every side and only its centre is kept, so seams fall
+    inside context the model has seen.
+    """
+    height, width = image.shape[:2]
+    src = (np.clip(image, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    out = np.empty((height * scale, width * scale, 3), dtype=np.uint8)
+    for top in range(0, height, tile):
+        for left in range(0, width, tile):
+            bottom, right = min(height, top + tile), min(width, left + tile)
+            y0, x0 = max(0, top - overlap), max(0, left - overlap)
+            y1, x1 = min(height, bottom + overlap), min(width, right + overlap)
+            result = np.asarray(predict(Image.fromarray(src[y0:y1, x0:x1], "RGB")).convert("RGB"))
+            oy, ox = (top - y0) * scale, (left - x0) * scale
+            out[top * scale:bottom * scale, left * scale:right * scale] = \
+                result[oy:oy + (bottom - top) * scale, ox:ox + (right - left) * scale]
+            del result
+    return out.astype(np.float32) / 255.0
 
 
 class AIDenoiseEngine:
@@ -1015,6 +1045,7 @@ class JobQueue:
             self._decode_ahead(job, pending, index + 1)
             if job.cancel_requested:
                 self._update(job, status="cancelled", current=None)
+                self._forget(job)
                 return
             row = db.fetch_photo(photo_id)
             if row is None:
@@ -1050,6 +1081,13 @@ class JobQueue:
                 continue
             self._publish(job)
         self._update(job, status="done", current=None)
+        self._forget(job)
+
+    def _forget(self, job: ExportJob) -> None:
+        # Finished jobs live in the database; get() reloads them, so the cache only holds live ones.
+        with self._lock:
+            if self._jobs.get(job.id) is job:
+                del self._jobs[job.id]
 
     def _record_failure(self, job: ExportJob, photo_id: str, name: str, error: str) -> None:
         db.update_export_item(job.id, photo_id, "failed", error=error[:500])

@@ -412,3 +412,33 @@ def test_prefetch_queue_cancels_obsolete_work():
         release.set()
         jobs._prefetcher.shutdown(wait=True)
         jobs._executor.shutdown(wait=True)
+
+
+def test_upscale_tiles_match_a_whole_image_pass_and_stay_small():
+    rng = np.random.default_rng(3)
+    image = rng.random((70, 90, 3), dtype=np.float32)
+    sizes = []
+
+    def nearest(pil):  # stand-in model: pixel-exact 2x nearest-neighbour upscale
+        sizes.append(pil.size)
+        return pil.resize((pil.width * 2, pil.height * 2), Image.Resampling.NEAREST)
+
+    tiled = export_enhance.upscale_tiled(image, 2, nearest, tile=32, overlap=4)
+    tile_sizes = list(sizes)
+    whole = np.asarray(nearest(Image.fromarray((image * 255 + 0.5).astype(np.uint8))), dtype=np.float32) / 255
+    assert tiled.shape == (140, 180, 3)
+    assert np.array_equal(tiled, whole)
+    assert max(w for w, _ in tile_sizes) <= 32 + 2 * 4 and len(tile_sizes) == 3 * 3
+
+
+def test_legacy_raw_export_keeps_capture_exif(tmp_path, monkeypatch):
+    path = tmp_path / "x.dng"
+    exif = Image.Exif()
+    exif[272] = "FC3170"
+    Image.new("RGB", (8, 8)).save(path, "TIFF", exif=exif.tobytes())
+    monkeypatch.setattr(raw_pipeline, "is_raw_image", lambda _p: True)
+    monkeypatch.setattr(raw_pipeline, "load_full_raw_image", lambda _p, _o: Image.new("RGB", (8, 8)))
+    _image, data, _source = export_enhance.ImageLoader().load_legacy({"path": str(path), "orientation_override": 0})
+    loaded = Image.Exif()
+    loaded.load(data)
+    assert loaded[272] == "FC3170"

@@ -163,3 +163,17 @@ def test_jobs_listing_and_resume_endpoints(client, tmp_path):
     resumed = client.post(f"/api/export-enhance/jobs/{job_id}/resume", json={})
     assert resumed.status_code == 200 and resumed.get_json()["status"] == "done"
     assert client.post("/api/export-enhance/jobs/missing/resume", json={}).status_code == 404
+
+
+def test_finished_jobs_leave_the_memory_cache(tmp_path):
+    configure_tmp(tmp_path)
+    _workspace, rows = library(tmp_path, ("a.jpg",))
+    out = tmp_path / "out"
+    out.mkdir()
+    queue = export_enhance.JobQueue()
+    job = wait(queue, queue.create([rows[0]["id"]], str(out), export_enhance.EnhanceSettings(recipe_version=2)).id)
+    deadline = time.time() + 5
+    while job.id in queue._jobs and time.time() < deadline:
+        time.sleep(0.02)
+    assert job.id not in queue._jobs
+    assert queue.get(job.id).status == "done" and queue.get(job.id).completed == 1
