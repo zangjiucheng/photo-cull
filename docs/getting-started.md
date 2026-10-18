@@ -6,7 +6,7 @@ AI Photo Culling runs locally on your Mac or Windows PC. Photos are indexed in p
 
 - macOS on Apple Silicon (arm64), or Windows 10/11 (x64; Windows on ARM runs it through x64 emulation). Intel Macs and Linux don't have builds yet.
 - Nothing else for basic use: the Python backend for scoring, RAW editing, and export is bundled in the app.
-- Optional: a network connection to install the AI runtime (extra scoring models and CLIP similarity) from the **Debug** workspace.
+- Optional: a network connection to install the AI runtime (extra scoring models and CLIP similarity) from the **Debug** workspace. The installer uses a Python 3.10–3.13 already on your computer; if there isn't one, it downloads a private copy of Python 3.12 (about 25 MB on macOS, 46 MB on Windows), checks its SHA-256, and keeps it in the app's data folder without changing your system.
 
 ## Install
 

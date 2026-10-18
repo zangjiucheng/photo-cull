@@ -103,6 +103,9 @@ jobs:
           cat "$RUNNER_TEMP/backend.log"
           exit 1
 
+      - name: Smoke test the downloadable AI runtime Python
+        run: node frontend/scripts/check-managed-python.cjs
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}

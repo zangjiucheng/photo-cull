@@ -3,13 +3,20 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const {
+  downloadVerified,
+  findRuntimePython,
+  isSupported,
+  managedPythonBuild,
+  managedPythonExecutable,
+  parseVersion,
+} = require("./python-runtime.cjs");
 const { checkForUpdates, initUpdater } = require("./updater.cjs");
 
 const appName = "AI Photo Culling";
 app.setName(appName);
 app.setAboutPanelOptions({ applicationName: appName });
 
-const minAiRuntimePython = { major: 3, minor: 10 };
 const isPackaged = app.isPackaged;
 const repoRoot = isPackaged ? process.resourcesPath : path.resolve(__dirname, "..", "..");
 const backendHost = process.env.FLASK_HOST || "127.0.0.1";
@@ -342,74 +349,74 @@ function runtimeSearchPath() {
   return [...extraPaths, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
 }
 
-function pythonVersion(command) {
-  const result = spawnSync(command, [
+function pythonVersion(candidate) {
+  const result = spawnSync(candidate.command, [
+    ...candidate.args,
     "-c",
     "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
   ], {
     encoding: "utf8",
+    windowsHide: true,
     env: {
       ...process.env,
       PATH: runtimeSearchPath(),
     },
   });
-  if (result.status !== 0) {
-    return null;
-  }
-  const match = result.stdout.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) {
-    return null;
-  }
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-    label: match[0],
-  };
+  // The Windows Store "python" alias exits non-zero without printing a version.
+  return result.status === 0 ? parseVersion(result.stdout) : null;
 }
 
-function isSupportedPython(version) {
-  if (!version) {
-    return false;
-  }
-  if (version.major > minAiRuntimePython.major) {
-    return true;
-  }
-  return version.major === minAiRuntimePython.major && version.minor >= minAiRuntimePython.minor;
+function managedPythonDir() {
+  return path.join(aiRuntimeDir(), "python-dist");
 }
 
-function systemPythonPath() {
-  if (process.env.AI_RUNTIME_PYTHON) {
-    const configuredVersion = pythonVersion(process.env.AI_RUNTIME_PYTHON);
-    writeAiRuntimeLog(`[python] AI_RUNTIME_PYTHON=${process.env.AI_RUNTIME_PYTHON} version=${configuredVersion?.label || "unavailable"}`);
-    if (isSupportedPython(configuredVersion)) {
-      return process.env.AI_RUNTIME_PYTHON;
-    }
-    throw new Error(`AI Runtime requires Python ${minAiRuntimePython.major}.${minAiRuntimePython.minor}+; AI_RUNTIME_PYTHON is ${configuredVersion?.label || "not runnable"}.`);
+// A relocatable CPython the app downloads for itself when the system has no suitable Python.
+async function ensureManagedPython() {
+  const build = managedPythonBuild();
+  if (!build) {
+    throw new Error("No downloadable Python is available for this platform; install Python 3.10–3.13 and try again.");
   }
-
-  const candidates = process.platform === "win32"
-    ? ["python3.13", "python3.12", "python3.11", "python3.10", "python"]
-    : [
-        "python3.13",
-        "python3.12",
-        "python3.11",
-        "python3.10",
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
-        "python3",
-      ];
-
-  for (const candidate of candidates) {
-    const version = pythonVersion(candidate);
-    writeAiRuntimeLog(`[python] candidate=${candidate} version=${version?.label || "unavailable"}`);
-    if (isSupportedPython(version)) {
-      return candidate;
-    }
+  const dir = managedPythonDir();
+  const executable = { command: managedPythonExecutable(dir), args: [] };
+  if (fs.existsSync(executable.command)) {
+    const version = pythonVersion(executable);
+    if (isSupported(version)) return { ...executable, version };
   }
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const archive = path.join(dir, "python.tar.gz");
+  const sizeMb = Math.round(build.bytes / 1e6);
+  setAiRuntimeStatus({ detail: `Downloading Python ${build.version} (${sizeMb} MB)` });
+  writeAiRuntimeLog(`[python] no suitable Python installed; downloading ${build.url}`);
+  let shown = -5;
+  await downloadVerified(build.url, archive, build.sha256, (fraction) => {
+    const percent = Math.floor(fraction * 100);
+    if (percent >= shown + 5) {
+      shown = percent;
+      setAiRuntimeStatus({ detail: `Downloading Python ${build.version} (${sizeMb} MB) ${percent}%` });
+    }
+  });
+  setAiRuntimeStatus({ detail: `Unpacking Python ${build.version}` });
+  // tar ships with macOS and with Windows 10 and later.
+  await runLogged("tar", ["-xzf", archive, "-C", dir], { cwd: dir });
+  fs.rmSync(archive, { force: true });
+  const version = pythonVersion(executable);
+  if (!isSupported(version)) {
+    throw new Error(`The downloaded Python did not start (${executable.command}).`);
+  }
+  writeAiRuntimeLog(`[python] using downloaded Python ${version.label} at ${executable.command}`);
+  return { ...executable, version };
+}
 
-  throw new Error(`AI Runtime requires Python ${minAiRuntimePython.major}.${minAiRuntimePython.minor}+ because numpy/torch do not support the selected older Python. Install Python 3.10 or newer, or set AI_RUNTIME_PYTHON to a compatible Python executable.`);
+async function basePython() {
+  try {
+    return findRuntimePython({ probe: pythonVersion, log: writeAiRuntimeLog });
+  } catch (error) {
+    // An explicit AI_RUNTIME_PYTHON is the user's choice; report it instead of downloading.
+    if (process.env.AI_RUNTIME_PYTHON) throw error;
+    writeAiRuntimeLog(`[python] ${error instanceof Error ? error.message : String(error)}`);
+    return ensureManagedPython();
+  }
 }
 
 function findAvailablePort(host) {
@@ -537,14 +544,14 @@ async function installAiRuntime() {
       fs.rmSync(aiRuntimeMarkerPath(), { force: true });
     }
     writeAiRuntimeLog(`\n[${new Date().toISOString()}] Installing AI runtime`);
-    const python = systemPythonPath();
+    const python = await basePython();
     if (fs.existsSync(aiRuntimeVenvDir())) {
       setAiRuntimeStatus({ detail: "Removing previous incomplete AI runtime venv" });
       writeAiRuntimeLog(`[venv] removing existing venv at ${aiRuntimeVenvDir()}`);
       fs.rmSync(aiRuntimeVenvDir(), { recursive: true, force: true });
     }
-    setAiRuntimeStatus({ detail: `Creating venv with ${python}` });
-    await runLogged(python, ["-m", "venv", aiRuntimeVenvDir()], { cwd: runtimeSourcePath });
+    setAiRuntimeStatus({ detail: `Creating venv with Python ${python.version.label}` });
+    await runLogged(python.command, [...python.args, "-m", "venv", aiRuntimeVenvDir()], { cwd: runtimeSourcePath });
 
     const runtimePython = runtimePythonPath();
     setAiRuntimeStatus({ detail: "Upgrading pip" });
