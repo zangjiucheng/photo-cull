@@ -13,6 +13,15 @@ contextBridge.exposeInMainWorld("aiCulling", {
   revealFolder: (folderPath) => ipcRenderer.invoke("reveal-folder", folderPath),
   getAiRuntimeStatus: () => ipcRenderer.invoke("ai-runtime-status"),
   installAiRuntime: () => ipcRenderer.invoke("install-ai-runtime"),
+  getRuntimeSettings: () => ipcRenderer.invoke("get-runtime-settings"),
+  checkPython: (command) => ipcRenderer.invoke("check-python", command),
+  setRuntimePython: (command) => ipcRenderer.invoke("set-runtime-python", command),
+  choosePython: () => ipcRenderer.invoke("choose-python"),
+  onOpenSettingsRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("open-settings-request", listener);
+    return () => ipcRenderer.removeListener("open-settings-request", listener);
+  },
   onAiRuntimeStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("ai-runtime-status", listener);

@@ -1,19 +1,20 @@
 import type { AiRuntimeStatus } from "../../types";
 import { Button } from "../ui/button";
+import { PythonSettings } from "./PythonSettings";
 
-interface DebugWorkspaceProps {
+interface SettingsWorkspaceProps {
   aiRuntimeStatus: AiRuntimeStatus | null;
   isRefreshing: boolean;
   onRefresh: () => void;
   onInstallAiRuntime: () => void;
 }
 
-export function DebugWorkspace({
+export function SettingsWorkspace({
   aiRuntimeStatus,
   isRefreshing,
   onRefresh,
   onInstallAiRuntime
-}: DebugWorkspaceProps) {
+}: SettingsWorkspaceProps) {
   const isError = aiRuntimeStatus?.state === "error";
   const runtimeMessage = aiRuntimeStatus
     ? isError ? aiRuntimeStatus.error || aiRuntimeStatus.message : aiRuntimeStatus.detail || aiRuntimeStatus.message
@@ -66,6 +67,8 @@ export function DebugWorkspace({
 
         <p className={`debug-message${isError ? " error" : ""}`}>{runtimeMessage}</p>
       </section>
+
+      <PythonSettings aiRuntimeStatus={aiRuntimeStatus} onReinstall={onInstallAiRuntime} />
 
       <section className="debug-section">
         <div className="debug-section-head">

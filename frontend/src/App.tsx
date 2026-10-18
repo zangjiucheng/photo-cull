@@ -3,7 +3,7 @@ import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, matchExpo
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
-import { DebugWorkspace } from "./components/workspaces/DebugWorkspace";
+import { SettingsWorkspace } from "./components/workspaces/SettingsWorkspace";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportEnhanceWorkspace } from "./components/workspaces/ExportEnhanceWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
@@ -22,7 +22,7 @@ import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryF
 import { cloneSettings, defaultSettings, pasteSettings, rebasePad, type AdjustmentGroup } from "./editing/recipe";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
-const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "debug"];
+const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "settings"];
 
 interface SimilarityProgress {
   percent: number;
@@ -485,6 +485,8 @@ export default function App() {
       void onSaveWorkspaceFile();
     });
   }, [onSaveWorkspaceFile]);
+
+  useEffect(() => window.aiCulling?.onOpenSettingsRequest?.(() => setActiveTab("settings")), []);
 
   async function onRevealWorkspaceFolder() {
     if (!activeWorkspace) {
@@ -1353,9 +1355,9 @@ export default function App() {
         processingProgress={processingProgress}
       />
     );
-  } else if (activeTab === "debug") {
+  } else if (activeTab === "settings") {
     workspace = (
-      <DebugWorkspace
+      <SettingsWorkspace
         aiRuntimeStatus={aiRuntimeStatus}
         isRefreshing={isRefreshing}
         onRefresh={() => void onRefresh()}

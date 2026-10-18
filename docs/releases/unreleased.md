@@ -17,6 +17,8 @@ Library recovery (`feat/library-recovery`):
 - Resumable exports: recipes recorded per photo, atomic file writes, resume after a crash without rewriting finished files, retry only failures.
 - Direct crop handles on the whole-image view and two-point horizon leveling.
 - Same-scene exposure matching to a reference photo, previewed before applying, capped at ±1 EV, highlight-aware, skipping night/silhouette mismatches.
+- AI runtime finds Python 3.10–3.13 more reliably (Windows py launcher, python.org and Homebrew installs) and downloads a verified private Python 3.12 when none is installed.
+- The Debug tab is now **Settings** (`⌘,` / `Ctrl+,`), where you can pick a custom Python for the AI runtime and reinstall it.
 
 Real high-ISO night, 48MP, extended desktop/memory, optional-model and user aesthetic acceptance remain open under PER-367.
 

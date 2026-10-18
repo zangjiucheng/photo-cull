@@ -10,6 +10,9 @@ const {
   managedPythonBuild,
   managedPythonExecutable,
   parseVersion,
+  SUPPORTED_LABEL,
+  describe: describePython,
+  systemTar,
 } = require("./python-runtime.cjs");
 const { checkForUpdates, initUpdater } = require("./updater.cjs");
 
@@ -56,6 +59,8 @@ function configureApplicationMenu() {
         { role: "about", label: `About ${appName}` },
         { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
         { type: "separator" },
+        { label: "Settings...", accelerator: "Cmd+,", click: openSettings },
+        { type: "separator" },
         { role: "services" },
         { type: "separator" },
         { role: "hide", label: `Hide ${appName}` },
@@ -79,7 +84,12 @@ function configureApplicationMenu() {
         { type: "separator" },
         { label: "Back Up Library...", click: () => void backupLibrary() },
         { label: "Restore Library...", click: () => void restoreLibrary() },
-        ...(process.platform === "darwin" ? [] : [{ type: "separator" }, { role: "quit", label: "Exit" }]),
+        ...(process.platform === "darwin" ? [] : [
+          { type: "separator" },
+          { label: "Settings...", accelerator: "Ctrl+,", click: openSettings },
+          { type: "separator" },
+          { role: "quit", label: "Exit" },
+        ]),
       ],
     },
     {
@@ -125,6 +135,32 @@ function configureApplicationMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function openSettings() {
+  (BrowserWindow.getFocusedWindow() || mainWindow)?.webContents.send("open-settings-request");
+}
+
+// App preferences that live outside the library database (they are about this machine).
+function settingsPath() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function readSettings() {
+  try {
+    return { pythonPath: null, ...JSON.parse(fs.readFileSync(settingsPath(), "utf8")) };
+  } catch {
+    return { pythonPath: null };
+  }
+}
+
+function writeSettings(updates) {
+  const next = { ...readSettings(), ...updates };
+  const partial = `${settingsPath()}.partial`;
+  fs.mkdirSync(path.dirname(partial), { recursive: true });
+  fs.writeFileSync(partial, JSON.stringify(next, null, 2));
+  fs.renameSync(partial, settingsPath());
+  return next;
 }
 
 async function backendJson(pathname, body) {
@@ -397,8 +433,8 @@ async function ensureManagedPython() {
     }
   });
   setAiRuntimeStatus({ detail: `Unpacking Python ${build.version}` });
-  // tar ships with macOS and with Windows 10 and later.
-  await runLogged("tar", ["-xzf", archive, "-C", dir], { cwd: dir });
+  // tar ships with macOS and with Windows 10 and later (System32\\tar.exe).
+  await runLogged(systemTar(), ["-xzf", archive, "-C", dir], { cwd: dir });
   fs.rmSync(archive, { force: true });
   const version = pythonVersion(executable);
   if (!isSupported(version)) {
@@ -409,13 +445,49 @@ async function ensureManagedPython() {
 }
 
 async function basePython() {
+  const custom = readSettings().pythonPath;
   try {
-    return findRuntimePython({ probe: pythonVersion, log: writeAiRuntimeLog });
+    return findRuntimePython({ probe: pythonVersion, log: writeAiRuntimeLog, custom });
   } catch (error) {
-    // An explicit AI_RUNTIME_PYTHON is the user's choice; report it instead of downloading.
-    if (process.env.AI_RUNTIME_PYTHON) throw error;
+    // A Python named in AI_RUNTIME_PYTHON or Settings is the user's choice; report it instead of downloading.
+    if (process.env.AI_RUNTIME_PYTHON || custom) throw error;
     writeAiRuntimeLog(`[python] ${error instanceof Error ? error.message : String(error)}`);
     return ensureManagedPython();
+  }
+}
+
+function installedRuntimeInfo() {
+  try {
+    return JSON.parse(fs.readFileSync(aiRuntimeMarkerPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function runtimeSettings() {
+  const managed = managedPythonBuild();
+  const installed = runtimeInstalled() ? installedRuntimeInfo() : null;
+  return {
+    pythonPath: readSettings().pythonPath,
+    envPython: process.env.AI_RUNTIME_PYTHON || null,
+    supportedRange: SUPPORTED_LABEL,
+    managedPython: managed ? { version: managed.version, megabytes: Math.round(managed.bytes / 1e6) } : null,
+    installedWith: installed?.basePython || null,
+  };
+}
+
+// Check one Python, or (command null) report what the automatic search would pick.
+function checkPython(command) {
+  if (command) {
+    const version = pythonVersion({ command, args: [] });
+    return { command, version: version?.label || null, supported: isSupported(version) };
+  }
+  try {
+    const { AI_RUNTIME_PYTHON: _ignored, ...env } = process.env;
+    const found = findRuntimePython({ probe: pythonVersion, env });
+    return { command: describePython(found), version: found.version.label, supported: true };
+  } catch (error) {
+    return { command: null, version: null, supported: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -545,6 +617,11 @@ async function installAiRuntime() {
     }
     writeAiRuntimeLog(`\n[${new Date().toISOString()}] Installing AI runtime`);
     const python = await basePython();
+    if (backendProcess && useAiRuntimeBackend()) {
+      // Reinstalling: the backend runs from this venv, and Windows cannot delete a running python.exe.
+      setAiRuntimeStatus({ detail: "Stopping the AI backend" });
+      await stopBackend();
+    }
     if (fs.existsSync(aiRuntimeVenvDir())) {
       setAiRuntimeStatus({ detail: "Removing previous incomplete AI runtime venv" });
       writeAiRuntimeLog(`[venv] removing existing venv at ${aiRuntimeVenvDir()}`);
@@ -576,6 +653,7 @@ async function installAiRuntime() {
     fs.writeFileSync(aiRuntimeMarkerPath(), JSON.stringify({
       installedAt: new Date().toISOString(),
       python: runtimePython,
+      basePython: { command: describePython(python), version: python.version.label },
       source: runtimeSourcePath,
     }, null, 2));
     setAiRuntimeStatus({
@@ -595,6 +673,16 @@ async function installAiRuntime() {
       error: error instanceof Error ? error.message : String(error),
       detail: `See ${path.join(app.getPath("userData"), "ai-runtime-install.log")}`,
     });
+    if (!backendProcess) {
+      // A failed reinstall stopped the AI backend; bring the bundled one back.
+      try {
+        closeBackendLog();
+        startBackend();
+        await waitForPort(backendHost, backendPort);
+      } catch (restartError) {
+        writeAiRuntimeLog(`[backend] restart failed: ${restartError instanceof Error ? restartError.message : String(restartError)}`);
+      }
+    }
   } finally {
     setAiRuntimeStatus({ installing: false });
   }
@@ -747,6 +835,32 @@ ipcMain.handle("reveal-folder", async (_event, folderPath) => {
 ipcMain.handle("ai-runtime-status", async () => aiRuntimePublicStatus());
 
 ipcMain.handle("install-ai-runtime", async () => installAiRuntime());
+
+ipcMain.handle("get-runtime-settings", async () => runtimeSettings());
+
+ipcMain.handle("check-python", async (_event, command) => checkPython(command || null));
+
+ipcMain.handle("set-runtime-python", async (_event, command) => {
+  const pythonPath = typeof command === "string" && command.trim() ? command.trim() : null;
+  if (pythonPath) {
+    const check = checkPython(pythonPath);
+    if (!check.supported) {
+      throw new Error(`AI Runtime needs Python ${SUPPORTED_LABEL}; ${pythonPath} is ${check.version ? `Python ${check.version}` : "not runnable"}.`);
+    }
+  }
+  writeSettings({ pythonPath });
+  return runtimeSettings();
+});
+
+ipcMain.handle("choose-python", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose a Python for the AI runtime",
+    buttonLabel: "Use This Python",
+    properties: ["openFile", "showHiddenFiles"],
+    filters: process.platform === "win32" ? [{ name: "Python", extensions: ["exe"] }] : [],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 
 app.whenReady().then(createWindow).catch((error) => {
   dialog.showErrorBox("Failed to start", error instanceof Error ? error.message : String(error));

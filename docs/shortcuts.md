@@ -14,7 +14,8 @@ Press `Shift+/` (`?`) in the app to see the shortcuts available in the current w
 | `⌘3` / `Ctrl+3` | Switch to Similarity |
 | `⌘4` / `Ctrl+4` | Switch to Enhance & Export |
 | `⌘5` / `Ctrl+5` | Switch to Stats |
-| `⌘6` / `Ctrl+6` | Switch to Debug |
+| `⌘6` / `Ctrl+6` | Switch to Settings |
+| `⌘,` / `Ctrl+,` | Open Settings |
 | `H` / `L` | Select the photo to the left / right |
 | `J` / `K` | Select the photo below / above |
 | `⌘S` / `Ctrl+S` | Save workspace file (desktop app, **File → Save Workspace File...**) |

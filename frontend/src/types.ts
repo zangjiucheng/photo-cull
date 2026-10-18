@@ -167,7 +167,7 @@ export type ViewMode = "grid" | "list";
 export type RatingFilter = "all" | "unrated" | "1" | "2" | "3" | "4" | "5";
 export type StatusTone = "" | "ok" | "warn" | "error" | "busy";
 export type SortMode = "score-desc" | "score-asc" | "name-asc" | "name-desc" | "mtime-desc" | "mtime-asc";
-export type ToolTab = "browse" | "review" | "duplicates" | "export-enhance" | "stats" | "debug";
+export type ToolTab = "browse" | "review" | "duplicates" | "export-enhance" | "stats" | "settings";
 export type WorkspaceTab = ToolTab;
 export type SimilarityScope = "current" | "library";
 
@@ -186,6 +186,23 @@ export interface AiRuntimeStatus {
   error: string;
   logPath: string;
   logTail: string[];
+}
+
+export interface RuntimeSettings {
+  /** Python chosen in Settings; null means find one automatically. */
+  pythonPath: string | null;
+  /** AI_RUNTIME_PYTHON from the environment, which overrides pythonPath. */
+  envPython: string | null;
+  supportedRange: string;
+  managedPython: { version: string; megabytes: number } | null;
+  installedWith: { command: string; version: string } | null;
+}
+
+export interface PythonCheck {
+  command: string | null;
+  version: string | null;
+  supported: boolean;
+  message?: string;
 }
 
 export type PadDirections = { up: Record<string, number>; down: Record<string, number> };

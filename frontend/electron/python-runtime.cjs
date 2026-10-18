@@ -45,6 +45,17 @@ function managedPythonExecutable(dir, platform = process.platform) {
   return platform === "win32" ? path.join(dir, "python", "python.exe") : path.join(dir, "python", "bin", "python3");
 }
 
+/**
+ * The tar to unpack with. On Windows use the bsdtar in System32 explicitly: a GNU tar earlier on
+ * PATH (Git for Windows) reads "C:\\..." as a remote host and fails.
+ */
+function systemTar(platform = process.platform, env = process.env) {
+  if (platform === "win32") {
+    return path.win32.join(env.SystemRoot || env.SYSTEMROOT || "C:\\Windows", "System32", "tar.exe");
+  }
+  return "tar";
+}
+
 /** Download url to target, failing unless the SHA-256 matches. onProgress gets 0..1. */
 async function downloadVerified(url, target, sha256, onProgress = () => {}, fetchImpl = fetch) {
   const response = await fetchImpl(url);
@@ -135,16 +146,22 @@ function installHint(platform) {
 
 /**
  * Pick the first supported Python. `probe(candidate)` returns a parsed version or null.
- * Throws an Error whose message lists what was found and how to fix it.
+ * A Python named by AI_RUNTIME_PYTHON, or else chosen in Settings (`custom`), is used as is;
+ * otherwise the candidates are searched. Throws an Error that says what was found and how to fix it.
  */
-function findRuntimePython({ probe, platform = process.platform, env = process.env, log = () => {} }) {
-  if (env.AI_RUNTIME_PYTHON) {
-    const configured = { command: env.AI_RUNTIME_PYTHON, args: [] };
-    const version = probe(configured);
-    log(`[python] AI_RUNTIME_PYTHON=${configured.command} version=${version?.label || "unavailable"}`);
-    if (isSupported(version)) return { ...configured, version };
+function findRuntimePython({ probe, platform = process.platform, env = process.env, log = () => {}, custom = null }) {
+  const configured = env.AI_RUNTIME_PYTHON
+    ? { command: env.AI_RUNTIME_PYTHON, args: [], source: "AI_RUNTIME_PYTHON" }
+    : custom
+      ? { command: custom, args: [], source: "the Python chosen in Settings" }
+      : null;
+  if (configured) {
+    const { source, ...candidate } = configured;
+    const version = probe(candidate);
+    log(`[python] ${source}=${candidate.command} version=${version?.label || "unavailable"}`);
+    if (isSupported(version)) return { ...candidate, version };
     throw new Error(
-      `AI Runtime needs Python ${SUPPORTED_LABEL}; AI_RUNTIME_PYTHON (${configured.command}) is ${version ? `Python ${version.label}` : "not runnable"}.`,
+      `AI Runtime needs Python ${SUPPORTED_LABEL}; ${source} (${candidate.command}) is ${version ? `Python ${version.label}` : "not runnable"}.`,
     );
   }
   // Probe every location and keep the newest supported version: a newer Python may live at a
@@ -173,6 +190,8 @@ function findRuntimePython({ probe, platform = process.platform, env = process.e
 module.exports = {
   MAX_MINOR,
   MIN_MINOR,
+  SUPPORTED_LABEL,
+  describe,
   downloadVerified,
   findRuntimePython,
   isSupported,
@@ -180,4 +199,5 @@ module.exports = {
   managedPythonExecutable,
   parseVersion,
   pythonCandidates,
+  systemTar,
 };

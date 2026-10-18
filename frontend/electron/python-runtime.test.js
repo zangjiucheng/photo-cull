@@ -45,6 +45,14 @@ describe("findRuntimePython", () => {
     expect(findRuntimePython({ platform: "linux", env: { AI_RUNTIME_PYTHON: "/x/python" }, probe: probeFrom({ "/x/python": "3.12.1" }) }).command).toBe("/x/python");
   });
 
+  it("uses the Python chosen in Settings unless AI_RUNTIME_PYTHON overrides it", () => {
+    const probe = probeFrom({ "/chosen/python": "3.11.9", "/env/python": "3.12.1", python3: "3.13.0" });
+    expect(findRuntimePython({ platform: "linux", env: {}, custom: "/chosen/python", probe }).command).toBe("/chosen/python");
+    expect(findRuntimePython({ platform: "linux", env: { AI_RUNTIME_PYTHON: "/env/python" }, custom: "/chosen/python", probe }).command).toBe("/env/python");
+    expect(() => findRuntimePython({ platform: "linux", env: {}, custom: "/missing/python", probe }))
+      .toThrow(/the Python chosen in Settings \(\/missing\/python\) is not runnable/);
+  });
+
   it("lists the newest candidates first", () => {
     expect(pythonCandidates("win32", {})[0]).toEqual({ command: "py", args: ["-3.13"] });
     expect(pythonCandidates("linux", {})[0]).toEqual({ command: "python3.13", args: [] });
@@ -57,6 +65,12 @@ describe("managed Python", () => {
   const os = require("node:os");
   const path = require("node:path");
   const crypto = require("node:crypto");
+
+  it("unpacks with Windows' own bsdtar, not a GNU tar from PATH", () => {
+    const { systemTar } = require("./python-runtime.cjs");
+    expect(systemTar("win32", { SystemRoot: "C:\\Windows" })).toBe("C:\\Windows\\System32\\tar.exe");
+    expect(systemTar("darwin", {})).toBe("tar");
+  });
 
   it("has a pinned build for macOS (both chips) and Windows x64", () => {
     expect(managedPythonBuild("darwin", "arm64").url).toMatch(/aarch64-apple-darwin-install_only\.tar\.gz$/);

@@ -9,7 +9,7 @@ const tabs: Array<{ id: WorkspaceTab; label: string; shortcut: string; detail: s
   { id: "duplicates", label: "Similarity", shortcut: `${modLabel}+3`, detail: "Find visually similar groups and choose what to keep." },
   { id: "export-enhance", label: "Enhance & Export", shortcut: `${modLabel}+4`, detail: "Apply styles, AI restoration, and export selected photos." },
   { id: "stats", label: "Stats", shortcut: `${modLabel}+5`, detail: "Check library progress, ratings, and export queue counts." },
-  { id: "debug", label: "Debug", shortcut: `${modLabel}+6`, detail: "Inspect AI Runtime status and background logs." }
+  { id: "settings", label: "Settings", shortcut: `${modLabel}+6`, detail: "AI Runtime, its Python, and install logs." }
 ];
 
 interface WorkspaceShellProps {
@@ -97,7 +97,7 @@ export function WorkspaceShell({
               size="sm"
               onClick={onInstallAiRuntime}
               disabled={aiRuntimeStatus.installing || aiRuntimeStatus.installed}
-              title="Open Debug tab to view AI Runtime logs"
+              title="Open Settings to choose its Python and view install logs"
             >
               {aiRuntimeButtonLabel}
             </Button>

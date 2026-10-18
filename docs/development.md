@@ -28,7 +28,7 @@ Optional extras, not needed for basic editing:
 
 - `make setup-ai` installs `requirements-ai.txt` (pyiqa, torch, open-clip) for AI scoring and CLIP similarity.
 - `make setup-faiss` installs `requirements-faiss.txt` for the FAISS similarity backend.
-- In the desktop app, the **Debug** workspace can install the AI runtime instead.
+- In the desktop app, the **Settings** workspace can install the AI runtime instead.
 
 ## Run
 
