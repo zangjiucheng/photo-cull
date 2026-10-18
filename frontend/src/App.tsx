@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, relocateWorkspace, fetchExportEnhanceJob, findSimilarPhotos, listExportEnhanceJobs, resumeExportEnhanceJob, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, matchExposure, relocateWorkspace, fetchExportEnhanceJob, findSimilarPhotos, listExportEnhanceJobs, resumeExportEnhanceJob, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -19,7 +19,7 @@ import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
 import { useShortcuts } from "./shortcuts/useShortcuts";
 import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
-import { cloneSettings, defaultSettings, pasteSettings, type AdjustmentGroup } from "./editing/recipe";
+import { cloneSettings, defaultSettings, pasteSettings, rebasePad, type AdjustmentGroup } from "./editing/recipe";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "debug"];
@@ -632,6 +632,31 @@ export default function App() {
     setExportEnhanceUndoStacks(history);
     setExportEnhanceRedoStacks(redo);
     updateStatus(`Applied adjustments to ${Math.max(0, exportQueueList.length - 1)} queued photos.`, "ok");
+  }
+
+  async function matchQueueExposure() {
+    if (!exportEnhanceCurrentPhotoId) throw new Error("Select a reference photo first");
+    const targets = Object.fromEntries(exportQueueList
+      .filter((id) => id !== exportEnhanceCurrentPhotoId)
+      .map((id) => [id, exportEnhanceSettingsByPhoto[id] ?? defaultExportEnhanceSettings]));
+    return matchExposure(exportEnhanceCurrentPhotoId, exportEnhanceSettings, targets);
+  }
+
+  // Exposure-only change per photo, recorded in each photo's undo history like a slider edit.
+  function applyExposureMatches(exposures: Record<string, number>) {
+    const next = { ...exportEnhanceSettingsByPhoto };
+    const history = { ...exportEnhanceUndoStacks };
+    const redo = { ...exportEnhanceRedoStacks };
+    for (const [id, exposure] of Object.entries(exposures)) {
+      const before = cloneSettings(next[id] ?? defaultSettings);
+      history[id] = [...(history[id] ?? []), before].slice(-50);
+      redo[id] = [];
+      next[id] = rebasePad({ ...before, exposure, auto: null });
+    }
+    setExportEnhanceSettingsByPhoto(next);
+    setExportEnhanceUndoStacks(history);
+    setExportEnhanceRedoStacks(redo);
+    updateStatus(`Matched exposure on ${Object.keys(exposures).length} photo(s).`, "ok");
   }
 
   function resetExportEnhanceSettings() {
@@ -1274,6 +1299,8 @@ export default function App() {
         onBeginAdjustment={beginEnhanceGesture}
         onEndAdjustment={endEnhanceGesture}
         onApplyToQueued={applyAdjustmentsToQueue}
+        onMatchExposure={matchQueueExposure}
+        onApplyExposureMatches={applyExposureMatches}
         onReset={resetExportEnhanceSettings}
         onSelectPreviewPhoto={selectExportEnhancePhoto}
         onChooseFolder={() => void onChooseExportEnhanceFolder()}

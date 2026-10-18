@@ -14,7 +14,8 @@ import type {
   PhotoStylePreset,
   StylePad,
 } from "../../types";
-import { renderEditingPreview } from "../../api";
+import { renderEditingPreview, type ExposureMatch } from "../../api";
+import { CropOverlay, MAX_ANGLE, levelAngle, rotateCrop, viewCrop } from "../../editing/CropOverlay";
 import { PresetManager } from "../../editing/PresetManager";
 import { SnapshotList } from "../../editing/SnapshotList";
 import { isMac, modPrefix, shiftModPrefix } from "../../lib/platform";
@@ -78,6 +79,8 @@ interface ExportEnhanceWorkspaceProps {
   onPreviewOpenChange: (open: boolean) => void;
   onStart: () => void;
   onResume: (retryFailed: boolean) => void;
+  onMatchExposure: () => Promise<{ scene: string; limitEv: number; results: ExposureMatch[] }>;
+  onApplyExposureMatches: (exposures: Record<string, number>) => void;
   onCancel: () => void;
   onClearQueue: () => void;
 }
@@ -505,7 +508,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   const [gpuError, setGpuError] = useState("");
   const [original, setOriginal] = useState(false),
     [clipping, setClipping] = useState(false),
-    [grid, setGrid] = useState(false);
+    [grid, setGrid] = useState(false),
+    [leveling, setLeveling] = useState(false),
+    [exposurePlan, setExposurePlan] = useState<ExposureMatch[] | null>(null),
+    [matching, setMatching] = useState(false);
   const [backendState, setBackendState] = useState<{
       key: string;
       url: string;
@@ -557,8 +563,13 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         ((props.job.completed + props.job.failed) / props.job.total) * 100,
       )
     : 0;
+  // While the crop section is open the preview shows the whole image at the crop's angle, with
+  // the crop drawn on top (like Lightroom/Photos), instead of the cropped result.
+  const cropping = grid && !!base && !legacy;
+  const shownCrop = cropping ? viewCrop(settings.crop) : settings.crop;
+  const shownSettings = cropping ? { ...settings, crop: shownCrop } : settings;
   const frame = base
-    ? geometry(base.width, base.height, settings.crop)
+    ? geometry(base.width, base.height, shownCrop)
     : { width: 4, height: 3 };
   const frameScale = Math.min(
     area.width / frame.width,
@@ -772,7 +783,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         const point = sourcePoint(
           base.width,
           base.height,
-          settings.crop,
+          shownCrop,
           (event.clientX - rect.left) / rect.width,
           (event.clientY - rect.top) / rect.height,
         );
@@ -844,14 +855,14 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
       {base && !legacy ? (
         <PreviewCanvas
           base={base}
-          settings={settings}
+          settings={shownSettings}
           original={original}
           clipping={clipping}
           maskOverlay={gradientMask}
           onError={onGpuError}
         />
       ) : null}
-      {backendPreview && !original ? (
+      {backendPreview && !original && !cropping ? (
         <img
           className="quick-rendered"
           src={backendPreview}
@@ -859,12 +870,35 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         />
       ) : null}
       {base && gpuError && !legacy && (!backendPreview || original) ? (
-        <NeutralCanvas base={base} crop={settings.crop} />
+        <NeutralCanvas base={base} crop={shownCrop} />
       ) : null}
       {(!base || legacy) && (!backendPreview || original) ? (
         <img src={photo.url} alt={photo.name} />
       ) : null}
-      {grid ? (
+      {cropping && base && !original ? (
+        <CropOverlay
+          base={base}
+          crop={settings.crop}
+          leveling={leveling}
+          onChange={updateCrop}
+          onBegin={onBeginAdjustment}
+          onEnd={onEndAdjustment}
+          onLevel={(points) => {
+            setLeveling(false);
+            if (!points) {
+              setNotice("Click two points farther apart along the horizon.");
+              return;
+            }
+            const angle = levelAngle(base.width, base.height, points[0], points[1]);
+            if (Math.abs(angle) > MAX_ANGLE) {
+              setNotice(`That line is tilted ${angle.toFixed(1)}°; straightening is limited to ±${MAX_ANGLE}°.`);
+              return;
+            }
+            updateCrop(rotateCrop(base.width, base.height, settings.crop, angle));
+            setNotice(`Leveled to ${angle.toFixed(1)}°.`);
+          }}
+        />
+      ) : grid ? (
         <div className="quick-grid" aria-hidden="true">
           <i />
           <i />
@@ -872,7 +906,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
           <b />
         </div>
       ) : null}
-      {base && settings.gradient?.enabled && gradientHandles && !original ? (
+      {base && settings.gradient?.enabled && gradientHandles && !original && !cropping ? (
         <GradientOverlay
           base={base}
           crop={settings.crop}
@@ -1475,7 +1509,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 </details>
                 <details
                   className="quick-section"
-                  onToggle={(event) => setGrid(event.currentTarget.open)}
+                  onToggle={(event) => {
+                    setGrid(event.currentTarget.open);
+                    if (!event.currentTarget.open) setLeveling(false);
+                  }}
                 >
                   <summary>Crop & straighten</summary>
                   <div className="quick-ratios">
@@ -1503,12 +1540,26 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     onBegin={onBeginAdjustment}
                     onEnd={onEndAdjustment}
                     onChange={(value) =>
-                      updateCrop({ ...settings.crop, angle: value * 15 })
+                      updateCrop(
+                        base
+                          ? rotateCrop(base.width, base.height, settings.crop, value * 15)
+                          : { ...settings.crop, angle: value * 15 },
+                      )
                     }
                   />
+                  <div className="quick-button-row">
+                    <button
+                      type="button"
+                      className={`ui-btn ui-btn-sm ${leveling ? "ui-btn-default" : "ui-btn-secondary"}`}
+                      aria-pressed={leveling}
+                      onClick={() => setLeveling(!leveling)}
+                    >
+                      {leveling ? "Click two points on the horizon…" : "Level horizon"}
+                    </button>
+                  </div>
                   <span className="quick-hint">
-                    {settings.crop.angle.toFixed(1)}° · edges automatically fit
-                    inside the photo
+                    {settings.crop.angle.toFixed(1)}° · drag the frame or its
+                    edges on the photo; Shift keeps the shape
                   </span>
                   <Slider
                     label="Crop size"
@@ -1642,6 +1693,66 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       Apply to queue
                     </button>
                   </div>
+                  <div className="quick-button-row">
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-secondary ui-btn-sm"
+                      disabled={queued.length < 2 || matching || legacy}
+                      title="Bring the other queued photos to this photo's brightness. Only exposure changes."
+                      onClick={() => {
+                        setMatching(true);
+                        setExposurePlan(null);
+                        props
+                          .onMatchExposure()
+                          .then((plan) => setExposurePlan(plan.results))
+                          .catch((error) =>
+                            setNotice(error instanceof Error ? error.message : "Unable to match exposure"),
+                          )
+                          .finally(() => setMatching(false));
+                      }}
+                    >
+                      {matching ? "Measuring…" : "Match exposure to this photo"}
+                    </button>
+                  </div>
+                  {exposurePlan ? (
+                    <div className="exposure-plan" role="region" aria-label="Exposure match preview">
+                      {exposurePlan.map((row) => (
+                        <div key={row.photoId} className={`exposure-plan-row ${row.status}`}>
+                          <span>{row.name}</span>
+                          <span>
+                            {row.status === "adjust"
+                              ? `${(row.deltaEv ?? 0) > 0 ? "+" : ""}${(row.deltaEv ?? 0).toFixed(2)} EV${row.limited ? " (capped)" : ""}`
+                              : row.status === "unchanged"
+                                ? "matches"
+                                : "skipped"}
+                          </span>
+                          {row.reason ? <small>{row.reason}</small> : null}
+                        </div>
+                      ))}
+                      <div className="quick-button-row">
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-default ui-btn-sm"
+                          disabled={!exposurePlan.some((row) => row.status === "adjust")}
+                          onClick={() => {
+                            props.onApplyExposureMatches(
+                              Object.fromEntries(
+                                exposurePlan
+                                  .filter((row) => row.status === "adjust" && row.proposed !== undefined)
+                                  .map((row) => [row.photoId, row.proposed as number]),
+                              ),
+                            );
+                            setExposurePlan(null);
+                          }}
+                        >
+                          Apply {exposurePlan.filter((row) => row.status === "adjust").length}
+                        </button>
+                        <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={() => setExposurePlan(null)}>
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <PresetManager
                     settings={settings}
                     onApply={(preset) =>

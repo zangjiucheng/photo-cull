@@ -347,3 +347,27 @@ export async function renamePreset(presetId: string, name: string): Promise<Edit
 export async function deletePreset(presetId: string): Promise<EditingPreset[]> {
   return (await requestJson<{ presets: EditingPreset[] }>(`/api/presets/${encodeURIComponent(presetId)}`, { method: "DELETE" }, "Failed to delete preset")).presets;
 }
+
+export interface ExposureMatch {
+  photoId: string;
+  name: string;
+  exposure: number;
+  status: "adjust" | "skip" | "unchanged";
+  proposed?: number;
+  deltaEv?: number;
+  limited?: boolean;
+  reason?: string;
+}
+
+/** Propose exposure-only changes that match queued photos to a reference photo's midtones. */
+export async function matchExposure(
+  referenceId: string,
+  referenceSettings: ExportEnhanceSettings,
+  targets: Record<string, ExportEnhanceSettings>,
+): Promise<{ scene: string; limitEv: number; results: ExposureMatch[] }> {
+  return requestJson("/api/export-enhance/match-exposure", jsonInit("POST", {
+    reference_id: referenceId,
+    reference_settings: referenceSettings,
+    targets
+  }), "Failed to match exposure");
+}
