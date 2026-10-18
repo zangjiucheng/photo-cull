@@ -91,7 +91,7 @@ The same workflow publishes a **nightly** prerelease of `main` every day at 07:0
 gh workflow run release.yml --ref <branch>
 ```
 
-Nightlies are versioned after the current release, e.g. `0.3.2-nightly.202610181530` after `0.3.1`, so they sort before the next real release. They are marked as prereleases, never become GitHub's "latest" release, and only the five newest are kept. Apps on the **Nightly** update channel (Settings → Updates) install them; Stable users never see them.
+Nightlies are versioned after the current release, e.g. `0.3.2-nightly.202610181530` after `0.3.1`, so they sort before the next real release. They are marked as prereleases, never become GitHub's "latest" release, and only the newest one is kept: publishing a nightly removes the previous one and its tag. Apps on the **Nightly** update channel (Settings → Updates) install them; Stable users never see them.
 
 Every package records the commit and build time in `electron/build-info.json` (written by `scripts/package-electron.cjs`); Settings and About show them, e.g. `0.3.1 (a1b2c3d, 2026-10-18 15:30 UTC)`.
 

@@ -190,9 +190,10 @@ jobs:
           generate_release_notes: ${{ needs.version.outputs.nightly != 'true' }}
           files: dist/*
 
-      - name: Keep the five newest nightlies
+      # Only the newest nightly is kept; it replaces the previous one once it is published.
+      - name: Remove older nightlies
         if: needs.version.outputs.nightly == 'true'
         run: |
           gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease,createdAt \
-            -q '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
+            -q '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))] | sort_by(.createdAt) | reverse | .[1:] | .[].tagName' |
             while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes; done
