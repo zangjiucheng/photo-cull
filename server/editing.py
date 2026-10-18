@@ -300,6 +300,21 @@ def style_pad_vectors(image, masks=None):
     }
 
 
+def luminance_stats(image):
+    y = np.clip(image @ LUMA, 0, 1)
+    low, median, high = np.percentile(y, [2, 50, 98])
+    return {"low": float(low), "median": float(median), "high": float(high), "clipped": float((y >= .99).mean())}
+
+
+def scene_kind(stats):
+    """Coarse scene class used to refuse exposure matching across very different scenes."""
+    if stats["median"] < .12:
+        return "night"
+    if stats["high"] > .8 and stats["median"] < .22:
+        return "silhouette"  # bright sky behind a dark subject
+    return "normal"
+
+
 def clean_exif(data, width, height):
     """Retain safe capture tags, never copy RAW offsets, thumbnail or GPS pointers."""
     out = Image.Exif()

@@ -377,6 +377,20 @@ def preset(preset_id):
     return jsonify({"preset": renamed, "presets": db.list_presets()}) if renamed else error_response("Preset not found", 404)
 
 
+@bp.route("/export-enhance/match-exposure", methods=["POST"])
+def match_exposure():
+    data = request.get_json(silent=True) or {}
+    targets = data.get("targets") if isinstance(data.get("targets"), dict) else {}
+    try:
+        return jsonify(export_enhance.match_exposure(
+            str(data.get("reference_id") or ""),
+            export_enhance.parse_settings(data.get("reference_settings")),
+            {str(pid): export_enhance.parse_settings(raw) for pid, raw in targets.items() if isinstance(raw, dict)},
+        ))
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+
+
 @bp.route("/export-enhance/jobs/<job_id>", methods=["GET"])
 def get_export_enhance_job(job_id):
     job = export_enhance.queue.get(job_id)

@@ -14,7 +14,7 @@ import traceback
 import urllib.request
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor, Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -1171,6 +1171,79 @@ def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 160
     preview.seek(0)
     preview.denoise_engine = engine
     return preview
+
+
+MATCH_LIMIT_EV = 1.0
+
+
+def _render_for_stats(row: Any, settings: EnhanceSettings, max_edge: int = 512) -> np.ndarray:
+    image = queue._loader.load_scaled(row, max_edge)
+    image = queue._color.apply(image, settings)
+    image = queue._style.apply(image, settings, row)
+    image = editing.apply_selected_color(image, settings.selected_color)
+    image = editing.apply_gradient(image, settings.gradient)
+    return editing.apply_geometry(image, settings.crop)
+
+
+def match_exposure(reference_id: str, reference_settings: EnhanceSettings,
+                   targets: dict[str, EnhanceSettings], limit: float = MATCH_LIMIT_EV) -> dict[str, Any]:
+    """Propose exposure changes so queued photos match the reference's rendered midtones.
+
+    Only exposure changes; white balance, crop and everything else stay as they are. Changes
+    are capped at +/-limit EV, and photos whose scene differs from the reference (night,
+    silhouette) are left alone rather than forced to look alike.
+    """
+    reference = db.fetch_photo(reference_id)
+    if reference is None:
+        raise ExportEnhanceError("Reference photo not found")
+    if reference_settings.recipe_version < 2:
+        raise ExportEnhanceError("Switch the reference photo to the new controls first")
+    ref_stats = editing.luminance_stats(_render_for_stats(reference, reference_settings))
+    ref_kind = editing.scene_kind(ref_stats)
+    target_linear = float(editing.decode_srgb(np.float32(ref_stats["median"])))
+    results = []
+    for photo_id, settings in targets.items():
+        row = db.fetch_photo(photo_id)
+        base = {"photoId": photo_id, "name": row["name"] if row else photo_id, "exposure": settings.exposure}
+        if row is None:
+            results.append({**base, "status": "skip", "reason": "Photo not found"})
+            continue
+        if settings.recipe_version < 2:
+            results.append({**base, "status": "skip", "reason": "Legacy edit; switch to the new controls first"})
+            continue
+        stats = editing.luminance_stats(_render_for_stats(row, settings))
+        clipped_before = stats["clipped"]
+        kind = editing.scene_kind(stats)
+        if kind != ref_kind:
+            results.append({**base, "status": "skip", "reason": f"{kind.capitalize()} scene; the reference is {ref_kind}"})
+            continue
+        # Exposure acts in linear light before the tone controls, so refine a few times.
+        delta = 0.0
+        for _ in range(3):
+            current = float(editing.decode_srgb(np.float32(stats["median"])))
+            step = math.log2(max(target_linear, 1e-4) / max(current, 1e-4))
+            delta = max(-limit, min(limit, delta + step))
+            proposed = max(-3.0, min(3.0, settings.exposure + delta))
+            stats = editing.luminance_stats(_render_for_stats(row, replace(settings, exposure=proposed)))
+            if abs(step) < 0.01:
+                break
+        # Brightening must not blow out skies or the sun: back off while clipping grows by >1%.
+        highlight_limited = False
+        while delta > 0.03 and stats["clipped"] > clipped_before + 0.01:
+            highlight_limited = True
+            delta = max(0.0, delta - 0.15)
+            proposed = max(-3.0, min(3.0, settings.exposure + delta))
+            stats = editing.luminance_stats(_render_for_stats(row, replace(settings, exposure=proposed)))
+        if abs(delta) < 0.03:
+            if highlight_limited:
+                results.append({**base, "status": "skip", "reason": "Brightening would clip highlights"})
+                continue
+            results.append({**base, "status": "unchanged", "reason": "Already matches"})
+            continue
+        results.append({**base, "status": "adjust", "proposed": round(proposed, 2), "deltaEv": round(delta, 2),
+                        "limited": abs(delta) >= limit - 1e-6,
+                        "reason": "Limited to protect highlights" if highlight_limited else ""})
+    return {"referenceId": reference_id, "scene": ref_kind, "limitEv": limit, "results": results}
 
 
 def render_style_masks(photo_id: str, max_edge: int = 1024) -> dict[str, Any]:
