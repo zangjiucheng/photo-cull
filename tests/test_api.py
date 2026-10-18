@@ -198,6 +198,7 @@ def test_delete_workspace_clears_similarity_and_render_caches(client, tmp_path, 
     for photo in photos:
         image = client.get(f"/api/photos/{photo['id']}/image")
         assert image.status_code == 200
+        image.close()  # release the file handle, which Windows would otherwise keep locked
     assert list(Path(db.get_config().render_cache_folder).glob("*.jpg"))
 
     similar = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")

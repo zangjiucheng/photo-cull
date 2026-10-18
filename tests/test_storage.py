@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -247,10 +248,20 @@ def test_scan_dng_queues_cached_display_image_for_scoring(tmp_path, monkeypatch)
 def test_default_db_path_uses_application_support(monkeypatch, tmp_path):
     monkeypatch.delenv("DB_PATH", raising=False)
     monkeypatch.delenv("AI_CULLING_APP_SUPPORT", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.home() reads USERPROFILE on Windows and HOME elsewhere, so patch it directly.
+    monkeypatch.setattr("server.config.Path.home", lambda: tmp_path)
     monkeypatch.setattr("server.config.platform.system", lambda: "Darwin")
 
     assert resolve_db_path() == str(tmp_path / "Library" / "Application Support" / "AI Photo Culling" / "ai_culling.db")
+
+
+def test_default_db_path_uses_appdata_on_windows(monkeypatch, tmp_path):
+    monkeypatch.delenv("DB_PATH", raising=False)
+    monkeypatch.delenv("AI_CULLING_APP_SUPPORT", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setattr("server.config.platform.system", lambda: "Windows")
+
+    assert resolve_db_path() == os.path.join(str(tmp_path / "Roaming"), "AI Photo Culling", "ai_culling.db")
 
 
 def test_migrate_legacy_db_moves_repo_database(tmp_path):
@@ -333,3 +344,19 @@ def test_reset_interrupted_processing_marks_unscored_rows_pending(tmp_path):
     assert processing["status"] == "pending"
     assert done["status"] == "processing"
     assert done["score"] == 82
+
+
+def test_delete_cached_renders_skips_files_in_use(tmp_path, monkeypatch):
+    monkeypatch.setattr(raw_pipeline, "_config", SimpleNamespace(render_cache_folder=str(tmp_path)))
+    (tmp_path / "abc.jpg").write_bytes(b"x")
+    (tmp_path / "abc-oriented.jpg").write_bytes(b"x")
+    real_remove = os.remove
+
+    def locked(path):
+        if path.endswith("abc-oriented.jpg"):
+            raise PermissionError("in use")
+        real_remove(path)
+
+    monkeypatch.setattr(raw_pipeline.os, "remove", locked)
+    assert raw_pipeline.delete_cached_renders(["abc"]) == 1
+    assert not (tmp_path / "abc.jpg").exists()

@@ -198,7 +198,8 @@ def export():
 
     unique_ids = list(dict.fromkeys(str(photo_id) for photo_id in selected_ids))
     mem = storage.build_export_zip(unique_ids)
-    return send_file(mem, download_name="selected.zip", as_attachment=True)
+    # Explicit type: Windows maps .zip to application/x-zip-compressed.
+    return send_file(mem, mimetype="application/zip", download_name="selected.zip", as_attachment=True)
 
 
 @bp.route("/workspaces/<workspace_id>/export-enhance-settings", methods=["PUT"])
