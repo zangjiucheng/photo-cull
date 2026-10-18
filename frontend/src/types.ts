@@ -264,6 +264,9 @@ export interface ExportEnhanceJob {
   outputFolder: string;
   outputs: string[];
   failures: Array<{ photo_id?: string; photoId?: string; name: string; error: string }>;
+  /** Photos not written yet; an interrupted or cancelled job can resume them. */
+  pending?: number;
+  resumable?: boolean;
   createdAt: number;
   updatedAt: number;
 }

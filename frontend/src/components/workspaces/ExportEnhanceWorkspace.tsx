@@ -15,6 +15,8 @@ import type {
   StylePad,
 } from "../../types";
 import { renderEditingPreview } from "../../api";
+import { PresetManager } from "../../editing/PresetManager";
+import { SnapshotList } from "../../editing/SnapshotList";
 import { isMac, modPrefix, shiftModPrefix } from "../../lib/platform";
 import {
   adjustmentGroups,
@@ -75,6 +77,7 @@ interface ExportEnhanceWorkspaceProps {
   onOutputFolderChange: (path: string) => void;
   onPreviewOpenChange: (open: boolean) => void;
   onStart: () => void;
+  onResume: (retryFailed: boolean) => void;
   onCancel: () => void;
   onClearQueue: () => void;
 }
@@ -112,8 +115,6 @@ const groupLabels: Record<AdjustmentGroup, string> = {
   crop: "Crop",
   output: "Export settings",
 };
-const PRESET_STORAGE = "photo-cull.editing-presets.v2";
-type SavedPreset = { name: string; settings: ExportEnhanceSettings };
 const thumbnailSettings = Object.fromEntries(
   Object.keys(presets).map((id) => [
     id,
@@ -528,20 +529,6 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
     "style",
     "detail",
   ]);
-  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>(() => {
-    try {
-      const list = JSON.parse(localStorage.getItem(PRESET_STORAGE) ?? "[]");
-      return Array.isArray(list)
-        ? list.filter(
-            (p) =>
-              typeof p.name === "string" && p.settings?.recipeVersion === 2,
-          )
-        : [];
-    } catch {
-      return [];
-    }
-  });
-  const [presetName, setPresetName] = useState("");
   const [notice, setNotice] = useState("");
   const [detail, setDetail] = useState(false);
   const [gradientHandles, setGradientHandles] = useState(false);
@@ -769,22 +756,6 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         );
     } finally {
       if (currentPhoto.current === key) setAutoBusy(false);
-    }
-  };
-  const savePreset = () => {
-    const name = presetName.trim();
-    if (!name) return;
-    const next = [
-      ...savedPresets.filter((p) => p.name !== name),
-      { name, settings: cloneSettings(settings) },
-    ];
-    try {
-      localStorage.setItem(PRESET_STORAGE, JSON.stringify(next));
-      setSavedPresets(next);
-      setPresetName("");
-      setNotice(`Saved “${name}”`);
-    } catch {
-      setNotice("Unable to save preset on this device");
     }
   };
   const preview = photo ? (
@@ -1671,63 +1642,26 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       Apply to queue
                     </button>
                   </div>
-                  <div className="quick-preset-save">
-                    <input
-                      className="ui-input"
-                      aria-label="Preset name"
-                      placeholder="Name this look"
-                      value={presetName}
-                      onChange={(event) => setPresetName(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="ui-btn ui-btn-secondary ui-btn-sm"
-                      disabled={!presetName.trim()}
-                      onClick={savePreset}
-                    >
-                      Save
-                    </button>
-                  </div>
-                  {savedPresets.map((preset) => (
-                    <div className="quick-saved-preset" key={preset.name}>
-                      <button
-                        type="button"
-                        className="ui-btn ui-btn-secondary ui-btn-sm"
-                        onClick={() =>
-                          onSettingsChange(
-                            pasteSettings(settings, preset.settings, groups),
-                          )
-                        }
-                      >
-                        {preset.name}
-                      </button>
-                      <button
-                        type="button"
-                        className="ui-btn ui-btn-ghost ui-btn-sm ui-btn-icon"
-                        aria-label={`Delete preset ${preset.name}`}
-                        onClick={() => {
-                          const next = savedPresets.filter(
-                            (p) => p.name !== preset.name,
-                          );
-                          try {
-                            localStorage.setItem(
-                              PRESET_STORAGE,
-                              JSON.stringify(next),
-                            );
-                            setSavedPresets(next);
-                          } catch {
-                            setNotice("Unable to remove preset");
-                          }
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
+                  <PresetManager
+                    settings={settings}
+                    onApply={(preset) =>
+                      onSettingsChange(pasteSettings(settings, preset, groups))
+                    }
+                    onNotice={setNotice}
+                  />
                   <small className="quick-hint">
-                    Exposure, warmth and crop stay individual unless selected
-                    above. Presets are saved on this device.
+                    Presets apply the groups selected above and are kept in
+                    the library, so backups include them.
                   </small>
+                </details>
+                <details className="quick-section">
+                  <summary>Versions</summary>
+                  <SnapshotList
+                    photoId={photo.id}
+                    settings={settings}
+                    onRestore={onSettingsChange}
+                    onNotice={setNotice}
+                  />
                 </details>
                 <details className="quick-section">
                   <summary>Noise reduction & upscale</summary>
@@ -1969,14 +1903,34 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            className="ui-btn ui-btn-ghost ui-btn-sm"
-            disabled={!queued.length}
-            onClick={props.onClearQueue}
-          >
-            Clear queue
-          </button>
+          <>
+            {props.job?.resumable ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn-secondary ui-btn-sm"
+                onClick={() => props.onResume(false)}
+              >
+                Resume export ({props.job.pending} left)
+              </button>
+            ) : null}
+            {props.job?.failed ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn-ghost ui-btn-sm"
+                onClick={() => props.onResume(true)}
+              >
+                Retry {props.job.failed} failed
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="ui-btn ui-btn-ghost ui-btn-sm"
+              disabled={!queued.length}
+              onClick={props.onClearQueue}
+            >
+              Clear queue
+            </button>
+          </>
         )}
         {props.job?.failures.length ? (
           <details>

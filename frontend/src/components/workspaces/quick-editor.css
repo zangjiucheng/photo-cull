@@ -614,3 +614,15 @@
   .quick-body { grid-template-columns: minmax(0, 1fr) 264px; }
   .quick-image-area { padding-inline: var(--space-5); }
 }
+
+/* Versions: saved recipes of the current photo. */
+.snapshot-row {
+  align-items: center;
+}
+.snapshot-row time {
+  flex: 0 0 auto;
+  padding: 0 var(--space-1);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}

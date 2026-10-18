@@ -161,6 +161,20 @@ export async function fetchExportEnhanceJob(jobId: string): Promise<ExportEnhanc
   return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}`, undefined, "Failed to load Enhance & Export job");
 }
 
+export async function listExportEnhanceJobs(workspaceId: string): Promise<ExportEnhanceJob[]> {
+  const payload = await requestJson<{ jobs: ExportEnhanceJob[] }>(`/api/export-enhance/jobs?workspace_id=${encodeURIComponent(workspaceId)}`, undefined, "Failed to load export history");
+  return payload.jobs;
+}
+
+/** Continue an interrupted or cancelled export, or (retryFailed) re-run only the photos that failed. */
+export async function resumeExportEnhanceJob(jobId: string, retryFailed = false): Promise<ExportEnhanceJob> {
+  return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ retry_failed: retryFailed })
+  }, "Failed to resume Enhance & Export job");
+}
+
 export async function cancelExportEnhanceJob(jobId: string): Promise<ExportEnhanceJob> {
   return requestJson<ExportEnhanceJob>(`/api/export-enhance/jobs/${encodeURIComponent(jobId)}/cancel`, {
     method: "POST"
@@ -271,3 +285,59 @@ export async function deletePhotos(photoIds: string[]): Promise<DeletePhotosPayl
 }
 
 export const apiInternals = { requestJson, requestBlob, parseError };
+
+export interface PhotoSnapshot {
+  id: string;
+  photoId: string;
+  name: string;
+  settings: ExportEnhanceSettings;
+  createdAt: number;
+}
+
+export interface EditingPreset {
+  id: string;
+  name: string;
+  settings: ExportEnhanceSettings;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const jsonInit = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body)
+});
+
+export async function listSnapshots(photoId: string): Promise<PhotoSnapshot[]> {
+  const payload = await requestJson<{ snapshots: PhotoSnapshot[] }>(`/api/photos/${encodeURIComponent(photoId)}/snapshots`, undefined, "Failed to load versions");
+  return payload.snapshots;
+}
+
+export function createSnapshot(photoId: string, name: string, settings: ExportEnhanceSettings): Promise<PhotoSnapshot> {
+  return requestJson<PhotoSnapshot>(`/api/photos/${encodeURIComponent(photoId)}/snapshots`, jsonInit("POST", { name, settings }), "Failed to save version");
+}
+
+export function renameSnapshot(snapshotId: string, name: string): Promise<PhotoSnapshot> {
+  return requestJson<PhotoSnapshot>(`/api/snapshots/${encodeURIComponent(snapshotId)}`, jsonInit("PATCH", { name }), "Failed to rename version");
+}
+
+export async function deleteSnapshot(snapshotId: string): Promise<void> {
+  await requestJson(`/api/snapshots/${encodeURIComponent(snapshotId)}`, { method: "DELETE" }, "Failed to delete version");
+}
+
+export async function listPresets(): Promise<EditingPreset[]> {
+  return (await requestJson<{ presets: EditingPreset[] }>("/api/presets", undefined, "Failed to load presets")).presets;
+}
+
+/** Saves one or several presets; an existing name is updated rather than duplicated. */
+export async function savePresets(presets: Array<{ name: string; settings: ExportEnhanceSettings }>): Promise<EditingPreset[]> {
+  return (await requestJson<{ presets: EditingPreset[] }>("/api/presets", jsonInit("POST", { presets }), "Failed to save presets")).presets;
+}
+
+export async function renamePreset(presetId: string, name: string): Promise<EditingPreset[]> {
+  return (await requestJson<{ presets: EditingPreset[] }>(`/api/presets/${encodeURIComponent(presetId)}`, jsonInit("PATCH", { name }), "Failed to rename preset")).presets;
+}
+
+export async function deletePreset(presetId: string): Promise<EditingPreset[]> {
+  return (await requestJson<{ presets: EditingPreset[] }>(`/api/presets/${encodeURIComponent(presetId)}`, { method: "DELETE" }, "Failed to delete preset")).presets;
+}

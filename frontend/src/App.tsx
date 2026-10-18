@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, listExportEnhanceJobs, resumeExportEnhanceJob, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -687,6 +687,33 @@ export default function App() {
     }
   }
 
+  async function onResumeExportEnhance(retryFailed: boolean) {
+    if (!exportEnhanceJob) return;
+    try {
+      setExportEnhanceJob(await resumeExportEnhanceJob(exportEnhanceJob.id, retryFailed));
+      updateStatus(retryFailed ? "Retrying failed exports..." : "Resuming Enhance & Export...", "busy");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to resume Enhance & Export", "error");
+    }
+  }
+
+  // After a restart, surface the last export if it was interrupted or left failures behind.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let cancelled = false;
+    void listExportEnhanceJobs(activeWorkspaceId)
+      .then((jobs) => {
+        const latest = jobs[0];
+        if (!cancelled && latest && (latest.resumable || latest.failed > 0 || ["queued", "running"].includes(latest.status))) {
+          setExportEnhanceJob((current) => current ?? latest);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId]);
+
   async function onCancelExportEnhance() {
     if (!exportEnhanceJob) return;
     try {
@@ -1239,6 +1266,7 @@ export default function App() {
         onOutputFolderChange={setExportEnhanceOutputFolder}
         onStart={() => void onStartExportEnhance()}
         onCancel={() => void onCancelExportEnhance()}
+        onResume={(retryFailed) => void onResumeExportEnhance(retryFailed)}
         onClearQueue={clearExportQueue}
       />
     );
