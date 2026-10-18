@@ -4,12 +4,12 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { compareVersions, normalizeAssetName, parseChecksums, selectChannelRelease, selectUpdateAsset } = require("./update-utils.cjs");
+const { compareVersions, normalizeAssetName, parseChecksums, selectChannelRelease, selectUpdateAsset, windowsInstallScript } = require("./update-utils.cjs");
 
 // Builds are not code signed, so Squirrel.Mac (electron-updater) cannot be used. The update package
 // is downloaded and checked against the published SHA256SUMS.txt, then installed once this process
-// exits: on macOS a small shell script swaps in the .app from the release zip; on Windows the NSIS
-// installer runs silently and relaunches the app.
+// exits: on macOS a small shell script swaps in the .app from the release zip; on Windows a
+// PowerShell script installs the release MSI silently (per user, no admin) and relaunches the app.
 const releaseRepo = "zangjiucheng/photo-cull";
 const releasesUrl = `https://api.github.com/repos/${releaseRepo}/releases?per_page=30`;
 const startupCheckDelayMs = 5000;
@@ -220,10 +220,23 @@ function scheduleInstall(relaunch) {
   }
   installScheduled = true;
   if (isWindows) {
-    // --updated keeps the installer quiet about the running app; --force-run relaunches it afterwards.
-    const args = ["/S", "--updated", ...(relaunch ? ["--force-run"] : [])];
-    spawn(pendingInstall.installerPath, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
-    writeUpdaterLog(`scheduled install of ${pendingInstall.version} (relaunch=${relaunch})`);
+    const installDir = path.dirname(process.execPath);
+    // Builds before the MSI switch were NSIS installs in the same folder; remove that registration first.
+    const uninstaller = path.join(installDir, `Uninstall ${app.getName()}.exe`);
+    const script = path.join(pendingInstall.stagingDir, "install-update.ps1");
+    fs.writeFileSync(script, windowsInstallScript(), "utf8");
+    const args = [
+      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
+      "-AppPid", String(process.pid),
+      "-Msi", pendingInstall.installerPath,
+      "-Log", path.join(app.getPath("userData"), "update-msi.log"),
+      "-Exe", process.execPath,
+      "-Relaunch", relaunch ? "1" : "0",
+      // Windows PowerShell drops empty -File arguments, so pass these only when there is an uninstaller.
+      ...(fs.existsSync(uninstaller) ? ["-Uninstaller", uninstaller, "-InstallDir", installDir] : []),
+    ];
+    spawn("powershell.exe", args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    writeUpdaterLog(`scheduled MSI install of ${pendingInstall.version} (relaunch=${relaunch})`);
     return;
   }
   const targetBundlePath = currentBundlePath();

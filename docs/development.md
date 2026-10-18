@@ -62,7 +62,7 @@ make package PYTHON=python3.11       # DMG + update zip (what the release workfl
 make package-dir PYTHON=python3.11   # unpacked app for local smoke tests
 ```
 
-On Windows (Git Bash or PowerShell), build the NSIS installer with npm directly:
+On Windows (Git Bash or PowerShell), build the MSI with npm directly (electron-builder fetches WiX itself):
 
 ```bash
 python -m venv .package-venv
@@ -81,7 +81,7 @@ Packaging creates a separate `.package-venv`, bundles the backend with PyInstall
 
 CI (`.github/workflows/ci.yml`) runs the backend tests, frontend tests, and a production build in a matrix on Ubuntu, macOS, and Windows for every push to `main` and every pull request.
 
-The release workflow (`.github/workflows/release.yml`) runs on `v*` tags. A matrix job builds each platform in parallel: it sets the app version from the tag, runs the tests, builds the macOS DMG and update zip or the Windows NSIS installer, and smoke-tests the bundled backend by starting it and calling its API. A final job collects every artifact, writes one `SHA256SUMS.txt`, and publishes the GitHub Release with generated notes. Pull requests that touch packaging run the same builds as a dry run without publishing. Installed apps pick up the new release through the in-app updater, which needs the platform's package and `SHA256SUMS.txt`.
+The release workflow (`.github/workflows/release.yml`) runs on `v*` tags. A matrix job builds each platform in parallel: it sets the app version from the tag, runs the tests, builds the macOS DMG and update zip or the Windows MSI, and smoke-tests the bundled backend by starting it and calling its API. A final job collects every artifact, writes one `SHA256SUMS.txt`, and publishes the GitHub Release with generated notes. Pull requests that touch packaging run the same builds as a dry run without publishing. Installed apps pick up the new release through the in-app updater, which needs the platform's package and `SHA256SUMS.txt`.
 
 ### Nightly builds
 

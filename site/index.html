@@ -46,7 +46,7 @@
           <a class="btn btn-primary" id="download" href="https://github.com/zangjiucheng/photo-cull/releases/latest">Download for macOS &amp; Windows</a>
           <a class="btn" href="https://github.com/zangjiucheng/photo-cull">View on GitHub</a>
         </div>
-        <p class="fineprint" id="download-note">macOS (Apple Silicon) DMG · Windows (x64) installer · updates in place from GitHub Releases</p>
+        <p class="fineprint" id="download-note">macOS (Apple Silicon) DMG · Windows (x64) MSI · updates in place from GitHub Releases</p>
       </div>
       <figure class="wrap shot shot-hero">
         <img src="assets/editor.webp" width="1440" height="900" fetchpriority="high" decoding="async"
@@ -164,7 +164,7 @@
         <div class="cols">
           <div>
             <h3>1. Download</h3>
-            <p>Get the latest build from the <a href="https://github.com/zangjiucheng/photo-cull/releases/latest">releases page</a>. On macOS (Apple Silicon), drag <strong>AI Photo Culling.app</strong> from the DMG into Applications. On Windows 10/11 (x64), run <strong>AI Photo Culling Setup.exe</strong>; it installs for your user without admin rights. Each release publishes <code>SHA256SUMS.txt</code>.</p>
+            <p>Get the latest build from the <a href="https://github.com/zangjiucheng/photo-cull/releases/latest">releases page</a>. On macOS (Apple Silicon), drag <strong>AI Photo Culling.app</strong> from the DMG into Applications. On Windows 10/11 (x64), double-click the <strong>.msi</strong>; it installs for your user without admin rights. Each release publishes <code>SHA256SUMS.txt</code>.</p>
           </div>
           <div>
             <h3>2. Allow it to open</h3>
@@ -218,7 +218,7 @@
 
       const builds = {
         mac: { label: "macOS", detail: "Apple Silicon · DMG", match: /arm64\.dmg$/i },
-        windows: { label: "Windows", detail: "Windows 10/11 (x64) · installer", match: /Setup.*\.exe$/i },
+        windows: { label: "Windows", detail: "Windows 10/11 (x64) · MSI", match: /\.msi$/i },
       };
       const other = os === "mac" ? "windows" : "mac";
       const button = document.getElementById("download");

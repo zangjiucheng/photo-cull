@@ -76,8 +76,7 @@ jobs:
             os: windows-latest
             backend: ai-culling-backend.exe
             artifacts: |
-              release/*.exe
-              release/*.exe.blockmap
+              release/*.msi
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -131,6 +130,26 @@ jobs:
             test -f "../release/win-unpacked/resources/vc-runtime/$dll" || { echo "missing $dll in the package"; exit 1; }
           done
 
+      # Installs the MSI exactly as the in-app updater does (same script, silent, per user), checks the
+      # app lands where the updater relaunches it from, then uninstalls.
+      - name: Install the MSI the way the updater does
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem release/*.msi | Select-Object -First 1).FullName
+          node -e "process.stdout.write(require('./frontend/electron/update-utils.cjs').windowsInstallScript())" | Set-Content -Encoding utf8 install-update.ps1
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\ai-photo-culling\AI Photo Culling.exe"
+          $log = Join-Path $env:RUNNER_TEMP "msi.log"
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File install-update.ps1 -AppPid 999999 -Msi $msi -Log $log -Exe $exe -Relaunch 0
+          Get-Content $log -Tail 2
+          if (-not (Test-Path -LiteralPath $exe)) {
+            Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs") -Directory | Select-Object FullName
+            throw "The MSI did not install the app at $exe"
+          }
+          Write-Host "installed: $exe"
+          Start-Process msiexec.exe -ArgumentList '/x', "`"$msi`"", '/qn' -Wait
+          if (Test-Path -LiteralPath $exe) { throw "Uninstalling the MSI left $exe behind" }
+
       - name: Smoke test the bundled backend
         run: |
           export FLASK_PORT=5099 DB_PATH="$RUNNER_TEMP/smoke.db" UPLOAD_FOLDER="$RUNNER_TEMP/uploads"
@@ -171,7 +190,7 @@ jobs:
 
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum *.dmg *.zip *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: sha256sum *.dmg *.zip *.msi > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - name: Write nightly notes
         if: needs.version.outputs.nightly == 'true'

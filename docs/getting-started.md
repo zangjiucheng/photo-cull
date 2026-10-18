@@ -20,9 +20,10 @@ Every release publishes the installers and a `SHA256SUMS.txt` you can check down
 
 ### Windows
 
-1. Download `AI.Photo.Culling.Setup.<version>.exe` from the [latest release](https://github.com/zangjiucheng/photo-cull/releases/latest) (check it with `certutil -hashfile <file>.exe SHA256` in Command Prompt).
-2. Run it. The installer installs for the current user only, needs no administrator rights, and adds Start menu and desktop shortcuts.
-3. Uninstall from **Settings → Apps → Installed apps**.
+1. Download `AI.Photo.Culling.<version>.x64.msi` from the [latest release](https://github.com/zangjiucheng/photo-cull/releases/latest) (check it with `certutil -hashfile <file>.msi SHA256` in Command Prompt).
+2. Double-click it. The MSI installs for the current user only, needs no administrator rights, adds Start menu and desktop shortcuts, and opens the app when it finishes.
+3. Uninstall from **Settings → Apps → Installed apps**. IT can deploy it silently with `msiexec /i <file>.msi /qn`.
+4. Nightly builds from before v0.4.0 used an `.exe` installer. The first update to an MSI build removes that install for you; your library and settings are kept.
 
 ## First launch and Gatekeeper (macOS)
 
@@ -43,7 +44,7 @@ Only do this for a copy you downloaded from this repository's Releases page.
 
 ## First launch and SmartScreen (Windows)
 
-The installer is not code signed yet, so Microsoft Defender SmartScreen may show "Windows protected your PC" the first time. Click **More info**, check that the file came from this repository's Releases page, then click **Run anyway**.
+The MSI is not code signed yet, so Microsoft Defender SmartScreen may show "Windows protected your PC" the first time. Click **More info**, check that the file came from this repository's Releases page, then click **Run anyway**.
 
 ## First run
 
@@ -64,7 +65,7 @@ The first time you open the app, a short guide walks through browsing, review, s
 - When an update is available you see its release notes and can choose **Update**, **Later**, or **Skip This Version**.
 - **Update** downloads the update for your platform and verifies it against `SHA256SUMS.txt`. Then choose **Restart Now** or **Install on Quit**.
   - macOS: the zip for your architecture replaces the app (the version inside is checked first; if replacing fails, the previous version is restored). This needs the app in a writable folder such as `/Applications`; when it runs from the DMG, the release page opens instead.
-  - Windows: the new installer runs silently after the app quits and starts the app again.
+  - Windows: the new MSI installs silently (per user, no admin) after the app quits, then the app starts again.
 - **Settings → Updates** chooses the channel: **Stable** (releases only) or **Nightly** (a build of the latest code each night; less tested, so back up your library first). It also shows the exact version, commit and build time, with **Copy Version** for bug reports. A nightly user switching back to Stable moves on at the next stable release.
 - Set `AI_CULLING_DISABLE_UPDATES=1` in the app's environment to turn update checks off.
 - v0.2.0 and earlier have no updater; install v0.2.1 or later manually once.

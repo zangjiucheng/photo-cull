@@ -15,7 +15,7 @@
     "package:dir": "npm run build && npm run backend:build && node scripts/package-electron.cjs --dir",
     "preview": "vite preview",
     "test": "vitest run",
-    "package:win": "npm run build && npm run backend:build && node scripts/package-electron.cjs --win nsis --x64"
+    "package:win": "npm run build && npm run backend:build && node scripts/package-electron.cjs --win msi --x64"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -78,7 +78,7 @@
       "icon": "icon-win.png",
       "target": [
         {
-          "target": "nsis",
+          "target": "msi",
           "arch": [
             "x64"
           ]
@@ -94,10 +94,14 @@
         }
       ]
     },
-    "nsis": {
+    "msi": {
       "oneClick": true,
       "perMachine": false,
-      "artifactName": "${productName} Setup ${version}.${ext}"
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "upgradeCode": "DF213409-AE4E-42C4-9CD2-E7A1AAF7845E",
+      "artifactName": "${productName} ${version} x64.${ext}"
     }
   }
 }

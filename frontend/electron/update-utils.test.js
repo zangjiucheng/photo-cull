@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { compareVersions, parseChecksums, selectChannelRelease, selectUpdateAsset, selectZipAsset } = require("./update-utils.cjs");
+const { compareVersions, parseChecksums, selectChannelRelease, selectUpdateAsset, selectZipAsset, windowsInstallScript } = require("./update-utils.cjs");
 
 describe("compareVersions", () => {
   it("orders semantic versions and ignores the tag prefix", () => {
@@ -75,17 +75,27 @@ describe("selectUpdateAsset", () => {
   const assets = [
     { name: "AI.Photo.Culling-0.4.0-arm64.dmg" },
     { name: "AI.Photo.Culling-0.4.0-arm64-mac.zip" },
-    { name: "AI.Photo.Culling.Setup.0.4.0.exe" },
-    { name: "AI.Photo.Culling.Setup.0.4.0.exe.blockmap" },
+    { name: "AI.Photo.Culling.0.4.0.x64.msi" },
   ];
 
   it("uses the NSIS installer on Windows and the zip on macOS", () => {
-    expect(selectUpdateAsset(assets, "win32", "x64")?.name).toBe("AI.Photo.Culling.Setup.0.4.0.exe");
+    expect(selectUpdateAsset(assets, "win32", "x64")?.name).toBe("AI.Photo.Culling.0.4.0.x64.msi");
     expect(selectUpdateAsset(assets, "darwin", "arm64")?.name).toBe("AI.Photo.Culling-0.4.0-arm64-mac.zip");
   });
 
   it("has nothing to offer on other platforms or without a package", () => {
     expect(selectUpdateAsset(assets, "linux", "x64")).toBeNull();
     expect(selectUpdateAsset([{ name: "AI.Photo.Culling-0.3.1-arm64-mac.zip" }], "win32", "x64")).toBeNull();
+  });
+});
+
+describe("windowsInstallScript", () => {
+  it("waits for the app, installs the MSI silently per user and relaunches", () => {
+    const script = windowsInstallScript();
+    expect(script).toMatch(/Wait-Process -Id \$AppPid/);
+    expect(script).toMatch(/msiexec\.exe' -ArgumentList '\/i'.*'\/qn', '\/norestart'/);
+    expect(script).toMatch(/if \(\$Relaunch -eq 1/);
+    // An older NSIS install of the same folder is removed before the MSI goes in.
+    expect(script.indexOf("$Uninstaller")).toBeLessThan(script.indexOf("msiexec.exe"));
   });
 });

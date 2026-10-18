@@ -69,10 +69,10 @@ function parseChecksums(text) {
   return checksums;
 }
 
-// macOS updates replace the .app from the release zip; Windows runs the NSIS installer silently.
+// macOS updates replace the .app from the release zip; Windows installs the release MSI silently.
 function selectUpdateAsset(assets, platform, arch) {
   if (platform === "win32") {
-    return (assets || []).find((asset) => /setup.*\.exe$/i.test(asset.name || "")) || null;
+    return (assets || []).find((asset) => /\.msi$/i.test(asset.name || "")) || null;
   }
   return platform === "darwin" ? selectZipAsset(assets, arch) : null;
 }
@@ -84,6 +84,24 @@ function selectZipAsset(assets, arch) {
     || null;
 }
 
+// PowerShell run detached on Windows once the app has quit: remove an older NSIS install of the
+// same app (it shared the install folder), install the MSI per user without UI, then relaunch.
+// msiexec's own "run after finish" only fires with UI, so the relaunch happens here.
+function windowsInstallScript() {
+  return [
+    "param([int]$AppPid, [string]$Msi, [string]$Log, [string]$Exe, [string]$Uninstaller, [string]$InstallDir, [int]$Relaunch)",
+    "Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue",
+    "if ($Uninstaller -and (Test-Path -LiteralPath $Uninstaller)) {",
+    "  Start-Process -FilePath $Uninstaller -ArgumentList '/S', \"_?=$InstallDir\" -Wait",
+    "  Remove-Item -LiteralPath $Uninstaller -Force -ErrorAction SilentlyContinue",
+    "}",
+    "$install = Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', \"`\"$Msi`\"\", '/qn', '/norestart', '/l*v', \"`\"$Log`\"\" -Wait -PassThru",
+    "Add-Content -LiteralPath $Log -Value \"msiexec exit code $($install.ExitCode)\"",
+    "if ($Relaunch -eq 1 -and (Test-Path -LiteralPath $Exe)) { Start-Process -FilePath $Exe }",
+    "",
+  ].join("\r\n");
+}
+
 module.exports = {
   compareVersions,
   normalizeAssetName,
@@ -91,4 +109,5 @@ module.exports = {
   selectChannelRelease,
   selectUpdateAsset,
   selectZipAsset,
+  windowsInstallScript,
 };

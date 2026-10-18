@@ -39,7 +39,7 @@
 Grab the latest build from [Releases](https://github.com/zangjiucheng/photo-cull/releases/latest):
 
 - **macOS** (Apple Silicon): open the DMG and drag the app into Applications.
-- **Windows** 10/11 (x64): run `AI Photo Culling Setup.exe`. It installs for your user, no admin rights needed.
+- **Windows** 10/11 (x64): double-click the `.msi`. It installs for your user, no admin rights needed.
 
 > [!NOTE]
 > Builds aren't code signed yet, so macOS Gatekeeper or Windows SmartScreen may warn on first launch. See [Getting started](docs/getting-started.md) for how to open the app.
@@ -71,4 +71,4 @@ make dev PYTHON="$PWD/.venv/bin/python"    # desktop app
 make test PYTHON="$PWD/.venv/bin/python"   # backend + frontend tests
 ```
 
-CI runs on Ubuntu, macOS and Windows. Pushing a `v*` tag builds the macOS DMG and the Windows installer and publishes a GitHub Release. See [Development](docs/development.md) for details and [Docker](docker/README.md) for the browser mode.
+CI runs on Ubuntu, macOS and Windows. Pushing a `v*` tag builds the macOS DMG and the Windows MSI and publishes a GitHub Release. See [Development](docs/development.md) for details and [Docker](docker/README.md) for the browser mode.
