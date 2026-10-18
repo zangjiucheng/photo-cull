@@ -290,6 +290,7 @@ class CacheBudget:
         self.max_bytes = max_bytes
         self.lock = threading.RLock()
         self.loaders = []
+        self.sequence = 0
 
     def trim(self):
         entries = [(loader, cache, key, value[0].nbytes if cache is loader._cache else value.nbytes)
@@ -340,7 +341,10 @@ class ImageLoader:
 
     def _touch(self, cache, key):
         cache.move_to_end(key)
-        self._used[(id(cache), key)] = time.monotonic_ns()
+        # Accesses can share one timer tick on Windows/Python 3.11. A shared sequence
+        # gives a strict order across both loaders while holding the budget lock.
+        self._budget.sequence += 1
+        self._used[(id(cache), key)] = self._budget.sequence
 
     def _limit(self, cache, capacity):
         while len(cache) > capacity:

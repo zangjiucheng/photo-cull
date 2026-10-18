@@ -364,6 +364,7 @@ def test_prefetch_warms_editor_caches(monkeypatch):
 
 
 def test_editor_and_export_share_resident_budget_with_one_oversized_exception(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_enhance.time, "monotonic_ns", lambda: 0)
     budget = export_enhance.CacheBudget(max_bytes=2400)
     editor, batch = export_enhance.ImageLoader(budget=budget), export_enhance.ImageLoader(budget=budget)
     rows = []
