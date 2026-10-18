@@ -285,10 +285,9 @@ def editing_base(photo_id):
     if photo is None:
         return error_response("Photo not found", 404)
     try:
-        image, _exif, _source = export_enhance.queue._loader.load(photo)
+        image = export_enhance.queue._loader.load_scaled(photo, 1600)
     except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
         return error_response(str(exc), 400)
-    image = editing.resize_float(image, 1600)
     return Response(image.astype("<f4").tobytes(), mimetype="application/octet-stream",
                     headers={"X-Image-Width": str(image.shape[1]), "X-Image-Height": str(image.shape[0]),
                              "Cache-Control": "no-store"})
@@ -300,10 +299,32 @@ def auto_adjustments(photo_id):
     if photo is None:
         return error_response("Photo not found", 404)
     try:
-        image, _exif, _source = export_enhance.queue._loader.load(photo)
+        small = export_enhance.queue._loader.load_scaled(photo, 512)
     except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
         return error_response(str(exc), 400)
-    return jsonify(editing.auto_adjustments(editing.resize_float(image, 512)))
+    return jsonify(editing.auto_adjustments(small))
+
+
+@bp.route("/photos/<photo_id>/prefetch", methods=["POST"])
+def prefetch_photo(photo_id):
+    photo = db.fetch_photo(photo_id)
+    if photo is None:
+        return error_response("Photo not found", 404)
+    export_enhance.queue.prefetch(photo)
+    return jsonify({"queued": True}), 202
+
+
+@bp.route("/photos/<photo_id>/style-pad", methods=["GET"])
+def style_pad(photo_id):
+    photo = db.fetch_photo(photo_id)
+    if photo is None:
+        return error_response("Photo not found", 404)
+    try:
+        small = export_enhance.queue._loader.load_scaled(photo, 512)
+    except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
+        return error_response(str(exc), 400)
+    masks = export_enhance.queue._masks.masks_for_row(photo, image=small)
+    return jsonify(editing.style_pad_vectors(small, masks))
 
 
 @bp.route("/export-enhance/style-masks", methods=["POST"])

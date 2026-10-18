@@ -30,17 +30,10 @@ interface BrowseWorkspaceProps {
 export function BrowseWorkspace(props: BrowseWorkspaceProps) {
   return (
     <div className="workspace-panel browse-workspace">
-      <div className="workspace-head">
-        <div>
-          <span className="panel-kicker">Browse</span>
-          <h2>Current Folder</h2>
-        </div>
-        <div className="workspace-actions">
-          <button className="link-button" onClick={props.onRemoveVisibleFromQueue}>Unqueue Visible</button>
-          <button className="link-button" onClick={props.onAddVisibleToQueue}>Add Visible to Queue</button>
-        </div>
-      </div>
-      <FilterBar {...props} visibleCount={props.photos.length} totalCount={props.folderPhotosCount} />
+      <FilterBar {...props} visibleCount={props.photos.length} totalCount={props.folderPhotosCount}>
+        <button className="link-button" onClick={props.onRemoveVisibleFromQueue}>Unqueue Visible</button>
+        <button className="link-button" onClick={props.onAddVisibleToQueue}>Add Visible to Queue</button>
+      </FilterBar>
       <div className="browse-content-scroll">
         <PhotoGrid
           photos={props.photos}

@@ -5,17 +5,20 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent,
 } from "react";
 import type {
   ExportEnhanceJob,
   ExportEnhanceSettings,
   Photo,
   PhotoStylePreset,
+  StylePad,
 } from "../../types";
 import { renderEditingPreview } from "../../api";
 import {
   adjustmentGroups,
   applyAuto,
+  applyPad,
   autoStrength,
   cloneSettings,
   defaultSettings,
@@ -23,6 +26,7 @@ import {
   pasteSettings,
   presets,
   quickKeys,
+  rebasePad,
   type AdjustmentGroup,
 } from "../../editing/recipe";
 import {
@@ -114,6 +118,85 @@ const thumbnailSettings = Object.fromEntries(
     },
   ]),
 );
+
+// Apple-style Tone (vertical) / Color (horizontal) pad. It moves the sliders below rather than
+// adding a hidden layer, so anything it does can be fine-tuned afterwards.
+function TonePad({
+  tone,
+  colour,
+  disabled,
+  onBegin,
+  onChange,
+  onEnd,
+}: {
+  tone: number;
+  colour: number;
+  disabled: boolean;
+  onBegin: () => void;
+  onChange: (tone: number, colour: number) => void;
+  onEnd: () => void;
+}) {
+  const move = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    onChange(1 - y * 2, x * 2 - 1);
+  };
+  return (
+    <div
+      className={`tone-pad${disabled ? " disabled" : ""}`}
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-label="Tone and color"
+      aria-disabled={disabled}
+      aria-valuetext={`Tone ${Math.round(tone * 100)}, Color ${Math.round(colour * 100)}`}
+      onPointerDown={(event) => {
+        if (disabled) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        onBegin();
+        move(event);
+      }}
+      onPointerMove={(event) => {
+        if (!disabled && event.buttons === 1) move(event);
+      }}
+      onPointerUp={onEnd}
+      onPointerCancel={onEnd}
+      onDoubleClick={() => {
+        if (disabled) return;
+        onBegin();
+        onChange(0, 0);
+        onEnd();
+      }}
+      onKeyDown={(event) => {
+        if (disabled) return;
+        const step = event.shiftKey ? 0.1 : 0.02;
+        const moves: Record<string, [number, number]> = {
+          ArrowUp: [step, 0],
+          ArrowDown: [-step, 0],
+          ArrowLeft: [0, -step],
+          ArrowRight: [0, step],
+        };
+        const delta = moves[event.key];
+        if (!delta) return;
+        event.preventDefault();
+        onBegin();
+        onChange(tone + delta[0], colour + delta[1]);
+        onEnd();
+      }}
+    >
+      <span className="tone-pad-axis horizontal" />
+      <span className="tone-pad-axis vertical" />
+      <span
+        className="tone-pad-dot"
+        style={{ left: `${(colour + 1) * 50}%`, top: `${(1 - tone) * 50}%` }}
+      />
+      <em className="tone-pad-label top">More Tone</em>
+      <em className="tone-pad-label bottom">Softer</em>
+      <em className="tone-pad-label left">Muted</em>
+      <em className="tone-pad-label right">Vivid</em>
+    </div>
+  );
+}
 
 function Slider({
   label,
@@ -345,6 +428,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   const [previewError, setPreviewError] = useState("");
   const [denoiseEngine, setDenoiseEngine] = useState("");
   const [autoBusy, setAutoBusy] = useState(false);
+  const [padVectors, setPadVectors] = useState<{
+    key: string;
+    vectors: StylePad["vectors"];
+  } | null>(null);
   const currentPhoto = useRef(photoKey);
   currentPhoto.current = photoKey;
   const latestSettings = useRef(settings);
@@ -408,6 +495,13 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   }, [photo?.id]);
 
   useEffect(() => {
+    // Keep the current frame visible in the filmstrip.
+    areaRef.current?.parentElement
+      ?.querySelector(".quick-filmstrip .active")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [photo?.id]);
+
+  useEffect(() => {
     if (!photo) return;
     const controller = new AbortController();
     setBaseError("");
@@ -416,12 +510,30 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
     setAutoBusy(false);
     loadEditingBase(photo.id, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted)
-          setBaseState({ key: photoKey, base: value });
+        if (controller.signal.aborted) return;
+        setBaseState({ key: photoKey, base: value });
+        // Develop the neighbours in the background so stepping through the filmstrip is instant.
+        const index = queued.findIndex((p) => p.id === photo.id);
+        for (const neighbour of [queued[index + 1], queued[index - 1]])
+          if (neighbour)
+            void fetch(
+              `/api/photos/${encodeURIComponent(neighbour.id)}/prefetch`,
+              { method: "POST" },
+            ).catch(() => undefined);
       })
       .catch((error) => {
         if (!controller.signal.aborted) setBaseError(error.message);
       });
+    setPadVectors(null);
+    fetch(`/api/photos/${encodeURIComponent(photo.id)}/style-pad`, {
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => {
+        if (!controller.signal.aborted && value)
+          setPadVectors({ key: photoKey, vectors: value as StylePad["vectors"] });
+      })
+      .catch(() => undefined);
     return () => controller.abort();
   }, [photoKey]); // Source edits and orientation invalidate the editing base.
 
@@ -491,7 +603,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   });
 
   const update = (key: SliderKey, value: number) =>
-    onSettingsChange({ ...settings, [key]: value, auto: null });
+    onSettingsChange(rebasePad({ ...settings, [key]: value, auto: null }));
   const slider = (key: SliderKey) => (
     <Slider
       key={key}
@@ -607,7 +719,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   return (
     <div className={`quick-editor ${props.isPreviewOpen ? "expanded" : ""}`}>
       <header className="quick-toolbar">
-        <div>
+        <div className="quick-toolbar-title">
           <strong>{photo?.name ?? "Edit photos"}</strong>
           <span>
             {queued.length
@@ -640,7 +752,8 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
           >
             Reset
           </Button>
-          <Button variant="outline" size="sm" onClick={props.onChooseFolder}>
+          <span className="quick-toolbar-sep" aria-hidden="true" />
+          <Button variant="ghost" size="sm" onClick={props.onChooseFolder}>
             Folder…
           </Button>
           <Button
@@ -667,6 +780,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <div className="quick-stage-tools">
                 <button
                   type="button"
+                  className="ui-btn ui-btn-ghost ui-btn-sm"
                   onPointerDown={(event) => {
                     event.currentTarget.setPointerCapture(event.pointerId);
                     setOriginal(true);
@@ -698,6 +812,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 </span>
                 <button
                   type="button"
+                  className="ui-btn ui-btn-ghost ui-btn-sm"
                   onClick={() =>
                     props.onPreviewOpenChange(!props.isPreviewOpen)
                   }
@@ -741,6 +856,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                   controls to start a neutral edit. Undo restores this recipe.
                 </p>
                 <Button
+                  variant="outline"
                   size="sm"
                   onClick={() =>
                     onSettingsChange(cloneSettings(defaultSettings))
@@ -754,14 +870,15 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 <section className="quick-section">
                   <div className="quick-section-title">
                     <h2>Adjust</h2>
-                    <button
-                      type="button"
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="quick-auto"
                       disabled={autoBusy || !base}
                       onClick={() => void auto()}
                     >
                       {autoBusy ? "Analyzing…" : "✧ Auto"}
-                    </button>
+                    </Button>
                   </div>
                   {settings.auto ? (
                     <Slider
@@ -771,13 +888,33 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       onBegin={onBeginAdjustment}
                       onEnd={onEndAdjustment}
                       onChange={(value) =>
-                        onSettingsChange(autoStrength(settings, value))
+                        onSettingsChange(rebasePad(autoStrength(settings, value)))
                       }
                     />
                   ) : null}
+                  <TonePad
+                    tone={settings.pad?.tone ?? 0}
+                    colour={settings.pad?.colour ?? 0}
+                    disabled={!settings.pad && padVectors?.key !== photoKey}
+                    onBegin={onBeginAdjustment}
+                    onEnd={onEndAdjustment}
+                    onChange={(tone, colour) =>
+                      onSettingsChange(
+                        applyPad(
+                          settings,
+                          tone,
+                          colour,
+                          padVectors?.key === photoKey
+                            ? padVectors.vectors
+                            : undefined,
+                        ),
+                      )
+                    }
+                  />
                   {quickKeys.map(slider)}
                   <small className="quick-hint">
-                    Double-click a slider to reset it.
+                    Drag the pad, then fine-tune any slider. Double-click to
+                    reset.
                   </small>
                 </section>
                 <details className="quick-section" open>
@@ -869,6 +1006,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     ].map(([name, ratio]) => (
                       <button
                         type="button"
+                        className="ui-btn ui-btn-secondary ui-btn-sm"
                         key={name}
                         onClick={() => fitRatio(Number(ratio))}
                       >
@@ -962,6 +1100,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                   />
                   <button
                     type="button"
+                    className="ui-btn ui-btn-secondary ui-btn-sm"
                     onClick={() => updateCrop({ ...defaultSettings.crop })}
                   >
                     Reset crop
@@ -992,6 +1131,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                   <div className="quick-button-row">
                     <button
                       type="button"
+                      className="ui-btn ui-btn-secondary ui-btn-sm"
                       onClick={() => {
                         setCopy(cloneSettings(settings));
                         setNotice("Adjustments copied");
@@ -1001,6 +1141,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     </button>
                     <button
                       type="button"
+                      className="ui-btn ui-btn-secondary ui-btn-sm"
                       disabled={!copy || !groups.length}
                       onClick={() =>
                         copy &&
@@ -1011,6 +1152,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     </button>
                     <button
                       type="button"
+                      className="ui-btn ui-btn-secondary ui-btn-sm"
                       disabled={queued.length < 2 || !groups.length}
                       onClick={() => props.onApplyToQueued(settings, groups)}
                     >
@@ -1019,6 +1161,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                   </div>
                   <div className="quick-preset-save">
                     <input
+                      className="ui-input"
                       aria-label="Preset name"
                       placeholder="Name this look"
                       value={presetName}
@@ -1026,6 +1169,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     />
                     <button
                       type="button"
+                      className="ui-btn ui-btn-secondary ui-btn-sm"
                       disabled={!presetName.trim()}
                       onClick={savePreset}
                     >
@@ -1036,6 +1180,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     <div className="quick-saved-preset" key={preset.name}>
                       <button
                         type="button"
+                        className="ui-btn ui-btn-secondary ui-btn-sm"
                         onClick={() =>
                           onSettingsChange(
                             pasteSettings(settings, preset.settings, groups),
@@ -1046,6 +1191,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       </button>
                       <button
                         type="button"
+                        className="ui-btn ui-btn-ghost ui-btn-sm ui-btn-icon"
                         aria-label={`Delete preset ${preset.name}`}
                         onClick={() => {
                           const next = savedPresets.filter(
@@ -1087,6 +1233,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     Noise reduction
                   </label>
                   <select
+                    className="ui-select"
                     aria-label="Noise reduction strength"
                     value={settings.aiDenoiseStrength}
                     disabled={!settings.aiDenoise}
@@ -1128,6 +1275,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     Real-ESRGAN upscale
                   </label>
                   <select
+                    className="ui-select"
                     aria-label="Upscale factor"
                     disabled={!settings.upscale}
                     value={settings.upscaleScale}
@@ -1153,6 +1301,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <div className="quick-button-row">
                 <button
                   type="button"
+                  className="ui-btn ui-btn-secondary ui-btn-sm"
                   onClick={() =>
                     onSettingsChange({
                       ...settings,
@@ -1167,6 +1316,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  className="ui-btn ui-btn-secondary ui-btn-sm"
                   onClick={() =>
                     onSettingsChange({
                       ...settings,
@@ -1182,6 +1332,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <label className="quick-form-field">
                 Format
                 <select
+                  className="ui-select"
                   value={settings.outputFormat}
                   onChange={(event) =>
                     onSettingsChange({
@@ -1213,6 +1364,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <label className="quick-form-field">
                 Longest edge
                 <select
+                  className="ui-select"
                   value={settings.resizeMaxEdge ?? "original"}
                   onChange={(event) =>
                     onSettingsChange({
@@ -1239,6 +1391,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <label className="quick-form-field">
                 Folder
                 <input
+                  className="ui-input"
                   value={props.outputFolder}
                   placeholder="Choose a destination…"
                   onChange={(event) =>
@@ -1267,7 +1420,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <span role="alert">
                 {props.saveError} · Keep this window open.
               </span>{" "}
-              <button type="button" onClick={props.onRetrySave}>
+              <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={props.onRetrySave}>
                 Retry save
               </button>
             </>
@@ -1291,13 +1444,14 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         {running ? (
           <>
             <progress max={100} value={progress} />
-            <button type="button" onClick={props.onCancel}>
+            <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={props.onCancel}>
               Cancel export
             </button>
           </>
         ) : (
           <button
             type="button"
+            className="ui-btn ui-btn-ghost ui-btn-sm"
             disabled={!queued.length}
             onClick={props.onClearQueue}
           >

@@ -14,18 +14,23 @@ export function DebugWorkspace({
   onRefresh,
   onInstallAiRuntime
 }: DebugWorkspaceProps) {
+  const isError = aiRuntimeStatus?.state === "error";
   const runtimeMessage = aiRuntimeStatus
-    ? aiRuntimeStatus.state === "error" ? aiRuntimeStatus.error || aiRuntimeStatus.message : aiRuntimeStatus.detail || aiRuntimeStatus.message
+    ? isError ? aiRuntimeStatus.error || aiRuntimeStatus.message : aiRuntimeStatus.detail || aiRuntimeStatus.message
     : "AI Runtime status is unavailable.";
+
+  const rows: Array<{ label: string; value: string; on: boolean }> = [
+    { label: "Status", value: aiRuntimeStatus?.state ?? "unavailable", on: aiRuntimeStatus?.state === "installed" },
+    { label: "Installed", value: aiRuntimeStatus?.installed ? "Yes" : "No", on: Boolean(aiRuntimeStatus?.installed) },
+    { label: "Using", value: aiRuntimeStatus?.using ? "Yes" : "No", on: Boolean(aiRuntimeStatus?.using) },
+    { label: "Installing", value: aiRuntimeStatus?.installing ? "Yes" : "No", on: Boolean(aiRuntimeStatus?.installing) }
+  ];
 
   return (
     <div className="workspace-panel debug-workspace">
-      <section className="debug-panel">
-        <div className="debug-panel-head">
-          <div>
-            <span className="panel-kicker">Runtime</span>
-            <strong>AI Runtime</strong>
-          </div>
+      <section className="debug-section">
+        <div className="debug-section-head">
+          <h2>AI Runtime</h2>
           <div className="debug-actions">
             <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>
               {isRefreshing ? "Refreshing" : "Refresh"}
@@ -47,36 +52,24 @@ export function DebugWorkspace({
           </div>
         </div>
 
-        <div className="debug-runtime-grid">
-          <div>
-            <span>Status</span>
-            <strong>{aiRuntimeStatus?.state ?? "unavailable"}</strong>
-          </div>
-          <div>
-            <span>Installed</span>
-            <strong>{aiRuntimeStatus?.installed ? "Yes" : "No"}</strong>
-          </div>
-          <div>
-            <span>Using</span>
-            <strong>{aiRuntimeStatus?.using ? "Yes" : "No"}</strong>
-          </div>
-          <div>
-            <span>Installing</span>
-            <strong>{aiRuntimeStatus?.installing ? "Yes" : "No"}</strong>
-          </div>
-        </div>
+        <dl className="debug-status-list">
+          {rows.map((row) => (
+            <div key={row.label} className={`debug-status-row${row.label === "Status" && isError ? " error" : ""}`}>
+              <dt>{row.label}</dt>
+              <dd>
+                <span className={`debug-dot${row.on ? " on" : ""}`} aria-hidden="true" />
+                {row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
 
-        <div className={`debug-message ${aiRuntimeStatus?.state === "error" ? "error" : ""}`.trim()}>
-          {runtimeMessage}
-        </div>
+        <p className={`debug-message${isError ? " error" : ""}`}>{runtimeMessage}</p>
       </section>
 
-      <section className="debug-panel">
-        <div className="debug-panel-head">
-          <div>
-            <span className="panel-kicker">Background Log</span>
-            <strong>AI Runtime Install Log</strong>
-          </div>
+      <section className="debug-section">
+        <div className="debug-section-head">
+          <h2>AI Runtime Install Log</h2>
         </div>
         <div className="debug-log-path">{aiRuntimeStatus?.logPath || "No log path available."}</div>
         <pre className="debug-log">{aiRuntimeStatus?.logTail?.length ? aiRuntimeStatus.logTail.join("\n") : "No install log yet."}</pre>

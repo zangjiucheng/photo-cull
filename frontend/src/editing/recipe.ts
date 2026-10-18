@@ -1,4 +1,4 @@
-import type { ExportEnhanceSettings } from "../types";
+import type { ExportEnhanceSettings, StylePad } from "../types";
 import presets from "../../../server/editing_presets.json";
 
 export { presets };
@@ -33,6 +33,7 @@ export const defaultSettings: ExportEnhanceSettings = {
   resizeMaxEdge: null,
   crop: { x: 0, y: 0, width: 1, height: 1, angle: 0 },
   auto: null,
+  pad: null,
   photoStyle: { preset: "standard", tone: 0, colour: 0, palette: 100 },
 };
 
@@ -106,7 +107,67 @@ export function applyAuto(
           ),
     ]),
   );
-  return autoStrength({ ...before, auto: { base, target, strength: 1 } }, 1);
+  return rebasePad(
+    autoStrength({ ...before, auto: { base, target, strength: 1 } }, 1),
+  );
+}
+
+export const padKeys = [
+  "contrast",
+  "blackPoint",
+  "shadows",
+  "highlights",
+  "brilliance",
+  "vibrance",
+  "saturation",
+] as const;
+
+function padOffset(pad: StylePad, key: string) {
+  const along = (axis: "tone" | "colour", amount: number) =>
+    amount >= 0
+      ? (pad.vectors[axis].up[key] ?? 0) * amount
+      : (pad.vectors[axis].down[key] ?? 0) * -amount;
+  return along("tone", pad.tone) + along("colour", pad.colour);
+}
+
+// The Tone/Color pad drives the regular sliders along per-photo directions from the server, so
+// every result stays editable. Starting the pad captures the current slider values as its origin.
+export function applyPad(
+  settings: ExportEnhanceSettings,
+  tone: number,
+  colour: number,
+  vectors?: StylePad["vectors"],
+) {
+  const current = settings.pad;
+  if (!current && !vectors) return settings;
+  const pad: StylePad = {
+    base: current?.base ?? Object.fromEntries(padKeys.map((k) => [k, settings[k]])),
+    vectors: current?.vectors ?? vectors!,
+    tone: Math.max(-1, Math.min(1, tone)),
+    colour: Math.max(-1, Math.min(1, colour)),
+  };
+  const next = cloneSettings(settings);
+  for (const key of padKeys)
+    next[key] = Math.max(-1, Math.min(1, pad.base[key] + padOffset(pad, key)));
+  next.pad = pad;
+  next.auto = null;
+  return next;
+}
+
+// After a slider or auto change, move the pad origin so the dot keeps its position and further
+// pad drags continue from the edited values instead of snapping them back.
+export function rebasePad(settings: ExportEnhanceSettings) {
+  if (!settings.pad) return settings;
+  const pad = settings.pad;
+  return {
+    ...settings,
+    pad: {
+      ...pad,
+      base: Object.fromEntries(
+        padKeys.map((k) => [k, settings[k] - padOffset(pad, k)]),
+      ),
+    },
+  };
 }
 
 export const adjustmentGroups = {
@@ -145,5 +206,5 @@ export function pasteSettings(
       .flatMap((group) => adjustmentGroups[group])
       .map((key) => [key, structuredClone(source[key])]),
   );
-  return { ...copy, ...values, auto: null, recipeVersion: 2 as const };
+  return { ...copy, ...values, auto: null, pad: null, recipeVersion: 2 as const };
 }

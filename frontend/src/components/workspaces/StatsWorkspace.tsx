@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import type { LibraryFolder } from "../../types";
 
 interface StatsWorkspaceProps {
@@ -17,6 +16,10 @@ interface StatsWorkspaceProps {
   processingProgress: number;
 }
 
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value || 0));
+}
+
 export function StatsWorkspace({
   activeFolder,
   totalPhotos,
@@ -32,42 +35,69 @@ export function StatsWorkspace({
   reviewRate,
   processingProgress
 }: StatsWorkspaceProps) {
+  const figures: Array<{ label: string; value: number | string; note: string }> = [
+    { label: "Visible", value: visibleCount, note: "after filters" },
+    { label: "Folder", value: folderPhotosCount, note: "current scope" },
+    { label: "Export Queue", value: exportQueueCount, note: "explicit picks" },
+    { label: "4+ Stars", value: fourPlusCount, note: "top rated" },
+    { label: "In Queue", value: processingInFlight, note: "still scoring" }
+  ];
+
+  const bars: Array<{ label: string; value: number; detail: string; progressbar?: boolean }> = [
+    { label: "Filter retention", value: keepRate, detail: `${visibleCount} of ${folderPhotosCount} visible` },
+    {
+      label: "Background scoring",
+      value: processingProgress,
+      detail: `${completedCount}/${processingTotal} completed · ${processingInFlight} in queue`,
+      progressbar: true
+    }
+  ];
+
   return (
     <div className="workspace-panel stats-workspace">
-      <div className="workspace-head">
-        <div>
-          <span className="panel-kicker">Stats</span>
-          <h2>{activeFolder?.path || "All Photos"}</h2>
-        </div>
-      </div>
-      <section className="stats-hero inline-stats-hero">
-        <div className="stats-hero-copy">
-          <span className="stats-eyebrow">Rating coverage</span>
-          <div className="stats-hero-value"><strong>{reviewRate}%</strong><span>{ratedCount}/{totalPhotos || 0} frames rated</span></div>
-          <p>{fourPlusCount} photos are 4+ stars. {exportQueueCount} photos are in the explicit export queue.</p>
-        </div>
-        <div className="stats-ring" style={{ "--ring-value": reviewRate * 3.6 } as CSSProperties} aria-hidden="true">
-          <div className="stats-ring-inner"><span>Rated</span><strong>{reviewRate}%</strong></div>
+      <header className="stats-head">
+        <h2 title={activeFolder?.path || "All Photos"}>{activeFolder?.path || "All Photos"}</h2>
+      </header>
+
+      <section className="stats-lead" aria-label="Rating coverage">
+        <strong className="stats-lead-value">{reviewRate}%</strong>
+        <div className="stats-lead-copy">
+          <span>{ratedCount}/{totalPhotos || 0} frames rated</span>
+          <span>{fourPlusCount} photos are 4+ stars. {exportQueueCount} photos are in the explicit export queue.</span>
         </div>
       </section>
-      <div className="stats-grid">
-        <article className="mini-stat mini-stat-accent"><span>Visible</span><strong>{visibleCount}</strong><small>after filters</small></article>
-        <article className="mini-stat"><span>Folder</span><strong>{folderPhotosCount}</strong><small>current scope</small></article>
-        <article className="mini-stat"><span>Export Queue</span><strong>{exportQueueCount}</strong><small>explicit picks</small></article>
-        <article className="mini-stat"><span>In Queue</span><strong>{processingInFlight}</strong><small>still scoring</small></article>
-      </div>
-      <section className="stats-panel">
-        <div className="stats-progress-group">
-          <div className="progress-head"><span>Filter retention</span><span>{keepRate}%</span></div>
-          <div className="progress progress-retention"><span style={{ width: `${keepRate}%` }} /></div>
-        </div>
-        <div className="stats-progress-group">
-          <div className="progress-head"><span>Background scoring</span><span>{processingProgress}%</span></div>
-          <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={processingProgress}>
-            <span style={{ width: `${processingProgress}%` }} />
+
+      <dl className="stats-figures">
+        {figures.map((figure) => (
+          <div key={figure.label} className="stats-figure">
+            <dt>{figure.label}</dt>
+            <dd>{figure.value}</dd>
+            <small>{figure.note}</small>
           </div>
-        </div>
-        <div className="progress-meta"><span>{completedCount}/{processingTotal} completed</span><span>{processingInFlight} in queue</span></div>
+        ))}
+      </dl>
+
+      <section className="stats-bars">
+        {bars.map((bar) => {
+          const percent = clampPercent(bar.value);
+          return (
+            <div key={bar.label} className="stats-bar">
+              <div className="stats-bar-head">
+                <span>{bar.label}</span>
+                <span className="stats-bar-value">{bar.value}%</span>
+              </div>
+              <div
+                className="stats-bar-track"
+                {...(bar.progressbar
+                  ? { role: "progressbar", "aria-label": bar.label, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": bar.value }
+                  : { "aria-hidden": true })}
+              >
+                <span style={{ width: `${percent}%` }} />
+              </div>
+              <small>{bar.detail}</small>
+            </div>
+          );
+        })}
       </section>
     </div>
   );

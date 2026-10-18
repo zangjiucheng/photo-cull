@@ -9,6 +9,8 @@ interface FolderNavigatorProps {
   activePhotoId: string | null;
   onSelectFolder: (path: string) => void;
   onSelectPhoto: (id: string) => void;
+  /** Show the folder photos as a compact list (off where the main view already shows them). */
+  showPhotos?: boolean;
 }
 
 interface FolderTreeNode {
@@ -89,17 +91,11 @@ function findNode(nodes: FolderTreeNode[], path: string): FolderTreeNode | null 
   return null;
 }
 
-function currentFolderName(activeFolderPath: string): string {
-  if (!activeFolderPath) return "All Photos";
-  const parts = activeFolderPath.split("/").filter(Boolean);
-  return parts[parts.length - 1] || "All Photos";
-}
-
 function fileStatusLabel(photo: Photo): string {
-  if (photo.status === "pending") return "Queued";
+  if (photo.status === "pending") return "Pending";
   if (photo.status === "processing") return "Scoring";
   if (photo.status === "error") return "Error";
-  return photo.rating ? `${photo.rating} star${photo.rating === 1 ? "" : "s"}` : "Photo";
+  return photo.rating ? "★".repeat(photo.rating) : "";
 }
 
 export function FolderNavigator({
@@ -108,18 +104,18 @@ export function FolderNavigator({
   activeFolderPath,
   activePhotoId,
   onSelectFolder,
-  onSelectPhoto
+  onSelectPhoto,
+  showPhotos = true
 }: FolderNavigatorProps) {
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
   const childFolders = useMemo(() => findNode(folderTree, activeFolderPath)?.children ?? [], [activeFolderPath, folderTree]);
 
+  const visiblePhotos = showPhotos ? photos : [];
+
   return (
     <div className="folder-navigator">
-      <div className="side-panel-head">
-        <div>
-          <span className="panel-kicker">Folders</span>
-          <strong>{currentFolderName(activeFolderPath)}</strong>
-        </div>
+      <div className="side-section-head">
+        <span className="panel-kicker">Folders</span>
       </div>
       <div className="folder-path-row" role="navigation" aria-label="Folder path">
         <button className={`path-link ${activeFolderPath === "" ? "active" : ""}`.trim()} onClick={() => onSelectFolder("")}>
@@ -137,13 +133,14 @@ export function FolderNavigator({
           );
         })}
       </div>
+      {showPhotos || childFolders.length ? (
       <section className="folder-browser-panel">
-        <div className="folder-browser-head">
-          <span>Library</span>
-          <span>{childFolders.length + photos.length} item(s)</span>
+        <div className="folder-browser-head side-section-head">
+          <span className="panel-kicker">{showPhotos ? "Library" : "Subfolders"}</span>
+          <span className="folder-browser-count">{childFolders.length + visiblePhotos.length}</span>
         </div>
         <ScrollArea className="folder-grid-scroll">
-          {childFolders.length || photos.length ? (
+          {childFolders.length || visiblePhotos.length ? (
             <div className="folder-item-grid" role="list" aria-label="Folders and files">
               {childFolders.map((folder) => (
                 <button
@@ -152,15 +149,14 @@ export function FolderNavigator({
                   onClick={() => onSelectFolder(folder.path)}
                   role="listitem"
                 >
-                  <span className="folder-tile-thumb" aria-hidden="true">
-                    <span className="folder-tile-tab" />
-                    <span className="folder-tile-body" />
-                  </span>
+                  <svg className="folder-tile-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+                    <path d="M1.5 4.5a1 1 0 0 1 1-1h3.6l1.4 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" strokeWidth="1.2" />
+                  </svg>
                   <span className="folder-file-name" title={folder.name}>{folder.name}</span>
-                  <span className="folder-file-meta">{folder.count} item(s)</span>
+                  <span className="folder-file-meta">{folder.count}</span>
                 </button>
               ))}
-              {photos.map((photo) => {
+              {visiblePhotos.map((photo) => {
                 const isActive = activePhotoId === photo.id;
                 return (
                   <button
@@ -185,6 +181,7 @@ export function FolderNavigator({
           )}
         </ScrollArea>
       </section>
+      ) : null}
     </div>
   );
 }

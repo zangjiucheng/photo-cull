@@ -1,0 +1,270 @@
+/* Views: Stats and Debug workspaces. Flat black, hairline-separated, tabular numbers. */
+
+.stats-workspace,
+.debug-workspace {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  max-width: 960px;
+  padding: var(--space-5);
+}
+
+.stats-workspace {
+  container-type: inline-size;
+}
+
+.stats-workspace h2,
+.debug-workspace h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+/* ---------- Stats ---------- */
+
+.stats-head h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+}
+
+.stats-lead-value {
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.stats-lead-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-lead-copy span + span {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.stats-figures {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.stats-figure {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-4) var(--space-4) var(--space-4) 0;
+}
+
+.stats-figure + .stats-figure {
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--line);
+}
+
+/* Narrow content column: 3 + 2 grid, hairlines between rows and columns. */
+@container (max-width: 640px) {
+  .stats-figures {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stats-figure:nth-child(3n + 1) {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .stats-figure:nth-child(n + 4) {
+    border-top: 1px solid var(--line);
+  }
+}
+
+.stats-figure dt {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stats-figure dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.stats-figure small {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-bars {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.stats-bar {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.stats-bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-2);
+  font-size: var(--fs);
+}
+
+.stats-bar-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-bar-track {
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--line-strong);
+}
+
+.stats-bar-track span {
+  display: block;
+  height: 100%;
+  background: var(--text);
+  transition: width 0.3s ease;
+}
+
+.stats-bar small {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Debug ---------- */
+
+.debug-section {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.debug-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.debug-status-list {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.debug-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: calc(var(--control-h) + var(--space-1));
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs);
+}
+
+.debug-status-row dt {
+  color: var(--text-2);
+}
+
+.debug-status-row dd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text);
+}
+
+.debug-status-row.error dd {
+  color: var(--danger);
+}
+
+.debug-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.debug-dot.on {
+  background: var(--text);
+}
+
+.debug-status-row.error .debug-dot {
+  background: var(--danger);
+}
+
+.debug-message {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.debug-message.error {
+  color: var(--danger);
+}
+
+.debug-log-path {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.debug-log {
+  min-height: 160px;
+  max-height: 420px;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

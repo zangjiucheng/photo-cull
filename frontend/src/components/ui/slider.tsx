@@ -5,7 +5,7 @@ export function Slider({ className, ...props }: InputHTMLAttributes<HTMLInputEle
   return (
     <input
       type="range"
-      className={cn("w-full accent-slate-900", className)}
+      className={cn("ui-range", className)}
       {...props}
     />
   );

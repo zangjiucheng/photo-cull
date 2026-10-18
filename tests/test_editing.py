@@ -155,3 +155,32 @@ def test_auto_preserves_dark_scene_and_never_rebalances_sunset():
     sunset = editing.auto_adjustments(np.full((32, 32, 3), [.8, .35, .1], np.float32))
     assert night["exposure"] == 0 and night["shadows"] <= .05
     assert sunset["temperature"] == 0
+
+
+def test_style_pad_vectors_adapt_to_the_photo():
+    rng = np.random.default_rng(7)
+    flat = (rng.random((32, 32, 3), dtype=np.float32) * .3 + .35)
+    crushed = flat.copy(); crushed[:12] = 0.0
+    bright = flat.copy(); bright[:8] = 1.0
+    open_shadows = editing.style_pad_vectors(flat)["tone"]["up"]
+    assert open_shadows["contrast"] > 0 and open_shadows["shadows"] < 0
+    assert editing.style_pad_vectors(crushed)["tone"]["up"]["shadows"] == 0
+    assert editing.style_pad_vectors(bright)["tone"]["up"]["highlights"] < 0
+    skin = np.zeros((32, 32, 4), np.float32); skin[..., 0] = 1
+    vivid = editing.style_pad_vectors(flat)["colour"]["up"]
+    assert editing.style_pad_vectors(flat, skin)["colour"]["up"]["saturation"] < vivid["saturation"]
+    for side in ("up", "down"):
+        assert set(editing.style_pad_vectors(flat)["tone"][side]) <= set(editing.PAD_KEYS)
+
+
+def test_pad_state_roundtrips_and_clamps():
+    vectors = editing.style_pad_vectors(np.full((8, 8, 3), .5, np.float32))
+    raw = {"recipeVersion": 2, "contrast": .2,
+           "pad": {"tone": 3, "colour": -.4, "base": {"contrast": 0}, "vectors": vectors}}
+    parsed = export_enhance.parse_settings(raw)
+    assert parsed.pad["tone"] == 1 and parsed.pad["colour"] == -.4
+    assert parsed.pad["base"]["saturation"] == 0
+    again = export_enhance.parse_settings(export_enhance.serialize_settings(parsed))
+    assert again.pad == parsed.pad
+    with pytest.raises(export_enhance.ExportEnhanceError):
+        export_enhance.parse_settings({"recipeVersion": 2, "pad": {"tone": 0}})

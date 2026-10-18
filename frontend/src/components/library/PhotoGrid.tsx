@@ -1,6 +1,4 @@
 import type { Photo, ViewMode } from "../../types";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { useState } from "react";
 
 interface PhotoGridProps {
@@ -27,7 +25,7 @@ function scoreTone(score: number): string {
 }
 
 function scoreLabel(photo: Photo): string {
-  if (photo.status === "pending") return "Queued";
+  if (photo.status === "pending") return "Pending";
   if (photo.status === "processing") return "Scoring";
   if (photo.status === "error") return "Error";
   return `Score ${photo.aiScore}`;
@@ -56,7 +54,7 @@ export function PhotoGrid({
         return (
           <article
             key={photo.id}
-            className={`photo-card ${isActive ? "active" : ""}`.trim()}
+            className={`photo-card ${isActive ? "active" : ""} ${isQueued ? "queued" : ""}`.trim()}
             data-photo-id={photo.id}
             role="button"
             tabIndex={0}
@@ -70,16 +68,29 @@ export function PhotoGrid({
           >
             <div className="thumb">
               <img src={photo.url} alt={photo.name} loading="lazy" />
+              {photo.status !== "done" && (
+                <span className={`thumb-status ${photo.status}`}>{scoreLabel(photo)}</span>
+              )}
+              <button
+                type="button"
+                className={`queue-button ${isQueued ? "queued" : ""}`.trim()}
+                aria-pressed={isQueued}
+                title={isQueued ? "Remove from export queue" : "Add to export queue"}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleExportQueue(photo.id);
+                }}
+              >
+                {isQueued ? "In Queue" : "Add Queue"}
+              </button>
             </div>
             <div className="meta">
-              <div className="badges">
-                {rating > 0 && <Badge variant="success">{rating} ★</Badge>}
-                {isQueued && <Badge variant="secondary">Queued</Badge>}
-                <Badge variant={photo.status === "error" ? "danger" : "outline"} className={photo.status === "done" ? scoreTone(photo.aiScore) : ""}>
-                  {scoreLabel(photo)}
-                </Badge>
+              <div className="meta-row meta-title">
+                <span className="name" title={photo.name}>{photo.name}</span>
+                {photo.status === "done" && (
+                  <span className={`score ${scoreTone(photo.aiScore)}`} title={scoreLabel(photo)}>{photo.aiScore}</span>
+                )}
               </div>
-              <div className="name" title={photo.name}>{photo.name}</div>
               <div className="meta-row">
                 <div className="star-rating star-rating-compact" onMouseLeave={() => setHoverRating(null)}>
                   {[1, 2, 3, 4, 5].map((star) => (
@@ -100,22 +111,12 @@ export function PhotoGrid({
                     </button>
                   ))}
                 </div>
+                {isQueued && <span className="queued-flag">Queued</span>}
               </div>
               <div className="file-extra">
                 <span>{formatBytes(photo.size)}</span>
                 <span>{new Date(photo.mtime * 1000).toLocaleString()}</span>
               </div>
-              <Button
-                variant={isQueued ? "secondary" : "outline"}
-                size="sm"
-                className="queue-button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleExportQueue(photo.id);
-                }}
-              >
-                {isQueued ? "In Queue" : "Add Queue"}
-              </Button>
             </div>
           </article>
         );

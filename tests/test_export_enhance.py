@@ -297,14 +297,14 @@ def test_export_enhance_job_continues_after_failure(tmp_path, monkeypatch):
     output = tmp_path / "out"
     output.mkdir()
 
-    original_load = export_enhance.queue._loader.load
+    original_load = export_enhance.queue._export_loader.load
 
     def flaky_load(row):
         if row["name"] == "a.jpg":
             raise RuntimeError("broken")
         return original_load(row)
 
-    monkeypatch.setattr(export_enhance.queue._loader, "load", flaky_load)
+    monkeypatch.setattr(export_enhance.queue._export_loader, "load", flaky_load)
     job = export_enhance.queue.create(
         selected_ids=[row["id"] for row in rows],
         output_folder=str(output),
@@ -318,3 +318,42 @@ def test_export_enhance_job_continues_after_failure(tmp_path, monkeypatch):
     assert finished.completed == 1
     assert finished.failed == 1
     assert finished.failures[0].error == "broken"
+
+
+def test_image_loader_shares_inflight_decode_and_caches_scaled(tmp_path, monkeypatch):
+    import threading
+    path = tmp_path / "a.jpg"
+    path.write_bytes(b"x")
+    row = {"path": str(path), "orientation_override": 0}
+    loader = export_enhance.ImageLoader()
+    calls, release = [], threading.Event()
+
+    def slow_decode(_row):
+        calls.append(1)
+        release.wait(2)
+        return np.full((40, 60, 3), .5, np.float32), None, str(path)
+
+    monkeypatch.setattr(loader, "_decode", slow_decode)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(loader.load(row))) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    release.set()
+    for thread in threads:
+        thread.join()
+    assert len(calls) == 1 and len(results) == 3 and all(r is results[0] for r in results)
+    scaled = loader.load_scaled(row, 30)
+    assert scaled.shape == (20, 30, 3) and loader.load_scaled(row, 30) is scaled
+
+
+def test_export_uses_its_own_loader_cache():
+    assert export_enhance.queue._export_loader is not export_enhance.queue._loader
+    assert export_enhance.queue._masks._loader is export_enhance.queue._loader
+
+
+def test_prefetch_warms_editor_caches(monkeypatch):
+    calls = []
+    monkeypatch.setattr(export_enhance.queue._loader, "load_scaled", lambda row, edge: calls.append(edge))
+    export_enhance.queue.prefetch({"path": "x"})
+    export_enhance.queue._prefetcher.submit(lambda: None).result(timeout=5)
+    assert calls == [1600, 512]

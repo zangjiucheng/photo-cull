@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAuto,
+  applyPad,
+  rebasePad,
   autoStrength,
   cloneSettings,
   defaultSettings,
@@ -65,6 +67,25 @@ describe("editing recipes", () => {
   it("auto after a manual edit builds on the edited values", () => {
     const edited = { ...applyAuto(cloneSettings(defaultSettings), { exposure: 0.3 }), auto: null, exposure: 1 };
     expect(applyAuto(edited, { exposure: 0.3 }).exposure).toBeCloseTo(1.3);
+  });
+  it("tone pad moves the sliders, stays editable, and returns to the origin", () => {
+    const vectors = {
+      tone: { up: { contrast: 0.2, shadows: -0.2 }, down: { contrast: -0.2, shadows: 0.3 } },
+      colour: { up: { vibrance: 0.4 }, down: { vibrance: -0.3, saturation: -0.3 } },
+    };
+    const start = { ...cloneSettings(defaultSettings), shadows: 0.1 };
+    const moved = applyPad(start, 1, -0.5, vectors);
+    expect(moved.contrast).toBeCloseTo(0.2);
+    expect(moved.shadows).toBeCloseTo(-0.1);
+    expect(moved.vibrance).toBeCloseTo(-0.15);
+    expect(moved.saturation).toBeCloseTo(-0.15);
+    // Fine-tuning a slider keeps the dot where it is and is preserved by later drags.
+    const tuned = rebasePad({ ...moved, contrast: 0.5 });
+    expect(tuned.pad?.tone).toBe(1);
+    expect(applyPad(tuned, 1, -0.5).contrast).toBeCloseTo(0.5);
+    expect(applyPad(tuned, 0, 0).contrast).toBeCloseTo(0.3);
+    expect(applyPad(moved, 0, 0).shadows).toBeCloseTo(0.1);
+    expect(applyPad(start, 1, 1)).toBe(start);
   });
   it("selective paste keeps individual exposure, warmth and crop", () => {
     const source = {

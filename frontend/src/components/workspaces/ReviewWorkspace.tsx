@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { shortcutRegistry } from "../../shortcuts/registry";
 import type { ShortcutHandlers } from "../../shortcuts/types";
@@ -29,6 +29,8 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
   const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const rating = activePhoto ? ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0 : 0;
+  const isQueued = activePhoto ? exportQueueIds.has(activePhoto.id) : false;
+  const activeIndex = activePhoto ? folderPhotos.findIndex((photo) => photo.id === activePhoto.id) : -1;
 
   const getClampedPreviewHeight = useCallback((height: number) => {
     const workspace = workspaceRef.current;
@@ -44,6 +46,11 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
 
     return Math.min(Math.max(height, minPreviewHeight), maxPreviewHeight);
   }, []);
+
+  // Start with the photo as large as possible, leaving the minimum filmstrip height below it.
+  useLayoutEffect(() => {
+    setPreviewHeight(getClampedPreviewHeight(Number.MAX_SAFE_INTEGER));
+  }, [getClampedPreviewHeight]);
 
   const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -179,12 +186,10 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
         "--review-preview-height": `${previewHeight}px`
       } as CSSProperties}
     >
-      <div className="workspace-head">
-        <div>
-          <span className="panel-kicker">Review</span>
-          <h2>{activePhoto ? activePhoto.name : "No Photo Selected"}</h2>
-        </div>
-        <Button variant="outline" onClick={onAutoRateByScore}>AI Rate Folder</Button>
+      <div className="review-head">
+        <h2 className="review-title" title={activePhoto?.name}>{activePhoto ? activePhoto.name : "No Photo Selected"}</h2>
+        {activeIndex >= 0 ? <span className="review-position">{activeIndex + 1} / {folderPhotos.length}</span> : null}
+        <Button variant="ghost" size="sm" className="review-head-action" onClick={onAutoRateByScore}>AI Rate Folder</Button>
       </div>
       <div className="review-stage" ref={reviewStageRef}>
         {activePhoto ? (
@@ -210,12 +215,33 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
             <div className="review-controls">
               <div className="star-rating review-stars" aria-label={`Rating ${rating || "unrated"} out of 5`}>
                 {[1, 2, 3, 4, 5].map((star) => (
-                  <button key={star} type="button" className={`star-btn ${rating >= star ? "filled" : ""}`.trim()} onClick={() => onRatePhoto(activePhoto.id, star)}>★</button>
+                  <button
+                    key={star}
+                    type="button"
+                    className={`star-btn ${rating >= star ? "filled" : ""}`.trim()}
+                    onClick={() => onRatePhoto(activePhoto.id, star)}
+                    aria-label={`Set ${star} star${star === 1 ? "" : "s"}`}
+                  >
+                    ★
+                  </button>
                 ))}
               </div>
-              <Button variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"} onClick={() => onToggleExportQueue(activePhoto.id)}>
-                {exportQueueIds.has(activePhoto.id) ? "Queued for Export" : "Add to Export Queue"}
+              <Button
+                variant={isQueued ? "secondary" : "outline"}
+                size="sm"
+                className={`review-queue-toggle ${isQueued ? "queued" : ""}`.trim()}
+                aria-pressed={isQueued}
+                onClick={() => onToggleExportQueue(activePhoto.id)}
+              >
+                <span className="review-queue-dot" aria-hidden="true" />
+                {isQueued ? "Queued for Export" : "Add to Export Queue"}
               </Button>
+              <div className="review-hints" aria-hidden="true">
+                <span><kbd>H</kbd><kbd>L</kbd> prev / next</span>
+                <span><kbd>Q</kbd> queue</span>
+                <span><kbd>Space</kbd> enlarge</span>
+                <span><kbd>⌘</kbd><kbd>+</kbd><kbd>−</kbd> zoom</span>
+              </div>
             </div>
           </>
         ) : <div className="empty-gallery">Select a photo to begin review.</div>}

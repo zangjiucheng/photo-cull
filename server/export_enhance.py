@@ -12,7 +12,7 @@ import time
 import traceback
 import urllib.request
 from uuid import uuid4
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -52,6 +52,8 @@ class EnhanceSettings:
     dehaze: float = 0.0
     crop: dict[str, float] = field(default_factory=lambda: {"x": 0, "y": 0, "width": 1, "height": 1, "angle": 0})
     auto: dict[str, Any] | None = None
+    # UI state for the Tone/Color pad; rendering only ever reads the slider values it produced.
+    pad: dict[str, Any] | None = None
     contrast: float = 0.0
     highlights: float = 0.0
     shadows: float = 0.0
@@ -139,6 +141,18 @@ def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         auto = {"strength": _float_setting(auto, "strength", 1, 0, 1),
                 **{group: {key: _float_setting(auto[group], key, 0, -3 if key == "exposure" else -1, 3 if key == "exposure" else 1)
                            for key in keys} for group in ("base", "target")}}
+    pad = settings.get("pad")
+    if pad is not None:
+        vectors = pad.get("vectors") if isinstance(pad, dict) else None
+        if not isinstance(pad, dict) or not isinstance(pad.get("base"), dict) or not isinstance(vectors, dict):
+            raise ExportEnhanceError("pad must contain base controls and vectors")
+        def directions(axis):
+            raw = vectors.get(axis) if isinstance(vectors.get(axis), dict) else {}
+            return {side: {key: _float_setting(raw.get(side) or {}, key, 0, -1, 1) for key in editing.PAD_KEYS}
+                    for side in ("up", "down")}
+        pad = {"tone": _float_setting(pad, "tone", 0, -1, 1), "colour": _float_setting(pad, "colour", 0, -1, 1),
+               "base": {key: _float_setting(pad["base"], key, 0, -1, 1) for key in editing.PAD_KEYS},
+               "vectors": {"tone": directions("tone"), "colour": directions("colour")}}
     style_raw = settings.get("photoStyle", settings.get("photo_style", {}))
     style_raw = style_raw if isinstance(style_raw, dict) else {}
     preset = str(style_raw.get("preset", "standard")).lower()
@@ -174,6 +188,7 @@ def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         dehaze=_float_setting(settings, "dehaze", 0.0, -1.0, 1.0),
         crop=parsed_crop,
         auto=auto,
+        pad=pad,
         contrast=_float_setting(settings, "contrast", 0.0, -1.0, 1.0),
         highlights=_float_setting(settings, "highlights", 0.0, -1.0, 1.0),
         shadows=_float_setting(settings, "shadows", 0.0, -1.0, 1.0),
@@ -207,6 +222,7 @@ def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
         "dehaze": settings.dehaze,
         "crop": settings.crop,
         "auto": settings.auto,
+        "pad": settings.pad,
         "contrast": settings.contrast,
         "highlights": settings.highlights,
         "shadows": settings.shadows,
@@ -231,25 +247,68 @@ def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
 
 
 class ImageLoader:
-    def __init__(self):
+    """Full-resolution decode cache plus a cache of downscaled copies for the editor.
+
+    Decoding happens outside the lock: concurrent requests for the same photo share one in-flight
+    decode, and requests for other (cached) photos are never blocked behind it.
+    """
+
+    def __init__(self, capacity: int = 2, scaled_capacity: int = 8):
         self._cache = OrderedDict()
+        self._scaled = OrderedDict()
+        self._inflight: dict[tuple, Future] = {}
+        self._capacity = capacity
+        self._scaled_capacity = scaled_capacity
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(row: Any) -> tuple:
+        source_path = row["path"]
+        stat = os.stat(source_path)
+        return (source_path, stat.st_mtime_ns, stat.st_size, row["orientation_override"])
+
+    def load_scaled(self, row: Any, max_edge: int) -> np.ndarray:
+        """The full decode resized to max_edge; identical to resize_float(load(row)[0], max_edge)."""
+        key = (*self._key(row), max_edge)
+        with self._lock:
+            if key in self._scaled:
+                self._scaled.move_to_end(key)
+                return self._scaled[key]
+        scaled = editing.resize_float(self.load(row)[0], max_edge)
+        with self._lock:
+            self._scaled[key] = scaled
+            while len(self._scaled) > self._scaled_capacity:
+                self._scaled.popitem(last=False)
+        return scaled
 
     def load(self, row: Any, *, full_raw: bool = True) -> tuple[np.ndarray, bytes | None, str]:
         # The flag remains accepted for callers from older integrations. Editing
         # always starts with the full source, never an embedded browsing JPEG.
-        source_path = row["path"]
-        stat = os.stat(source_path)
-        key = (source_path, stat.st_mtime_ns, stat.st_size, row["orientation_override"])
+        key = self._key(row)
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
                 return self._cache[key]
+            pending = self._inflight.get(key)
+            owner = pending is None
+            if owner:
+                pending = self._inflight[key] = Future()
+        if not owner:
+            return pending.result()
+        try:
             result = self._decode(row)
+        except BaseException as exc:
+            with self._lock:
+                self._inflight.pop(key, None)
+            pending.set_exception(exc)
+            raise
+        with self._lock:
+            self._inflight.pop(key, None)
             self._cache[key] = result
-            while len(self._cache) > 2 or (sum(item[0].nbytes for item in self._cache.values()) > 384 * 1024 ** 2 and len(self._cache) > 1):
+            while len(self._cache) > self._capacity or (sum(item[0].nbytes for item in self._cache.values()) > 384 * 1024 ** 2 and len(self._cache) > 1):
                 self._cache.popitem(last=False)
-            return result
+        pending.set_result(result)
+        return result
 
     def _decode(self, row: Any) -> tuple[np.ndarray, bytes | None, str]:
         source_path = row["path"]
@@ -354,8 +413,9 @@ def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
 
 
 class SemanticMaskProvider:
-    def __init__(self):
-        self._cache: dict[tuple[str, int, int, int], np.ndarray] = {}
+    def __init__(self, loader: ImageLoader | None = None):
+        self._loader = loader or ImageLoader(capacity=1)
+        self._cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
         self._lock = threading.Lock()
         self._torch_plugin_checked = False
         self._torch_plugin: Any | None = None
@@ -363,7 +423,18 @@ class SemanticMaskProvider:
     def masks_for_row(self, row: Any, image: np.ndarray | None = None, max_edge: int | None = None) -> np.ndarray:
         source = str(row["path"])
         if image is None:
-            image, _exif, _source = ImageLoader().load(row)
+            # Check the cache before paying for a full RAW decode.
+            stat = os.stat(source)
+            request_key = (source, stat.st_mtime_ns, row["orientation_override"], max_edge or 0)
+            with self._lock:
+                cached = self._cache.get(request_key)
+            if cached is not None:
+                return cached.copy()
+            image, _exif, _source = self._loader.load(row)
+            masks = self.masks_for_row(row, image=image, max_edge=max_edge)
+            with self._lock:
+                self._remember(request_key, masks)
+            return masks
         if max_edge and max(image.shape[:2]) > max_edge:
             pil = Image.fromarray((image * 255.0 + 0.5).astype(np.uint8), "RGB")
             pil.thumbnail((max_edge, max_edge), Image.Resampling.BILINEAR)
@@ -376,8 +447,14 @@ class SemanticMaskProvider:
             return cached.copy()
         masks = self._build_masks(image)
         with self._lock:
-            self._cache[cache_key] = masks.copy()
+            self._remember(cache_key, masks)
         return masks
+
+    def _remember(self, key: tuple, masks: np.ndarray) -> None:
+        self._cache[key] = masks.copy()
+        self._cache.move_to_end(key)
+        while len(self._cache) > 16:
+            self._cache.popitem(last=False)
 
     def _build_masks(self, image: np.ndarray) -> np.ndarray:
         skin = self._skin_mask(image)
@@ -669,13 +746,27 @@ class JobQueue:
         self._lock = threading.Lock()
         self._jobs: dict[str, ExportJob] = {}
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._prefetcher = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch")
+        # Editor and preview requests use _loader; exports use their own cache so a batch export
+        # never evicts the photos being edited.
         self._loader = ImageLoader()
+        self._export_loader = ImageLoader(capacity=2, scaled_capacity=0)
         self._color = ColorProcessor()
-        self._masks = SemanticMaskProvider()
+        self._masks = SemanticMaskProvider(self._loader)
         self._style = PhotographicStyleProcessor(self._masks)
         self._denoise = AIDenoiseEngine()
         self._upscale = RealESRGANEngine()
         self._writer = ExportWriter()
+
+    def prefetch(self, row: Any) -> None:
+        """Develop a photo into the editor caches in the background so switching to it is instant."""
+        def warm():
+            try:
+                for edge in (1600, 512):
+                    self._loader.load_scaled(row, edge)
+            except Exception:
+                pass  # The real request reports errors; a failed warm-up costs nothing.
+        self._prefetcher.submit(warm)
 
     def create(
         self,
@@ -723,12 +814,22 @@ class JobQueue:
             self._publish(job)
         return job
 
+    def _decode_ahead(self, job: ExportJob, index: int) -> None:
+        """Decode the next photo while the current one is processed (RAW decode is the longest stage)."""
+        if index >= len(job.selected_ids) or job.cancel_requested:
+            return
+        row = db.fetch_photo(job.selected_ids[index])
+        settings = job.settings_by_photo.get(row["id"], job.settings) if row is not None else None
+        if settings is not None and settings.recipe_version >= 2:
+            self._prefetcher.submit(lambda: self._export_loader.load(row))
+
     def _run(self, job_id: str) -> None:
         job = self.get(job_id)
         if job is None:
             return
         self._update(job, status="running")
-        for photo_id in job.selected_ids:
+        for index, photo_id in enumerate(job.selected_ids):
+            self._decode_ahead(job, index + 1)
             if job.cancel_requested:
                 self._update(job, status="cancelled", current=None)
                 return
@@ -739,7 +840,7 @@ class JobQueue:
             self._update(job, current=row["name"])
             try:
                 settings = job.settings_by_photo.get(photo_id, job.settings)
-                image, exif, _source = (self._loader.load(row) if settings.recipe_version >= 2 else self._loader.load_legacy(row))
+                image, exif, _source = (self._export_loader.load(row) if settings.recipe_version >= 2 else self._export_loader.load_legacy(row))
                 image = self._color.apply(image, settings)
                 image = self._style.apply(image, settings, row)
                 image = editing.apply_geometry(image, settings.crop)
@@ -804,8 +905,10 @@ def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 160
     row = db.fetch_photo(photo_id)
     if row is None:
         raise ExportEnhanceError("Photo not found")
-    image, _exif, _source = (queue._loader.load(row) if settings.recipe_version >= 2 else queue._loader.load_legacy(row))
-    image = editing.resize_float(image, max_edge)
+    if settings.recipe_version >= 2:
+        image = queue._loader.load_scaled(row, max_edge)
+    else:
+        image = editing.resize_float(queue._loader.load_legacy(row)[0], max_edge)
     image = queue._color.apply(image, settings)
     image = queue._style.apply(image, settings, row)
     image = editing.apply_geometry(image, settings.crop)

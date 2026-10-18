@@ -1,0 +1,357 @@
+/* Element defaults and the shared UI primitives in components/ui. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs) / 1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, p {
+  margin: 0;
+}
+
+h1 { font-size: var(--fs-lg); font-weight: 600; }
+h2 { font-size: var(--fs-md); font-weight: 600; }
+h3 { font-size: var(--fs); font-weight: 600; }
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+a {
+  color: var(--text);
+}
+
+kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font: var(--fs-xs) var(--mono);
+}
+
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+::selection {
+  background: #3a3a3a;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2e2e2e transparent;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Small all-caps section label used across panels. */
+.panel-kicker {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.link-button:hover:not(:disabled) { color: var(--text); }
+.link-button:disabled { color: var(--text-3); }
+
+/* Button */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: var(--fs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.ui-btn:disabled { opacity: 0.4; }
+.ui-btn-sm { height: var(--control-h-sm); padding: 0 var(--space-2); font-size: var(--fs-sm); }
+.ui-btn-lg { height: 34px; padding: 0 var(--space-4); }
+.ui-btn-icon { width: var(--control-h); padding: 0; }
+
+.ui-btn-default { background: var(--accent); color: var(--accent-ink); }
+.ui-btn-default:hover:not(:disabled) { background: #d9d9d9; }
+.ui-btn-secondary { background: var(--surface-3); color: var(--text); }
+.ui-btn-secondary:hover:not(:disabled) { background: #262626; }
+.ui-btn-outline { border-color: var(--line-strong); background: transparent; color: var(--text); }
+.ui-btn-outline:hover:not(:disabled) { background: var(--surface-2); }
+.ui-btn-ghost { background: transparent; color: var(--text-2); }
+.ui-btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.ui-btn-destructive { border-color: var(--line-strong); background: transparent; color: var(--danger); }
+.ui-btn-destructive:hover:not(:disabled) { background: rgba(255, 69, 58, 0.12); }
+
+/* Input / Select */
+.ui-input,
+.ui-select {
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs);
+  outline: none;
+}
+
+.ui-input::placeholder { color: var(--text-3); }
+.ui-input:focus,
+.ui-select:focus { border-color: var(--text-2); }
+
+.ui-select {
+  appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a1a1a1' stroke-width='1.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+/* Range: shared by ui/Slider and every native range in the app. */
+input[type="range"] {
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  appearance: none;
+}
+
+input[type="range"]::-moz-range-track { height: 2px; background: var(--line-strong); }
+input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); }
+input[type="range"]:disabled { opacity: 0.4; }
+
+/* Checkbox */
+.ui-checkbox,
+input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* Badge */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ui-badge-default { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.ui-badge-success { color: var(--ok); }
+.ui-badge-danger { color: var(--danger); }
+
+/* Card: a flat bordered block. Avoid nesting cards inside cards. */
+.ui-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.ui-card-header { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); }
+.ui-card-title { font-size: var(--fs); font-weight: 600; }
+.ui-card-content { padding: 0 var(--space-3) var(--space-3); }
+
+.ui-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Segmented control (ui/Tabs). */
+.tab-head {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.tab-btn {
+  height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { background: var(--surface-3); color: var(--text); }
+
+/* Shared loading overlay (launcher and app). */
+.app-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.app-loading-panel {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.app-loading-panel strong { color: var(--text); font-size: var(--fs); }
+
+.app-loading-spinner {
+  width: 18px;
+  height: 18px;
+  margin-bottom: var(--space-2);
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ui-spin 0.8s linear infinite;
+}
+
+@keyframes ui-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Keyboard shortcut help (shortcuts/ShortcutHelpDialog). */
+.shortcut-help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.shortcut-help-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(720px, 100%);
+  max-height: min(640px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--overlay-shadow);
+}
+
+.shortcut-help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.shortcut-help-close {
+  width: var(--control-h);
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+}
+
+.shortcut-help-close:hover { background: var(--surface-3); color: var(--text); }
+
+.shortcut-help-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4);
+  overflow: auto;
+}
+
+.shortcut-help-group {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+}
+
+.shortcut-help-group h3 {
+  margin-bottom: var(--space-1);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.shortcut-help-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.shortcut-help-row kbd { justify-self: start; }

@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import threading
 import struct
 from fractions import Fraction
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,13 +21,58 @@ from PIL import Image, ImageCms
 PRESETS = json.loads(Path(__file__).with_name("editing_presets.json").read_text())
 SRGB_ICC = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+# PIL releases the GIL while resampling, so the three channel planes resize in parallel.
+_RESIZE_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="resize")
 
 
+_PIXEL_WORKERS = min(8, os.cpu_count() or 4)
+_PIXEL_POOL = ThreadPoolExecutor(max_workers=_PIXEL_WORKERS, thread_name_prefix="pixels")
+_IN_PIXEL_POOL = threading.local()
+
+
+def per_pixel(fn):
+    """Run a purely per-pixel function over row bands in parallel for large images.
+
+    NumPy releases the GIL inside large ufuncs, so bands run concurrently; because every pixel
+    is computed independently the result is bit-identical to a single call.
+    """
+    def band(part, args):
+        _IN_PIXEL_POOL.active = True
+        try:
+            return fn(part, *args)
+        finally:
+            _IN_PIXEL_POOL.active = False
+
+    def run(image, *args):
+        # Nested per-pixel calls (apply_color -> decode_srgb) run inline: submitting to the same
+        # pool from its own workers would deadlock once every worker waits on a nested band.
+        if (getattr(_IN_PIXEL_POOL, "active", False) or image.ndim < 2
+                or image.shape[0] * image.shape[1] < 1_000_000):
+            return fn(image, *args)
+        bands = np.array_split(image, _PIXEL_WORKERS, axis=0)
+        return np.concatenate(list(_PIXEL_POOL.map(band, bands, [args] * len(bands))), axis=0)
+    run.__wrapped__ = fn
+    run.__doc__ = fn.__doc__
+    return run
+
+
+def channel_max(image):
+    # Elementwise over channel views is ~10x faster than a reduction over the last (stride-3) axis
+    # and gives bit-identical results.
+    return np.maximum(np.maximum(image[..., 0], image[..., 1]), image[..., 2])
+
+
+def channel_min(image):
+    return np.minimum(np.minimum(image[..., 0], image[..., 1]), image[..., 2])
+
+
+@per_pixel
 def encode_srgb(linear):
     return np.where(linear <= 0.0031308, linear * 12.92,
                     1.055 * np.maximum(linear, 0) ** (1 / 2.4) - 0.055).astype(np.float32)
 
 
+@per_pixel
 def decode_srgb(rgb):
     return np.where(rgb <= 0.04045, rgb / 12.92,
                     ((np.maximum(rgb, 0) + 0.055) / 1.055) ** 2.4).astype(np.float32)
@@ -35,6 +83,7 @@ def decode_srgb(rgb):
 BASE_EXPOSURE_EV = 0.6
 
 
+@per_pixel
 def apply_profile_tone(linear, curve):
     """Apply a linear-in/linear-out DNG tone curve while preserving hue (RGB-tone style).
 
@@ -44,13 +93,14 @@ def apply_profile_tone(linear, curve):
     # RAW input is 16-bit, so a 16-bit lookup table is exact enough and much faster than interp.
     lut = np.interp(np.linspace(0, 1, 65536), curve[:, 0], curve[:, 1]).astype(np.float32)
     linear = np.clip(linear, 0, 1)
-    high, low = linear.max(axis=-1), linear.min(axis=-1)
+    high, low = channel_max(linear), channel_min(linear)
     high_out = lut[(high * 65535 + .5).astype(np.uint16)]
     low_out = lut[(low * 65535 + .5).astype(np.uint16)]
     scale = np.where(high - low > 1e-6, (high_out - low_out) / np.maximum(high - low, 1e-6), 0)
     return (low_out[..., None] + (linear - low[..., None]) * scale[..., None]).astype(np.float32)
 
 
+@per_pixel
 def apply_color(image, settings):
     def value(key):
         return float(getattr(settings, key, 0))
@@ -73,7 +123,7 @@ def apply_color(image, settings):
     # Conservative global haze contrast; this is deliberately not a depth model.
     out = (out - value("dehaze") * .06) * (1 + value("dehaze") * .12)
     gray = out @ LUMA
-    sat = np.max(out, axis=-1) - np.min(out, axis=-1)
+    sat = channel_max(out) - channel_min(out)
     factor = (1 + value("saturation")) * (1 + value("vibrance") * (1 - np.clip(sat * 1.5, 0, 1)))
     out = gray[..., None] + (out - gray[..., None]) * factor[..., None]
     return np.clip(out, 0, 1).astype(np.float32)
@@ -96,8 +146,10 @@ def resize_float(image, max_edge):
     if scale == 1:
         return image
     size = (max(1, round(width * scale)), max(1, round(height * scale)))
-    return np.stack([np.asarray(Image.fromarray(image[..., c], "F").resize(size, Image.Resampling.LANCZOS))
-                     for c in range(3)], axis=-1).astype(np.float32)
+    def plane(c):
+        source = Image.fromarray(np.ascontiguousarray(image[..., c], dtype=np.float32), "F")
+        return np.asarray(source.resize(size, Image.Resampling.LANCZOS))
+    return np.stack(list(_RESIZE_POOL.map(plane, range(3))), axis=-1).astype(np.float32)
 
 
 def orient_array(image, orientation):
@@ -156,6 +208,42 @@ def auto_adjustments(image):
             "highlights": -.2 if high > .92 else (-.08 if high > .85 else 0.0),
             "shadows": .05 if night or low < .04 else 0.0,
             "vibrance": .08 if night else .14, "temperature": 0.0}
+
+
+PAD_KEYS = ("contrast", "blackPoint", "shadows", "highlights", "brilliance", "vibrance", "saturation")
+
+
+def style_pad_vectors(image, masks=None):
+    """Per-photo directions for the Tone/Color pad, as slider deltas at full deflection.
+
+    Dragging the pad moves the regular sliders along these directions, so the result stays
+    fully editable. Directions adapt to the photo: no deeper shadows when they are already
+    crushed, highlight protection near clipping, and gentler saturation on skin and large skies.
+    masks are the SemanticMaskProvider channels (skin, sky, foliage, background), if available.
+    """
+    y = np.clip(image @ LUMA, 0, 1)
+    low, high = np.percentile(y, [5, 98])
+    chroma = float((channel_max(image) - channel_min(image)).mean())
+    shadow_room = float(np.clip((low - .02) / .10, 0, 1))
+    highlight_room = float(np.clip((.97 - high) / .15, 0, 1))
+    chroma_room = float(np.clip((.28 - chroma) / .20, .25, 1))
+    skin = sky = 0.0
+    if masks is not None:
+        skin = float(np.clip(masks[..., 0].mean() * 8, 0, 1))
+        sky = float(np.clip(masks[..., 1].mean() * 2.5, 0, 1))
+    return {
+        "tone": {
+            "up": {"contrast": .22, "blackPoint": .25 * shadow_room, "shadows": -.25 * shadow_room,
+                   "highlights": .12 * highlight_room - .25 * (1 - highlight_room), "brilliance": -.05},
+            "down": {"contrast": -.20, "blackPoint": -.15, "shadows": .20 + .15 * (1 - shadow_room),
+                     "highlights": -.15 - .15 * (1 - highlight_room), "brilliance": .15},
+        },
+        "colour": {
+            "up": {"vibrance": .45 * chroma_room,
+                   "saturation": .20 * chroma_room * (1 - .7 * skin) * (1 - .5 * sky)},
+            "down": {"vibrance": -.35, "saturation": -.35},
+        },
+    }
 
 
 def clean_exif(data, width, height):

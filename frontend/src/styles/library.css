@@ -1,0 +1,488 @@
+/* Library: left sidebar (workspace + folders) and the Browse workspace with its photo grid.
+   .bridge-gallery / .photo-card come from PhotoGrid and are also reused by the Review workspace. */
+
+/* ---------- Sidebar ---------- */
+.side-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 20px;
+}
+
+.workspace-control-panel {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-control-select {
+  font-weight: 500;
+}
+
+.workspace-control-path {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.workspace-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.folder-navigator {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 var(--space-3);
+}
+
+.folder-navigator > .side-section-head {
+  padding: 0 var(--space-3);
+}
+
+.folder-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+}
+
+.path-segment {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.path-separator {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.path-link {
+  max-width: 180px;
+  height: var(--control-h-sm);
+  overflow: hidden;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-link:hover { background: var(--surface-2); color: var(--text); }
+.path-link.active { color: var(--text); font-weight: 500; }
+
+.folder-browser-panel {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.folder-browser-head {
+  padding: 0 var(--space-3);
+}
+
+.folder-browser-count {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-item-grid {
+  display: grid;
+  padding: 0 var(--space-2);
+}
+
+.folder-browser-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+
+.folder-browser-tile:hover { background: var(--surface-2); color: var(--text); }
+.folder-browser-tile.active { background: var(--surface-3); color: var(--text); }
+
+.folder-tile-icon {
+  width: 24px;
+  color: var(--text-3);
+}
+
+.folder-file-thumb {
+  display: block;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--surface-2);
+}
+
+.folder-file-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.folder-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-file-meta {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.folder-file-tile .folder-file-meta { color: var(--star); font-size: 9px; letter-spacing: 1px; }
+
+.folder-file-empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Browse workspace ---------- */
+.browse-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browse-toolbar {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.search-field {
+  position: relative;
+  display: flex;
+  flex: 1 1 160px;
+  align-items: center;
+  min-width: 140px;
+  max-width: 260px;
+}
+
+.search-icon {
+  position: absolute;
+  left: var(--space-2);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.search-field .search-input {
+  padding-left: 26px;
+  padding-right: 44px;
+}
+
+.search-clear {
+  position: absolute;
+  right: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.search-clear:hover { color: var(--text); }
+
+.workspace-filterbar .compact-field {
+  display: flex;
+  flex: 0 1 170px;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 120px;
+  height: var(--control-h);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.workspace-filterbar .compact-field strong {
+  display: inline-block;
+  min-width: 2ch;
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace-filterbar .ui-select {
+  flex: 0 0 auto;
+  width: 112px;
+}
+
+.workspace-filterbar .view-switch {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.browse-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: 0 var(--space-3) var(--space-2);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.filter-retention-inline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-retention-inline .filter-count { color: var(--text-2); }
+.filter-retention-inline strong { color: var(--text-2); font-weight: 500; }
+
+.browse-statusbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.browse-content-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ---------- Photo grid (PhotoGrid) ---------- */
+.bridge-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  align-content: start;
+  gap: var(--space-4) var(--space-3);
+  padding: var(--space-3);
+}
+
+.empty-gallery {
+  grid-column: 1 / -1;
+  padding: var(--space-5);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.photo-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  outline: none;
+  cursor: default;
+}
+
+.photo-card .thumb {
+  position: relative;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.photo-card .thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-card:hover .thumb img { opacity: 0.92; }
+
+.photo-card.active .thumb,
+.photo-card:focus-visible .thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.photo-card:focus-visible:not(.active) .thumb { outline-width: 1px; outline-color: var(--text-2); }
+
+.thumb-status {
+  position: absolute;
+  bottom: var(--space-1);
+  left: var(--space-1);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+
+.thumb-status.error { color: var(--danger); }
+
+/* Queue toggle: appears on hover/focus; stays visible as a small white chip when queued. */
+.photo-card .queue-button {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  height: 20px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.photo-card:hover .queue-button,
+.photo-card:focus-within .queue-button { opacity: 1; }
+.photo-card .queue-button:hover { background: rgba(0, 0, 0, 0.8); }
+.photo-card .queue-button.queued { background: var(--accent); color: var(--accent-ink); }
+.photo-card .queue-button.queued:hover { background: var(--text-2); }
+
+.photo-card .meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.photo-card .meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 16px;
+}
+
+.photo-card .name {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo-card.active .name { color: var(--text); }
+
+.photo-card .score {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.photo-card .score.high { color: var(--text-2); }
+
+.star-rating-compact {
+  display: flex;
+  margin-left: -2px;
+}
+
+.star-rating-compact .star-btn {
+  width: 14px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--line-strong);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.star-rating-compact .star-btn.filled { color: var(--star); }
+.photo-card:hover .star-rating-compact .star-btn:not(.filled) { color: var(--text-3); }
+
+.queued-flag {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.queued-flag::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.photo-card .file-extra { display: none; }
+
+/* List mode: one row per photo. */
+.bridge-gallery.list-mode {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: var(--space-1) var(--space-3);
+}
+
+.list-mode .photo-card {
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--line);
+}
+
+.list-mode .photo-card.active { background: var(--surface-2); }
+.list-mode .photo-card.active .thumb { outline-width: 1px; outline-offset: 1px; }
+
+.list-mode .photo-card .meta {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.list-mode .photo-card .meta-title { justify-content: flex-start; gap: var(--space-3); }
+
+.list-mode .photo-card .file-extra {
+  display: flex;
+  gap: var(--space-3);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.list-mode .photo-card .queue-button { height: 18px; padding: 0 4px; font-size: 10px; }
+
+@media (max-width: 1280px) {
+  .list-mode .photo-card .meta { grid-template-columns: minmax(0, 1fr) auto; }
+  .list-mode .photo-card .file-extra { display: none; }
+}

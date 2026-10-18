@@ -1273,15 +1273,11 @@ export default function App() {
 
   const workspaceControls = (
     <section className="workspace-control-panel">
-      <div className="side-panel-head">
-        <div>
-          <span className="panel-kicker">Workspace</span>
-          <strong>{activeWorkspace?.name ?? "No Workspace"}</strong>
-        </div>
-        <span>{library.workspaces.length}</span>
+      <div className="side-section-head">
+        <span className="panel-kicker">Workspace</span>
       </div>
       <select
-        className="workspace-control-select"
+        className="workspace-control-select ui-select"
         value={activeWorkspaceId ?? ""}
         onChange={(event) => {
           const selectedValue = event.target.value;
@@ -1358,6 +1354,7 @@ export default function App() {
               activePhotoId={activePhoto?.id ?? null}
               onSelectFolder={setActiveFolderPath}
               onSelectPhoto={setActiveId}
+              showPhotos={activeTab !== "browse"}
             />
           </>
         }

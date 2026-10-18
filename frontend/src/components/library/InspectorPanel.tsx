@@ -4,7 +4,6 @@ import type { ShortcutHandlers } from "../../shortcuts/types";
 import { useShortcuts } from "../../shortcuts/useShortcuts";
 import type { Photo } from "../../types";
 import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
 interface InspectorPanelProps {
   activePhoto: Photo | null;
@@ -86,82 +85,86 @@ function ScoreReasonPanel({ photo }: { photo: Photo }) {
 
   if (!details) {
     return (
-      <div className="score-reason-card">
-        <div className="score-reason-head">
-          <div>
-            <span className="score-override-label">Score Reasons</span>
-            <strong>No details yet</strong>
-          </div>
+      <section className="inspect-section">
+        <div className="inspect-section-head">
+          <span className="panel-kicker">Score Reasons</span>
+          <span className="inspect-section-note">No details yet</span>
         </div>
-        <p className="score-reason-empty">
+        <p className="inspect-note">
           {photo.status === "done" ? "Refresh AI scores to generate detailed reasons for this photo." : "Details will appear after backend scoring finishes."}
         </p>
-      </div>
+      </section>
     );
   }
 
+  const finalScore = details.final ?? photo.score ?? undefined;
+
   return (
-    <div className="score-reason-card">
-      <div className="score-reason-head">
-        <div>
-          <span className="score-override-label">Score Reasons</span>
-          <strong>{details.mode || "AI scoring"} · Final {formatScoreValue(details.final ?? photo.score ?? undefined)}</strong>
+    <>
+      <section className="inspect-section">
+        <div className="inspect-section-head">
+          <span className="panel-kicker">Score Reasons</span>
+          <span className="inspect-section-note">{scoreQualityLabel(finalScore)}</span>
         </div>
-        <span className="score-reason-pill">{scoreQualityLabel(details.final ?? photo.score ?? undefined)}</span>
-      </div>
+        <dl className="inspect-list">
+          <div className="inspect-row"><dt>Mode</dt><dd>{details.mode || "AI scoring"}</dd></div>
+          <div className="inspect-row"><dt>Final</dt><dd className="num">{formatScoreValue(finalScore)}</dd></div>
+        </dl>
+      </section>
 
       {metrics.length ? (
-        <div className="score-reason-section">
-          <span className="score-reason-section-title">Model metrics</span>
-          <div className="score-reason-list">
+        <section className="inspect-section">
+          <div className="inspect-section-head"><span className="panel-kicker">Model metrics</span></div>
+          <dl className="inspect-list">
             {metrics.map(([name, metric]) => {
               const normalized = typeof metric.normalized === "number" ? metric.normalized : undefined;
+              const isError = metric.status === "error";
               return (
-                <div className={`score-reason-row ${metric.status === "error" ? "error" : ""}`.trim()} key={name}>
-                  <div>
-                    <strong>{name}</strong>
-                    <span>
+                <div className={`inspect-row inspect-metric ${isError ? "error" : ""}`.trim()} key={name}>
+                  <dt>
+                    <span className="inspect-metric-name">{name}</span>
+                    <span className="inspect-sub">
                       {metric.group || "metric"}
                       {typeof metric.weight === "number" ? ` · weight ${formatScoreValue(metric.weight, 2)}` : ""}
                       {metric.lowerBetter ? " · lower is better" : ""}
                     </span>
-                  </div>
-                  <div className="score-reason-value">
-                    <strong>{metric.status === "error" ? "Error" : formatScoreValue(normalized)}</strong>
-                    <span>{metric.status === "error" ? metric.error || "Metric failed" : `raw ${formatScoreValue(metric.raw, 3)}`}</span>
-                  </div>
+                  </dt>
+                  <dd>
+                    <span className="num">{isError ? "Error" : formatScoreValue(normalized)}</span>
+                    <span className="inspect-sub num">{isError ? metric.error || "Metric failed" : `raw ${formatScoreValue(metric.raw, 3)}`}</span>
+                  </dd>
                 </div>
               );
             })}
-          </div>
-        </div>
+          </dl>
+        </section>
       ) : null}
 
       {heuristics ? (
-        <div className="score-reason-section">
-          <span className="score-reason-section-title">Photo signals</span>
-          <div className="score-signal-grid">
-            <div><span>Sharpness</span><strong>{formatScoreValue(heuristics.sharpness)}</strong></div>
-            <div><span>Exposure</span><strong>{formatScoreValue(heuristics.exposure)}</strong></div>
-            <div><span>Contrast</span><strong>{formatScoreValue(heuristics.contrast)}</strong></div>
-            <div><span>Clipping</span><strong>{formatScoreValue(heuristics.clipping)}</strong></div>
-            <div><span>Brightness</span><strong>{formatScoreValue(heuristics.brightness, 3)}</strong></div>
-            <div><span>Clipped</span><strong>{formatScoreValue((heuristics.clippedRatio ?? 0) * 100, 2)}%</strong></div>
-          </div>
-        </div>
+        <section className="inspect-section">
+          <div className="inspect-section-head"><span className="panel-kicker">Photo signals</span></div>
+          <dl className="inspect-list">
+            <div className="inspect-row"><dt>Sharpness</dt><dd className="num">{formatScoreValue(heuristics.sharpness)}</dd></div>
+            <div className="inspect-row"><dt>Exposure</dt><dd className="num">{formatScoreValue(heuristics.exposure)}</dd></div>
+            <div className="inspect-row"><dt>Contrast</dt><dd className="num">{formatScoreValue(heuristics.contrast)}</dd></div>
+            <div className="inspect-row"><dt>Clipping</dt><dd className="num">{formatScoreValue(heuristics.clipping)}</dd></div>
+            <div className="inspect-row"><dt>Brightness</dt><dd className="num">{formatScoreValue(heuristics.brightness, 3)}</dd></div>
+            <div className="inspect-row"><dt>Clipped</dt><dd className="num">{formatScoreValue((heuristics.clippedRatio ?? 0) * 100, 2)}%</dd></div>
+          </dl>
+        </section>
       ) : null}
 
       {errors.length ? (
-        <div className="score-reason-section">
-          <span className="score-reason-section-title">Scoring errors</span>
-          <div className="score-error-list">
+        <section className="inspect-section">
+          <div className="inspect-section-head"><span className="panel-kicker">Scoring errors</span></div>
+          <div className="inspect-errors">
             {errors.map(([name, message]) => <span key={name}>{name}: {message}</span>)}
           </div>
-        </div>
+        </section>
       ) : null}
 
-      {details.raw ? <p className="score-reason-empty">{details.raw}</p> : null}
-    </div>
+      {details.raw ? <p className="inspect-note">{details.raw}</p> : null}
+    </>
   );
 }
 
@@ -301,113 +304,123 @@ export function InspectorPanel({
 
   return (
     <>
-      <Card className="inspector-card">
-        <CardHeader>
-          <CardTitle>Inspector</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!activePhoto && <div className="inspector-empty">Open a folder and pick a photo.</div>}
-          {activePhoto && (
-            <>
-              <button
-                type="button"
-                className="inspect-image"
-                onClick={() => setIsPreviewOpen(true)}
-                aria-label={`Open preview for ${activePhoto.name}`}
-              >
-                <img src={activePhoto.url} alt={activePhoto.name} />
-                <span className="inspect-image-hint">Click to enlarge</span>
-              </button>
-              <div className="inspect-meta">
-                <h3>{activePhoto.name}</h3>
-                <p>Folder: {activePhoto.folder || "Root"}</p>
-                <StarRating
-                  photo={activePhoto}
-                  rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
-                  onRatePhoto={onRatePhoto}
-                />
-                <Button
-                  className="inspector-queue-button inspector-queue-under-stars"
-                  variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
-                  onClick={() => onToggleExportQueue(activePhoto.id)}
-                >
-                  {exportQueueIds.has(activePhoto.id) ? "In Queue" : "Add Queue"}
-                </Button>
-                <div className="metric-grid">
-                  <div className="metric"><span>AI Score</span><strong>{activePhoto.aiScore}</strong></div>
-                  <div className="metric"><span>Raw Score</span><strong>{activePhoto.score ?? "-"}</strong></div>
-                </div>
-                <ScoreReasonPanel photo={activePhoto} />
-                <div className="score-override-card">
-                  <div className="score-override-head">
-                    <div>
-                      <span className="score-override-label">Manual Override</span>
-                      <strong>{activePhoto.manualScore !== null ? `Using ${activePhoto.manualScore}` : "Using auto score"}</strong>
-                    </div>
-                    {activePhoto.manualScore !== null ? <span className="score-override-badge">Override On</span> : null}
-                  </div>
-                  <div className="score-override-controls">
-                    <input
-                      className="score-override-input"
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={scoreDraft}
-                      onChange={(event) => setScoreDraft(event.target.value)}
-                      placeholder="0-100"
-                    />
-                    <Button className="score-override-action" variant="outline" onClick={() => void handleSaveScoreOverride()} disabled={isSavingScore}>
-                      {isSavingScore ? "Saving..." : "Save"}
-                    </Button>
-                    <Button
-                      className="score-override-action"
-                      variant="ghost"
-                      onClick={() => void handleResetScoreOverride()}
-                      disabled={isSavingScore || activePhoto.manualScore === null}
-                    >
-                      Reset
-                    </Button>
-                  </div>
-                </div>
-                {activePhoto.status !== "done" && (
-                  <div className="tab-body">
+      <div className="inspector">
+        {!activePhoto && <div className="inspector-empty">Open a folder and pick a photo.</div>}
+        {activePhoto && (
+          <>
+            <button
+              type="button"
+              className="inspect-image"
+              onClick={() => setIsPreviewOpen(true)}
+              aria-label={`Open preview for ${activePhoto.name}`}
+            >
+              <img src={activePhoto.url} alt={activePhoto.name} />
+              <span className="inspect-image-hint">Click to enlarge</span>
+            </button>
+            <div className="inspect-title">
+              <h3 title={activePhoto.name}>{activePhoto.name}</h3>
+              <p>Folder: {activePhoto.folder || "Root"}</p>
+            </div>
+            <dl className="inspect-list">
+              <div className="inspect-row">
+                <dt>Rating</dt>
+                <dd>
+                  <StarRating
+                    photo={activePhoto}
+                    rating={ratings.get(activePhoto.id) ?? activePhoto.rating ?? 0}
+                    onRatePhoto={onRatePhoto}
+                  />
+                </dd>
+              </div>
+              <div className="inspect-row">
+                <dt>Export</dt>
+                <dd>
+                  <Button
+                    className={`inspector-queue-button ${exportQueueIds.has(activePhoto.id) ? "queued" : ""}`.trim()}
+                    variant={exportQueueIds.has(activePhoto.id) ? "secondary" : "outline"}
+                    size="sm"
+                    aria-pressed={exportQueueIds.has(activePhoto.id)}
+                    onClick={() => onToggleExportQueue(activePhoto.id)}
+                  >
+                    {exportQueueIds.has(activePhoto.id) ? "In Queue" : "Add Queue"}
+                  </Button>
+                </dd>
+              </div>
+              <div className="inspect-row"><dt>AI Score</dt><dd className="num inspect-strong">{activePhoto.aiScore}</dd></div>
+              <div className="inspect-row"><dt>Raw Score</dt><dd className="num">{activePhoto.score ?? "-"}</dd></div>
+              {activePhoto.status !== "done" && (
+                <div className={`inspect-row ${activePhoto.status === "error" ? "error" : ""}`.trim()}>
+                  <dt>Status</dt>
+                  <dd>
                     {activePhoto.status === "pending" && "Waiting in backend queue."}
                     {activePhoto.status === "processing" && "Scoring in backend worker."}
                     {activePhoto.status === "error" && (activePhoto.error || "Scoring failed.")}
-                  </div>
-                )}
-                <div className="orientation-override-card">
-                  <div className="orientation-override-head">
-                    <div>
-                      <span className="score-override-label">Orientation</span>
-                      <strong>{activePhoto.orientationOverride ? `${activePhoto.orientationOverride} deg clockwise` : "Using EXIF orientation"}</strong>
-                    </div>
-                    {activePhoto.orientationOverride ? <span className="score-override-badge">Override On</span> : null}
-                  </div>
-                  <div className="orientation-override-controls" aria-label="Orientation override">
-                    {[0, 90, 180, 270].map((degrees) => {
-                      const value = degrees as 0 | 90 | 180 | 270;
-                      const isActive = (activePhoto.orientationOverride ?? 0) === value;
-                      return (
-                        <Button
-                          key={degrees}
-                          className="orientation-override-button"
-                          variant={isActive ? "secondary" : "outline"}
-                          onClick={() => void handleOrientationChange(value === 0 ? null : value)}
-                          disabled={isSavingOrientation}
-                        >
-                          {degrees}
-                        </Button>
-                      );
-                    })}
-                  </div>
+                  </dd>
                 </div>
+              )}
+            </dl>
+            <ScoreReasonPanel photo={activePhoto} />
+            <section className="inspect-section">
+              <div className="inspect-section-head">
+                <span className="panel-kicker">Manual Override</span>
+                <span className="inspect-section-note">
+                  {activePhoto.manualScore !== null ? `Using ${activePhoto.manualScore}` : "Using auto score"}
+                </span>
               </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+              <div className="inspect-override">
+                <input
+                  className="ui-input score-override-input"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={scoreDraft}
+                  onChange={(event) => setScoreDraft(event.target.value)}
+                  placeholder="0-100"
+                  aria-label="Manual score"
+                />
+                <Button variant="outline" size="sm" onClick={() => void handleSaveScoreOverride()} disabled={isSavingScore}>
+                  {isSavingScore ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void handleResetScoreOverride()}
+                  disabled={isSavingScore || activePhoto.manualScore === null}
+                >
+                  Reset
+                </Button>
+              </div>
+            </section>
+            <section className="inspect-section">
+              <div className="inspect-section-head">
+                <span className="panel-kicker">Orientation</span>
+                <span className="inspect-section-note">
+                  {activePhoto.orientationOverride ? `${activePhoto.orientationOverride} deg clockwise` : "Using EXIF orientation"}
+                </span>
+              </div>
+              <div className="tab-head inspect-orientation" aria-label="Orientation override">
+                {[0, 90, 180, 270].map((degrees) => {
+                  const value = degrees as 0 | 90 | 180 | 270;
+                  const isActive = (activePhoto.orientationOverride ?? 0) === value;
+                  return (
+                    <button
+                      key={degrees}
+                      type="button"
+                      className={`tab-btn ${isActive ? "active" : ""}`.trim()}
+                      aria-pressed={isActive}
+                      onClick={() => void handleOrientationChange(value === 0 ? null : value)}
+                      disabled={isSavingOrientation}
+                    >
+                      {degrees}°
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
+      </div>
 
       {activePhoto && isPreviewOpen ? (
         <div className="inspector-lightbox" role="dialog" aria-modal="true" aria-label={`${activePhoto.name} preview`} onClick={() => setIsPreviewOpen(false)}>

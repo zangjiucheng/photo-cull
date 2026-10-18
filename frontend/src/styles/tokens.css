@@ -1,0 +1,51 @@
+/* Design tokens. Flat black-and-white UI: no gradients, no decorative shadows, one accent (white).
+   Colour is reserved for photos and for the few functional states below. */
+:root {
+  color-scheme: dark;
+
+  --bg: #000;
+  --surface: #0b0b0b;
+  --surface-2: #141414;
+  --surface-3: #1c1c1c;
+  --line: #1f1f1f;
+  --line-strong: #2e2e2e;
+
+  --text: #f2f2f2;
+  --text-2: #a1a1a1;
+  --text-3: #6b6b6b;
+
+  --accent: #fff;
+  --accent-ink: #000;
+
+  --star: #f5c518;
+  --danger: #ff453a;
+  --ok: #30d158;
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs: 13px;
+  --fs-md: 15px;
+  --fs-lg: 20px;
+  --fs-xl: 40px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+
+  --control-h: 28px;
+  --control-h-sm: 24px;
+  --topbar-h: 44px;
+  --sidebar-w: 248px;
+  --inspector-w: 300px;
+
+  /* Only for floating layers (popovers, menus, dialogs). */
+  --overlay-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}

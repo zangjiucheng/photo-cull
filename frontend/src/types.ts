@@ -186,6 +186,14 @@ export interface AiRuntimeStatus {
   logTail: string[];
 }
 
+export type PadDirections = { up: Record<string, number>; down: Record<string, number> };
+export interface StylePad {
+  tone: number;
+  colour: number;
+  base: Record<string, number>;
+  vectors: { tone: PadDirections; colour: PadDirections };
+}
+
 export interface ExportEnhanceSettings {
   recipeVersion: 1 | 2;
   brilliance: number;
@@ -194,6 +202,7 @@ export interface ExportEnhanceSettings {
   dehaze: number;
   crop: { x: number; y: number; width: number; height: number; angle: number };
   auto: { base: Record<string, number>; target: Record<string, number>; strength: number } | null;
+  pad: StylePad | null;
   exposure: number;
   contrast: number;
   highlights: number;

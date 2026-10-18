@@ -1,0 +1,274 @@
+/* App frame: top bar, three-column layout, launcher. */
+.bridge-shell {
+  display: grid;
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+  height: 100vh;
+  background: var(--bg);
+}
+
+.bridge-topbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+
+.bridge-topbar button,
+.bridge-topbar [role="progressbar"] {
+  -webkit-app-region: no-drag;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.brand-lockup strong {
+  font-size: var(--fs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.brand-lockup span {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.workspace-tab {
+  position: relative;
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs);
+  font-weight: 500;
+}
+
+.workspace-tab:hover { color: var(--text); }
+.workspace-tab.active { background: var(--surface-3); color: var(--text); }
+
+.workspace-tab-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 30;
+  display: none;
+  gap: 2px;
+  width: 220px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: var(--overlay-shadow);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  text-align: left;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.workspace-tab-tooltip strong { color: var(--text); font-weight: 600; }
+.workspace-tab-tooltip kbd { justify-self: start; margin-top: var(--space-1); }
+
+.workspace-tab:hover .workspace-tab-tooltip {
+  display: grid;
+  transition-delay: 0.6s;
+}
+
+.bridge-actions,
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.ai-runtime-topbar-button.error { color: var(--danger); }
+
+/* Background scoring progress: a thin ring with a hover popover. */
+.scoring-progress {
+  position: relative;
+  outline: none;
+}
+
+.scoring-progress-ring {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) var(--progress-deg, 0deg), var(--line-strong) 0);
+}
+
+.scoring-progress-ring span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoring-progress.error .scoring-progress-ring { background: var(--danger); }
+
+.scoring-progress-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: none;
+  gap: var(--space-1);
+  width: 240px;
+  padding: var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: var(--overlay-shadow);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.scoring-progress-popover strong { color: var(--text); }
+.scoring-progress:hover .scoring-progress-popover,
+.scoring-progress:focus-within .scoring-progress-popover { display: grid; }
+
+.scoring-progress-action {
+  justify-self: start;
+  height: var(--control-h-sm);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  font-size: var(--fs-sm);
+}
+
+.scoring-progress-action:hover:not(:disabled) { background: var(--surface-3); }
+.scoring-progress-action:disabled { opacity: 0.4; }
+.ai-runtime-status.error { color: var(--danger); }
+
+/* Three columns separated by hairlines; workspaces may drop the inspector. */
+.bridge-layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--inspector-w);
+  min-height: 0;
+}
+
+.without-inspector .bridge-layout {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+}
+
+.bridge-sidebar,
+.bridge-content,
+.bridge-inspector {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bridge-sidebar { border-right: 1px solid var(--line); }
+.bridge-inspector { border-left: 1px solid var(--line); }
+
+/* Launcher */
+.launcher {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--space-5);
+}
+
+.launcher-panel {
+  display: grid;
+  gap: var(--space-5);
+  width: min(520px, 100%);
+}
+
+.launcher-brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.launcher-status { color: var(--text-3); font-size: var(--fs-sm); }
+.launcher-status.error { color: var(--danger); }
+
+.launcher-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.launcher-recent {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.launcher-recent ul {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.launcher-recent li {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.launcher-recent-open {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+  padding: var(--space-2) var(--space-1);
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.launcher-recent-open strong { font-weight: 500; }
+
+.launcher-recent-open span {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher-recent-open:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+
+.launcher-recent-delete {
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  opacity: 0;
+}
+
+.launcher-recent li:hover .launcher-recent-delete,
+.launcher-recent-delete:focus-visible { opacity: 1; }
+.launcher-recent-delete:hover { color: var(--danger); }
+
+.launcher-empty { color: var(--text-3); font-size: var(--fs-sm); }
