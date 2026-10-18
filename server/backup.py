@@ -16,6 +16,7 @@ import tempfile
 import time
 import zipfile
 from collections import Counter
+from contextlib import closing
 from typing import Any
 
 from . import db
@@ -28,6 +29,12 @@ MANIFEST_ENTRY = "manifest.json"
 
 class BackupError(ValueError):
     pass
+
+
+# sqlite3's context manager only commits; Windows cannot delete or replace a database file
+# while a connection is still open, so every connection here is closed explicitly.
+def _open(path: str) -> closing:
+    return closing(sqlite3.connect(path))
 
 
 def _sha256(path: str) -> str:
@@ -75,9 +82,9 @@ def create_backup(destination: str, app_version: str | None = None) -> dict[str,
     with tempfile.TemporaryDirectory() as work:
         snapshot = os.path.join(work, DB_ENTRY)
         # The SQLite backup API gives a consistent copy even while scans or edits are writing.
-        with db.connect() as source, sqlite3.connect(snapshot) as target:
+        with closing(db.connect()) as source, _open(snapshot) as target:
             source.backup(target)
-        with sqlite3.connect(snapshot) as conn:
+        with _open(snapshot) as conn:
             summary = _summarize(conn)
         manifest = {
             "format": FORMAT,
@@ -115,7 +122,7 @@ def _extract_and_verify(path: str, work: str) -> tuple[dict[str, Any], str]:
     extracted = os.path.join(work, DB_ENTRY)
     if _sha256(extracted) != manifest.get("database", {}).get("sha256"):
         raise BackupError("The backup database does not match its checksum; the file is damaged")
-    with sqlite3.connect(extracted) as conn:
+    with _open(extracted) as conn:
         if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise BackupError("The backup database failed SQLite's integrity check")
     return manifest, extracted
@@ -141,11 +148,20 @@ def restore_backup(path: str) -> dict[str, Any]:
         safety = None
         if os.path.exists(current):
             safety = f"{os.path.splitext(current)[0]}.before-restore-{time.strftime('%Y%m%d-%H%M%S')}.db"
-            with db.connect() as source, sqlite3.connect(safety) as target:
+            with closing(db.connect()) as source, _open(safety) as target:
                 source.backup(target)
         staged = current + ".restoring"
         shutil.copyfile(extracted, staged)
-        os.replace(staged, current)
+        # On Windows a background thread may hold the database open for a moment; retry briefly.
+        for attempt in range(10):
+            try:
+                os.replace(staged, current)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    os.remove(staged)
+                    raise BackupError("The library is busy; wait for scanning or export to finish and try again")
+                time.sleep(0.2)
     # Older backups are upgraded in place to the current schema.
     db.init_db()
     db.mark_interrupted_export_jobs()

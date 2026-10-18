@@ -4,6 +4,7 @@ import os
 import shutil
 import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -76,7 +77,7 @@ def test_restore_keeps_previous_library_and_upgrades_old_schema(library, tmp_pat
     # Build a backup of an older library that predates presets/snapshots.
     old = tmp_path / "old.db"
     shutil.copyfile(library["config"].db_path, old)
-    with sqlite3.connect(old) as conn:
+    with closing(sqlite3.connect(old)) as conn, conn:
         conn.execute("DROP TABLE presets")
         conn.execute("DROP TABLE photo_snapshots")
         conn.execute("UPDATE workspaces SET name = 'From backup'")
@@ -92,7 +93,7 @@ def test_restore_keeps_previous_library_and_upgrades_old_schema(library, tmp_pat
     assert result["previousLibrary"] and os.path.exists(result["previousLibrary"])
     assert db.list_workspaces()[0]["name"] == "From backup"
     assert db.list_presets() == []  # table recreated by the migration, data came from the backup
-    with sqlite3.connect(result["previousLibrary"]) as conn:
+    with closing(sqlite3.connect(result["previousLibrary"])) as conn:
         assert conn.execute("SELECT name FROM presets").fetchone()[0] == "Punchy"
 
 
