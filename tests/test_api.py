@@ -198,6 +198,7 @@ def test_delete_workspace_clears_similarity_and_render_caches(client, tmp_path, 
     for photo in photos:
         image = client.get(f"/api/photos/{photo['id']}/image")
         assert image.status_code == 200
+        image.close()  # release the file handle, which Windows would otherwise keep locked
     assert list(Path(db.get_config().render_cache_folder).glob("*.jpg"))
 
     similar = client.get(f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=0&scope=library")
@@ -489,6 +490,49 @@ def test_similar_detection_reuses_cached_result(client, tmp_path, monkeypatch):
     assert calls["count"] == 2
 
 
+def test_similar_cache_is_recomputed_when_clip_becomes_available(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    make_image(source / "b.jpg", "blue")
+    workspace = open_workspace(client, source)
+    similarity.clear_similarity_cache()
+    url = f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=1&scope=library"
+
+    monkeypatch.setattr(similarity, "clip_available", lambda: False)
+    similarity._load_clip_model.cache_clear()
+    before = client.get(url).get_json()
+    assert before["stages"]["clip"]["status"] == f"unavailable: {similarity.CLIP_MISSING}"
+    assert client.get(url).get_json()["cache"]["hit"] is True
+
+    # The AI runtime is installed: the result computed without CLIP is no longer reused.
+    monkeypatch.setattr(similarity, "clip_available", lambda: True)
+    monkeypatch.setattr(similarity, "clip_matches", lambda candidates: ([], "ready:numpy"))
+    after = client.get(url).get_json()
+    assert after["cache"] == {"hit": False, "source": "computed"}
+    assert after["stages"]["clip"]["status"] == "ready:numpy"
+    similarity._load_clip_model.cache_clear()
+
+
+def test_similar_does_not_cache_a_clip_load_failure(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    make_image(source / "b.jpg", "blue")
+    workspace = open_workspace(client, source)
+    similarity.clear_similarity_cache()
+    url = f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=1&scope=library"
+    monkeypatch.setattr(similarity, "clip_available", lambda: True)
+
+    # open_clip is installed but torch cannot load (WinError 126 on a PC without the VC++ runtime).
+    monkeypatch.setattr(similarity, "clip_matches", lambda candidates: ([], "unavailable: [WinError 126] c10.dll"))
+    failed = client.get(url).get_json()
+    assert failed["stages"]["clip"]["status"].startswith("unavailable")
+    assert client.get(url).get_json()["cache"]["hit"] is False
+
+    # Once torch loads, CLIP runs instead of the failure being replayed from the cache.
+    monkeypatch.setattr(similarity, "clip_matches", lambda candidates: ([], "ready:numpy"))
+    assert client.get(url).get_json()["stages"]["clip"]["status"] == "ready:numpy"
+
+
 def test_invalid_score_and_missing_photo(client):
     bad_score = client.patch("/api/photos/missing/score", json={"manual_score": 120})
     assert bad_score.status_code == 400
@@ -580,6 +624,34 @@ def test_invalid_recipe_payload_returns_actionable_error(client, tmp_path):
     response = client.post("/api/export-enhance/preview", json={"photo_id": photo["id"], "settings": {"quality": []}})
     assert response.status_code == 400
     assert "Invalid" in response.get_json()["error"]
+
+
+def test_detail_endpoint_and_new_recipe_fields_persist(client, tmp_path):
+    import numpy as np
+    source = tmp_path / "source"
+    make_image(source / "a.png", "blue")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    settings = {"recipeVersion": 2, "engineVersion": 1, "rawProfileVersion": 1,
+        "gradient": {"exposure": -.5}, "selectedColor": {"center": 2 / 3, "luminance": -.3}}
+    saved = client.put(f"/api/workspaces/{workspace['id']}/export-enhance-settings", json={"settings_by_photo": {photo["id"]: settings}})
+    assert saved.status_code == 200
+    loaded = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["exportEnhanceSettings"][photo["id"]]
+    assert loaded["engineVersion"] == loaded["rawProfileVersion"] == 1
+    assert loaded["gradient"]["exposure"] == -.5 and loaded["selectedColor"]["luminance"] == -.3
+    base = client.get(f"/api/photos/{photo['id']}/editing-base")
+    assert base.headers["X-Source-Width"] == base.headers["X-Source-Height"] == "8"
+    payload = {"settings": loaded, "region": {"x": 2, "y": 3, "width": 4, "height": 3}}
+    detail = client.post(f"/api/photos/{photo['id']}/editing-detail", json=payload)
+    assert detail.status_code == 200
+    assert detail.headers["X-Image-Width"] == "4" and detail.headers["X-Image-Height"] == "3"
+    assert detail.headers["X-Region-X"] == "2" and detail.headers["Cache-Control"] == "no-store"
+    assert np.frombuffer(detail.data, dtype="<f4").size == 4 * 3 * 3
+    assert client.post(f"/api/photos/{photo['id']}/editing-detail", json={**payload, "region": {}}).status_code == 400
+    rejected = client.put(f"/api/workspaces/{workspace['id']}/export-enhance-settings", json={"settings_by_photo": {photo["id"]: {**settings, "engineVersion": 2}}})
+    assert rejected.status_code == 400
+    still_saved = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["exportEnhanceSettings"][photo["id"]]
+    assert still_saved == loaded
 
 
 def test_export_enhance_settings_are_persistent(client, tmp_path):

@@ -1,14 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { AiRuntimeStatus, WorkspaceTab } from "../../types";
+import { modLabel } from "../../lib/platform";
 import { Button } from "../ui/button";
 
 const tabs: Array<{ id: WorkspaceTab; label: string; shortcut: string; detail: string }> = [
-  { id: "browse", label: "Browse", shortcut: "Cmd+1", detail: "Browse and filter the active photo library." },
-  { id: "review", label: "Review", shortcut: "Cmd+2", detail: "Review photos, rate picks, and manage queue decisions." },
-  { id: "duplicates", label: "Similarity", shortcut: "Cmd+3", detail: "Find visually similar groups and choose what to keep." },
-  { id: "export-enhance", label: "Enhance & Export", shortcut: "Cmd+4", detail: "Apply styles, AI restoration, and export selected photos." },
-  { id: "stats", label: "Stats", shortcut: "Cmd+5", detail: "Check library progress, ratings, and export queue counts." },
-  { id: "debug", label: "Debug", shortcut: "Cmd+6", detail: "Inspect AI Runtime status and background logs." }
+  { id: "browse", label: "Browse", shortcut: `${modLabel}+1`, detail: "Browse and filter the active photo library." },
+  { id: "review", label: "Review", shortcut: `${modLabel}+2`, detail: "Review photos, rate picks, and manage queue decisions." },
+  { id: "duplicates", label: "Similarity", shortcut: `${modLabel}+3`, detail: "Find visually similar groups and choose what to keep." },
+  { id: "export-enhance", label: "Enhance & Export", shortcut: `${modLabel}+4`, detail: "Apply styles, AI restoration, and export selected photos." },
+  { id: "stats", label: "Stats", shortcut: `${modLabel}+5`, detail: "Check library progress, ratings, and export queue counts." },
+  { id: "settings", label: "Settings", shortcut: `${modLabel}+6`, detail: "AI Runtime, its Python, and install logs." }
 ];
 
 interface WorkspaceShellProps {
@@ -96,7 +97,7 @@ export function WorkspaceShell({
               size="sm"
               onClick={onInstallAiRuntime}
               disabled={aiRuntimeStatus.installing || aiRuntimeStatus.installed}
-              title="Open Debug tab to view AI Runtime logs"
+              title="Open Settings to choose its Python and view install logs"
             >
               {aiRuntimeButtonLabel}
             </Button>

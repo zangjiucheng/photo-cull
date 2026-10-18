@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, matchExposure, relocateWorkspace, fetchExportEnhanceJob, findSimilarPhotos, listExportEnhanceJobs, resumeExportEnhanceJob, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
-import { DebugWorkspace } from "./components/workspaces/DebugWorkspace";
+import { SettingsWorkspace } from "./components/workspaces/SettingsWorkspace";
+import { Onboarding, onboardingPending } from "./components/Onboarding";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportEnhanceWorkspace } from "./components/workspaces/ExportEnhanceWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
@@ -19,10 +21,18 @@ import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
 import { useShortcuts } from "./shortcuts/useShortcuts";
 import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
 
-import { cloneSettings, defaultSettings, pasteSettings, type AdjustmentGroup } from "./editing/recipe";
+import { cloneSettings, defaultSettings, pasteSettings, rebasePad, type AdjustmentGroup } from "./editing/recipe";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
-const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "debug"];
+const WORKSPACE_LABELS: Record<WorkspaceTab, string> = {
+  browse: "Browse",
+  review: "Review",
+  duplicates: "Similarity",
+  "export-enhance": "Enhance & Export",
+  stats: "Stats",
+  settings: "Settings",
+};
+const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "settings"];
 
 interface SimilarityProgress {
   percent: number;
@@ -58,6 +68,7 @@ export default function App() {
   const [isInspectorPreviewOpen, setIsInspectorPreviewOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [exportEnhanceSettings, setExportEnhanceSettings] = useState<ExportEnhanceSettings>(defaultExportEnhanceSettings);
   const [exportEnhanceSettingsByPhoto, setExportEnhanceSettingsByPhoto] = useState<Record<string, ExportEnhanceSettings>>({});
   const [exportEnhanceUndoStacks, setExportEnhanceUndoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
@@ -70,7 +81,7 @@ export default function App() {
   const enhanceByPhotoRef = useRef(exportEnhanceSettingsByPhoto);
   enhanceByPhotoRef.current = exportEnhanceSettingsByPhoto;
   const [exportEnhanceSelectedPhotoId, setExportEnhanceSelectedPhotoId] = useState<string | null>(null);
-  const [exportEnhanceOutputFolder, setExportEnhanceOutputFolder] = useState("");
+  const [exportEnhanceOutputFolder, setExportEnhanceOutputFolderState] = useState("");
   const [exportEnhanceJob, setExportEnhanceJob] = useState<ExportEnhanceJob | null>(null);
   const [isStartingExportEnhance, setIsStartingExportEnhance] = useState(false);
   const [exportEnhanceRedoStacks, setExportEnhanceRedoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
@@ -105,6 +116,27 @@ export default function App() {
     serverExportQueue,
     serverExportEnhanceSettings
   } = library;
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  activeWorkspaceIdRef.current = activeWorkspaceId;
+  // Remember the export folder per workspace on this device so it survives a restart.
+  const outputFolderKey = (workspaceId: string) => `photo-cull.export-folder.${workspaceId}`;
+  const setExportEnhanceOutputFolder = useCallback((folder: string) => {
+    setExportEnhanceOutputFolderState(folder);
+    if (!activeWorkspaceIdRef.current) return;
+    try {
+      localStorage.setItem(outputFolderKey(activeWorkspaceIdRef.current), folder);
+    } catch {
+      // Remembering the folder is a convenience; the export still works without it.
+    }
+  }, []);
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    try {
+      setExportEnhanceOutputFolderState(localStorage.getItem(outputFolderKey(activeWorkspaceId)) ?? "");
+    } catch {
+      setExportEnhanceOutputFolderState("");
+    }
+  }, [activeWorkspaceId]);
   const ratingState = usePhotoRatings(photos, updateStatus);
   const { ratings, setRatings, ratePhoto } = ratingState;
   const { activeFolder, folderPhotos, visiblePhotos, activePhoto } = usePhotoFilters(photos, folders, {
@@ -362,6 +394,9 @@ export default function App() {
       updateStatus("Export queue is already empty.", "warn");
       return;
     }
+    if (currentIds.length > 1 && !window.confirm(`Remove all ${currentIds.length} photos from the export queue? Their edits are kept.`)) {
+      return;
+    }
     commitExportQueue([], `Removed ${currentIds.length} photo(s) from export queue.`);
   }
 
@@ -379,6 +414,20 @@ export default function App() {
       updateStatus(`Opened ${workspace.name}.`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to open folder", "error");
+    }
+  }
+
+  async function onRelocateWorkspace(workspaceId: string) {
+    try {
+      const selectedPath = window.aiCulling?.openFolder
+        ? await window.aiCulling.openFolder()
+        : window.prompt("Enter the folder's new path on this machine");
+      if (!selectedPath) return;
+      const workspace = await relocateWorkspace(workspaceId, selectedPath);
+      await library.loadLibrary();
+      updateStatus(`Reconnected ${workspace.name}.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to reconnect the folder", "error");
     }
   }
 
@@ -447,6 +496,14 @@ export default function App() {
       void onSaveWorkspaceFile();
     });
   }, [onSaveWorkspaceFile]);
+
+  useEffect(() => window.aiCulling?.onOpenSettingsRequest?.(() => setActiveTab("settings")), []);
+  useEffect(() => window.aiCulling?.onOpenOnboardingRequest?.(() => setIsOnboardingOpen(true)), []);
+  useEffect(() => {
+    void onboardingPending().then((pending) => {
+      if (pending) setIsOnboardingOpen(true);
+    });
+  }, []);
 
   async function onRevealWorkspaceFolder() {
     if (!activeWorkspace) {
@@ -620,6 +677,31 @@ export default function App() {
     updateStatus(`Applied adjustments to ${Math.max(0, exportQueueList.length - 1)} queued photos.`, "ok");
   }
 
+  async function matchQueueExposure() {
+    if (!exportEnhanceCurrentPhotoId) throw new Error("Select a reference photo first");
+    const targets = Object.fromEntries(exportQueueList
+      .filter((id) => id !== exportEnhanceCurrentPhotoId)
+      .map((id) => [id, exportEnhanceSettingsByPhoto[id] ?? defaultExportEnhanceSettings]));
+    return matchExposure(exportEnhanceCurrentPhotoId, exportEnhanceSettings, targets);
+  }
+
+  // Exposure-only change per photo, recorded in each photo's undo history like a slider edit.
+  function applyExposureMatches(exposures: Record<string, number>) {
+    const next = { ...exportEnhanceSettingsByPhoto };
+    const history = { ...exportEnhanceUndoStacks };
+    const redo = { ...exportEnhanceRedoStacks };
+    for (const [id, exposure] of Object.entries(exposures)) {
+      const before = cloneSettings(next[id] ?? defaultSettings);
+      history[id] = [...(history[id] ?? []), before].slice(-50);
+      redo[id] = [];
+      next[id] = rebasePad({ ...before, exposure, auto: null });
+    }
+    setExportEnhanceSettingsByPhoto(next);
+    setExportEnhanceUndoStacks(history);
+    setExportEnhanceRedoStacks(redo);
+    updateStatus(`Matched exposure on ${Object.keys(exposures).length} photo(s).`, "ok");
+  }
+
   function resetExportEnhanceSettings() {
     const targetId = exportEnhanceCurrentPhotoId;
     if (!targetId) return;
@@ -686,6 +768,33 @@ export default function App() {
       setIsStartingExportEnhance(false);
     }
   }
+
+  async function onResumeExportEnhance(retryFailed: boolean) {
+    if (!exportEnhanceJob) return;
+    try {
+      setExportEnhanceJob(await resumeExportEnhanceJob(exportEnhanceJob.id, retryFailed));
+      updateStatus(retryFailed ? "Retrying failed exports..." : "Resuming Enhance & Export...", "busy");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to resume Enhance & Export", "error");
+    }
+  }
+
+  // After a restart, surface the last export if it was interrupted or left failures behind.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let cancelled = false;
+    void listExportEnhanceJobs(activeWorkspaceId)
+      .then((jobs) => {
+        const latest = jobs[0];
+        if (!cancelled && latest && (latest.resumable || latest.failed > 0 || ["queued", "running"].includes(latest.status))) {
+          setExportEnhanceJob((current) => current ?? latest);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId]);
 
   async function onCancelExportEnhance() {
     if (!exportEnhanceJob) return;
@@ -1233,12 +1342,15 @@ export default function App() {
         onBeginAdjustment={beginEnhanceGesture}
         onEndAdjustment={endEnhanceGesture}
         onApplyToQueued={applyAdjustmentsToQueue}
+        onMatchExposure={matchQueueExposure}
+        onApplyExposureMatches={applyExposureMatches}
         onReset={resetExportEnhanceSettings}
         onSelectPreviewPhoto={selectExportEnhancePhoto}
         onChooseFolder={() => void onChooseExportEnhanceFolder()}
         onOutputFolderChange={setExportEnhanceOutputFolder}
         onStart={() => void onStartExportEnhance()}
         onCancel={() => void onCancelExportEnhance()}
+        onResume={(retryFailed) => void onResumeExportEnhance(retryFailed)}
         onClearQueue={clearExportQueue}
       />
     );
@@ -1260,13 +1372,14 @@ export default function App() {
         processingProgress={processingProgress}
       />
     );
-  } else if (activeTab === "debug") {
+  } else if (activeTab === "settings") {
     workspace = (
-      <DebugWorkspace
+      <SettingsWorkspace
         aiRuntimeStatus={aiRuntimeStatus}
         isRefreshing={isRefreshing}
         onRefresh={() => void onRefresh()}
         onInstallAiRuntime={() => void onInstallAiRuntime()}
+        onShowOnboarding={() => setIsOnboardingOpen(true)}
       />
     );
   }
@@ -1321,11 +1434,20 @@ export default function App() {
           onWorkspaceDelete={(workspaceId) => {
             void onDeleteWorkspace(workspaceId);
           }}
+          onWorkspaceRelocate={(workspaceId) => {
+            void onRelocateWorkspace(workspaceId);
+          }}
         />
         <ShortcutHelpDialog
           open={isShortcutHelpOpen}
           scopes={shortcutHelpScopes}
           onClose={() => setIsShortcutHelpOpen(false)}
+        />
+        <Onboarding
+          open={isOnboardingOpen}
+          aiRuntimeStatus={aiRuntimeStatus}
+          onInstallAiRuntime={() => void onInstallAiRuntime()}
+          onClose={() => setIsOnboardingOpen(false)}
         />
       </>
     );
@@ -1376,12 +1498,20 @@ export default function App() {
           />
         )}
       >
-        {workspace}
+        <ErrorBoundary key={activeTab} label={WORKSPACE_LABELS[activeTab]}>
+          {workspace}
+        </ErrorBoundary>
       </WorkspaceShell>
       <ShortcutHelpDialog
         open={isShortcutHelpOpen}
         scopes={shortcutHelpScopes}
         onClose={() => setIsShortcutHelpOpen(false)}
+      />
+      <Onboarding
+        open={isOnboardingOpen}
+        aiRuntimeStatus={aiRuntimeStatus}
+        onInstallAiRuntime={() => void onInstallAiRuntime()}
+        onClose={() => setIsOnboardingOpen(false)}
       />
     </>
   );

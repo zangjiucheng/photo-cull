@@ -247,10 +247,17 @@ def phash_matches(candidates: list[PhotoCandidate]) -> list[dict]:
     return matches
 
 
+CLIP_MISSING = "needs the AI runtime (Settings > Install AI Runtime)"
+
+
+def clip_available() -> bool:
+    return importlib.util.find_spec("open_clip") is not None
+
+
 @lru_cache(maxsize=1)
 def _load_clip_model():
-    if importlib.util.find_spec("open_clip") is None:
-        return None, None, "open-clip-torch is not installed"
+    if not clip_available():
+        return None, None, CLIP_MISSING
 
     import open_clip
     import torch
@@ -410,9 +417,13 @@ def find_similar_groups(
 ) -> dict:
     rows = _candidate_rows(workspace_id=workspace_id, folder_path=folder_path)
     rows_signature = _rows_signature(rows)
+    # Groups found without CLIP must not be served once the AI runtime is installed (or vice versa),
+    # so whether CLIP can run is part of the cache identity.
+    use_clip = bool(include_clip) and clip_available()
     signature = _signature_digest((
-        "similar-v1",
+        "similar-v2",
         bool(include_clip),
+        use_clip,
         PHASH_EXACT_DISTANCE,
         PHASH_REVIEW_DISTANCE,
         CLIP_HIGH_SIMILARITY,
@@ -420,10 +431,11 @@ def find_similar_groups(
         rows_signature,
     ))
     cache_key = (
-        "similar-v1",
+        "similar-v2",
         workspace_id,
         folder_path,
         bool(include_clip),
+        use_clip,
         signature,
     )
     cached = _cache_get(cache_key)
@@ -452,6 +464,11 @@ def find_similar_groups(
         "groups": build_groups(candidates, matches),
         "stages": _stages_payload(clip_status),
     }
+    # CLIP is installed but failed to load (e.g. a missing system DLL): keep the result out of the
+    # caches so the next scan tries CLIP again instead of replaying the failure.
+    if use_clip and clip_status.startswith("unavailable"):
+        _load_clip_model.cache_clear()
+        return _with_cache_info(payload, False, "computed")
     _cache_set(cache_key, payload)
     if workspace_id:
         db.save_similarity_group_cache(workspace_id, folder_path, include_clip, signature, payload)

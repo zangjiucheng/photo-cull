@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { AiRuntimeStatus } from "./types";
+import type { AiRuntimeStatus, PythonCheck, RuntimeSettings, UpdateChannel, UpdateSettings } from "./types";
 
 declare global {
   interface Window {
@@ -14,6 +14,17 @@ declare global {
       getAiRuntimeStatus: () => Promise<AiRuntimeStatus>;
       installAiRuntime: () => Promise<AiRuntimeStatus>;
       onAiRuntimeStatus: (callback: (status: AiRuntimeStatus) => void) => () => void;
+      getRuntimeSettings: () => Promise<RuntimeSettings>;
+      checkPython: (command: string | null) => Promise<PythonCheck>;
+      setRuntimePython: (command: string | null) => Promise<RuntimeSettings>;
+      choosePython: () => Promise<string | null>;
+      getUpdateSettings: () => Promise<UpdateSettings>;
+      getOnboardingDone: () => Promise<boolean>;
+      setOnboardingDone: () => Promise<boolean>;
+      setUpdateChannel: (channel: UpdateChannel) => Promise<UpdateSettings>;
+      checkForUpdates: () => Promise<UpdateSettings>;
+      onOpenSettingsRequest: (callback: () => void) => () => void;
+      onOpenOnboardingRequest: (callback: () => void) => () => void;
     };
   }
 }

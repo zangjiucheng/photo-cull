@@ -52,26 +52,50 @@ describe("editing recipes", () => {
     expect(autoStrength(settings, 0.5).exposure).toBe(0.4);
   });
   it("re-running auto replaces the previous suggestion instead of stacking", () => {
-    const start = { ...cloneSettings(defaultSettings), exposure: 0.2, shadows: 0.1 };
-    const suggestions = { exposure: 0.3, shadows: 0.15, vibrance: 0.1, temperature: 0.5 };
+    const start = {
+      ...cloneSettings(defaultSettings),
+      exposure: 0.2,
+      shadows: 0.1,
+    };
+    const suggestions = {
+      exposure: 0.3,
+      shadows: 0.15,
+      vibrance: 0.1,
+      temperature: 0.5,
+    };
     const once = applyAuto(start, suggestions);
     const twice = applyAuto(applyAuto(once, suggestions), suggestions);
     expect(once.exposure).toBeCloseTo(0.5);
     expect(once.shadows).toBeCloseTo(0.25);
     expect(once.temperature).toBe(0);
-    for (const key of ["exposure", "shadows", "vibrance", "temperature"] as const)
+    for (const key of [
+      "exposure",
+      "shadows",
+      "vibrance",
+      "temperature",
+    ] as const)
       expect(twice[key]).toBeCloseTo(once[key]);
     expect(twice.auto?.base.exposure).toBe(0.2);
     expect(autoStrength(twice, 0).exposure).toBe(0.2);
   });
   it("auto after a manual edit builds on the edited values", () => {
-    const edited = { ...applyAuto(cloneSettings(defaultSettings), { exposure: 0.3 }), auto: null, exposure: 1 };
+    const edited = {
+      ...applyAuto(cloneSettings(defaultSettings), { exposure: 0.3 }),
+      auto: null,
+      exposure: 1,
+    };
     expect(applyAuto(edited, { exposure: 0.3 }).exposure).toBeCloseTo(1.3);
   });
   it("tone pad moves the sliders, stays editable, and returns to the origin", () => {
     const vectors = {
-      tone: { up: { contrast: 0.2, shadows: -0.2 }, down: { contrast: -0.2, shadows: 0.3 } },
-      colour: { up: { vibrance: 0.4 }, down: { vibrance: -0.3, saturation: -0.3 } },
+      tone: {
+        up: { contrast: 0.2, shadows: -0.2 },
+        down: { contrast: -0.2, shadows: 0.3 },
+      },
+      colour: {
+        up: { vibrance: 0.4 },
+        down: { vibrance: -0.3, saturation: -0.3 },
+      },
     };
     const start = { ...cloneSettings(defaultSettings), shadows: 0.1 };
     const moved = applyPad(start, 1, -0.5, vectors);
@@ -130,5 +154,28 @@ describe("editing recipes", () => {
     expect(
       Math.abs(crop.s) * crop.width + Math.abs(crop.c) * crop.height,
     ).toBeLessThanOrEqual(3001);
+  });
+  it("keeps gradients separate from global paste and copies them only when requested", () => {
+    const source = {
+      ...cloneSettings(defaultSettings),
+      gradient: {
+        start: { x: 0.5, y: 0.1 },
+        end: { x: 0.5, y: 0.7 },
+        exposure: -0.4,
+        highlights: -0.3,
+        temperature: 0.1,
+        feather: 1,
+        invert: false,
+        enabled: true,
+      },
+    };
+    expect(
+      pasteSettings(defaultSettings, source, ["light", "color"]).gradient,
+    ).toBeNull();
+    const target = pasteSettings(defaultSettings, source, ["local"]);
+    expect(target.gradient).toEqual(source.gradient);
+    target.gradient!.start.x = 0.2;
+    expect(source.gradient.start.x).toBe(0.5);
+    expect(cloneSettings(source).engineVersion).toBe(1);
   });
 });

@@ -13,6 +13,25 @@ contextBridge.exposeInMainWorld("aiCulling", {
   revealFolder: (folderPath) => ipcRenderer.invoke("reveal-folder", folderPath),
   getAiRuntimeStatus: () => ipcRenderer.invoke("ai-runtime-status"),
   installAiRuntime: () => ipcRenderer.invoke("install-ai-runtime"),
+  getRuntimeSettings: () => ipcRenderer.invoke("get-runtime-settings"),
+  checkPython: (command) => ipcRenderer.invoke("check-python", command),
+  setRuntimePython: (command) => ipcRenderer.invoke("set-runtime-python", command),
+  choosePython: () => ipcRenderer.invoke("choose-python"),
+  getUpdateSettings: () => ipcRenderer.invoke("get-update-settings"),
+  getOnboardingDone: () => ipcRenderer.invoke("get-onboarding-done"),
+  setOnboardingDone: () => ipcRenderer.invoke("set-onboarding-done"),
+  setUpdateChannel: (channel) => ipcRenderer.invoke("set-update-channel", channel),
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  onOpenOnboardingRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("open-onboarding-request", listener);
+    return () => ipcRenderer.removeListener("open-onboarding-request", listener);
+  },
+  onOpenSettingsRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("open-settings-request", listener);
+    return () => ipcRenderer.removeListener("open-settings-request", listener);
+  },
   onAiRuntimeStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on("ai-runtime-status", listener);

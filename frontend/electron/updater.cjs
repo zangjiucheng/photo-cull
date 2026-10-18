@@ -4,16 +4,20 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { compareVersions, normalizeAssetName, parseChecksums, selectZipAsset } = require("./update-utils.cjs");
+const { compareVersions, normalizeAssetName, parseChecksums, selectChannelRelease, selectUpdateAsset, windowsInstallScript } = require("./update-utils.cjs");
 
-// Builds are not Developer ID signed, so Squirrel.Mac (electron-updater) cannot be used. Instead the
-// release zip is downloaded, checked against the published SHA256SUMS.txt, and swapped in for the
-// running .app bundle by a small shell script once this process exits.
+// Builds are not code signed, so Squirrel.Mac (electron-updater) cannot be used. The update package
+// is downloaded and checked against the published SHA256SUMS.txt, then installed once this process
+// exits: on macOS a small shell script swaps in the .app from the release zip; on Windows a
+// PowerShell script installs the release MSI silently (per user, no admin) and relaunches the app.
 const releaseRepo = "zangjiucheng/photo-cull";
-const latestReleaseUrl = `https://api.github.com/repos/${releaseRepo}/releases/latest`;
+const releasesUrl = `https://api.github.com/repos/${releaseRepo}/releases?per_page=30`;
 const startupCheckDelayMs = 5000;
+const isWindows = process.platform === "win32";
 
 let getWindow = () => null;
+// "stable" or "nightly" (prerelease builds published by the Release workflow every night).
+let getChannel = () => "stable";
 let checking = false;
 let downloading = false;
 // Set once an update has been downloaded and extracted; installed on restart or on the next quit.
@@ -47,7 +51,7 @@ function writeUpdaterLog(message) {
 }
 
 function updatesSupported() {
-  return app.isPackaged && process.platform === "darwin" && !process.env.AI_CULLING_DISABLE_UPDATES;
+  return app.isPackaged && (isWindows || process.platform === "darwin") && !process.env.AI_CULLING_DISABLE_UPDATES;
 }
 
 function currentBundlePath() {
@@ -57,6 +61,9 @@ function currentBundlePath() {
 
 // Returns a user-facing reason when the running bundle cannot be replaced in place.
 function bundleNotReplaceableReason(bundlePath) {
+  if (isWindows) {
+    return null; // The per-user installer replaces the app itself.
+  }
   if (!bundlePath.endsWith(".app")) {
     return "The running app is not inside an .app bundle.";
   }
@@ -120,21 +127,25 @@ async function downloadFile(url, targetPath, onProgress) {
 }
 
 function runChecked(command, args) {
-  const result = spawnSync(command, args, { encoding: "utf8" });
+  const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout || "").trim()}`);
   }
   return result.stdout;
 }
 
-async function fetchLatestRelease() {
-  const release = await fetchJson(latestReleaseUrl);
+async function fetchChannelRelease(channel) {
+  const release = selectChannelRelease(await fetchJson(releasesUrl), channel);
+  if (!release) {
+    throw new Error(`No ${channel} release is published yet.`);
+  }
   const version = String(release.tag_name || "").replace(/^v/, "");
   return {
     version,
     notes: String(release.body || "").trim(),
     url: release.html_url,
-    zip: selectZipAsset(release.assets, process.arch),
+    prerelease: Boolean(release.prerelease),
+    asset: selectUpdateAsset(release.assets, process.platform, process.arch),
     checksums: (release.assets || []).find((asset) => asset.name === "SHA256SUMS.txt") || null,
   };
 }
@@ -152,26 +163,30 @@ async function showMessage(options) {
 async function downloadAndStage(release) {
   const win = getWindow();
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-culling-update-"));
-  const zipPath = path.join(stagingDir, normalizeAssetName(release.zip.name));
+  const downloadPath = path.join(stagingDir, normalizeAssetName(release.asset.name));
   downloading = true;
   try {
     const checksums = parseChecksums(await fetchText(release.checksums.browser_download_url));
-    const expected = checksums.get(normalizeAssetName(release.zip.name));
+    const expected = checksums.get(normalizeAssetName(release.asset.name));
     if (!expected) {
-      throw new Error(`SHA256SUMS.txt has no entry for ${release.zip.name}.`);
+      throw new Error(`SHA256SUMS.txt has no entry for ${release.asset.name}.`);
     }
 
-    writeUpdaterLog(`downloading ${release.zip.browser_download_url}`);
-    const actual = await downloadFile(release.zip.browser_download_url, zipPath, (fraction) => {
+    writeUpdaterLog(`downloading ${release.asset.browser_download_url}`);
+    const actual = await downloadFile(release.asset.browser_download_url, downloadPath, (fraction) => {
       win?.setProgressBar(fraction);
     });
     if (actual !== expected) {
-      throw new Error(`Checksum mismatch for ${release.zip.name} (expected ${expected}, got ${actual}).`);
+      throw new Error(`Checksum mismatch for ${release.asset.name} (expected ${expected}, got ${actual}).`);
+    }
+    if (isWindows) {
+      writeUpdaterLog(`staged ${release.version} installer at ${downloadPath}`);
+      return { version: release.version, stagingDir, installerPath: downloadPath };
     }
 
     const extractDir = path.join(stagingDir, "app");
-    runChecked("/usr/bin/ditto", ["-x", "-k", zipPath, extractDir]);
-    fs.rmSync(zipPath, { force: true });
+    runChecked("/usr/bin/ditto", ["-x", "-k", downloadPath, extractDir]);
+    fs.rmSync(downloadPath, { force: true });
     const bundleName = fs.readdirSync(extractDir).find((name) => name.endsWith(".app"));
     if (!bundleName) {
       throw new Error("The downloaded update does not contain an .app bundle.");
@@ -204,6 +219,26 @@ function scheduleInstall(relaunch) {
     return;
   }
   installScheduled = true;
+  if (isWindows) {
+    const installDir = path.dirname(process.execPath);
+    // Builds before the MSI switch were NSIS installs in the same folder; remove that registration first.
+    const uninstaller = path.join(installDir, `Uninstall ${app.getName()}.exe`);
+    const script = path.join(pendingInstall.stagingDir, "install-update.ps1");
+    fs.writeFileSync(script, windowsInstallScript(), "utf8");
+    const args = [
+      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
+      "-AppPid", String(process.pid),
+      "-Msi", pendingInstall.installerPath,
+      "-Log", path.join(app.getPath("userData"), "update-msi.log"),
+      "-Exe", process.execPath,
+      "-Relaunch", relaunch ? "1" : "0",
+      // Windows PowerShell drops empty -File arguments, so pass these only when there is an uninstaller.
+      ...(fs.existsSync(uninstaller) ? ["-Uninstaller", uninstaller, "-InstallDir", installDir] : []),
+    ];
+    spawn("powershell.exe", args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    writeUpdaterLog(`scheduled MSI install of ${pendingInstall.version} (relaunch=${relaunch})`);
+    return;
+  }
   const targetBundlePath = currentBundlePath();
   const backupPath = path.join(pendingInstall.stagingDir, "previous.app");
   const logPath = path.join(app.getPath("userData"), "updater.log");
@@ -255,7 +290,7 @@ async function promptRestart() {
 async function checkForUpdates({ manual = false } = {}) {
   if (!updatesSupported()) {
     if (manual) {
-      await showMessage({ type: "info", message: "Updates are only available in the packaged macOS app." });
+      await showMessage({ type: "info", message: "Updates are only available in the packaged app." });
     }
     return;
   }
@@ -270,11 +305,15 @@ async function checkForUpdates({ manual = false } = {}) {
   let userStartedUpdate = false;
   try {
     const currentVersion = app.getVersion();
-    const release = await fetchLatestRelease();
-    writeUpdaterLog(`current=${currentVersion} latest=${release.version}`);
+    const channel = getChannel();
+    const release = await fetchChannelRelease(channel);
+    writeUpdaterLog(`channel=${channel} current=${currentVersion} latest=${release.version}`);
     if (compareVersions(release.version, currentVersion) <= 0) {
       if (manual) {
-        await showMessage({ type: "info", message: "You're up to date.", detail: `AI Photo Culling ${currentVersion} is the latest version.` });
+        const detail = channel === "stable" && compareVersions(currentVersion, release.version) > 0
+          ? `You have nightly ${currentVersion}; the Stable channel continues from the next stable release after it.`
+          : `AI Photo Culling ${currentVersion} is the latest ${channel} version.`;
+        await showMessage({ type: "info", message: "You're up to date.", detail });
       }
       return;
     }
@@ -283,14 +322,14 @@ async function checkForUpdates({ manual = false } = {}) {
     }
 
     const notReplaceable = bundleNotReplaceableReason(currentBundlePath());
-    const canInstall = !notReplaceable && release.zip && release.checksums;
+    const canInstall = !notReplaceable && release.asset && release.checksums;
     const notes = releaseNotesPreview(release.notes);
     const { response } = await showMessage({
       type: "info",
       buttons: canInstall ? ["Update", "Later", "Skip This Version"] : ["Open Release Page", "Later", "Skip This Version"],
       defaultId: 0,
       cancelId: 1,
-      message: `AI Photo Culling ${release.version} is available.`,
+      message: `AI Photo Culling ${release.version} is available${release.prerelease ? " (nightly build)" : ""}.`,
       detail: [
         `You have ${currentVersion}.`,
         notes,
@@ -325,6 +364,7 @@ async function checkForUpdates({ manual = false } = {}) {
 
 function initUpdater(options) {
   getWindow = options.getWindow;
+  getChannel = options.getChannel || getChannel;
   if (!updatesSupported()) {
     return;
   }
@@ -337,4 +377,5 @@ function initUpdater(options) {
 module.exports = {
   checkForUpdates,
   initUpdater,
+  updatesSupported,
 };

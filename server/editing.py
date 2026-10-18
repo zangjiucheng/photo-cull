@@ -78,8 +78,8 @@ def decode_srgb(rgb):
                     ((np.maximum(rgb, 0) + 0.055) / 1.055) ** 2.4).astype(np.float32)
 
 
-# Camera JPEGs and Lightroom render DJI DNGs through the embedded ProfileToneCurve. This lift
-# before the curve matched FC3170 camera JPEG midtones on real samples without clipping skies.
+# rawProfileVersion=1: retain this appearance for existing recipes. This is a tuned base,
+# not a promise of camera-JPEG/Lightroom equivalence. New profiles need a separate version.
 BASE_EXPOSURE_EV = 0.6
 
 
@@ -196,6 +196,58 @@ def apply_geometry(image, crop):
         (ow, oh), Image.Transform.AFFINE, affine, Image.Resampling.BICUBIC)) for channel in range(3)], axis=-1)
 
 
+@per_pixel
+def apply_selected_color(image, selected):
+    """One smooth circular hue band in HSL; low-chroma colors are protected."""
+    if not selected or not any(selected[key] for key in ("hue", "saturation", "luminance")):
+        return image
+    high, low = channel_max(image), channel_min(image)
+    d = high - low
+    safe = np.maximum(d, 1e-6)
+    r, g, b = image[..., 0], image[..., 1], image[..., 2]
+    hue = np.mod(np.where(high == r, (g - b) / safe,
+                 np.where(high == g, 2 + (b - r) / safe, 4 + (r - g) / safe)) / 6, 1)
+    light = (high + low) / 2
+    saturation = d / np.maximum(1 - np.abs(2 * light - 1), 1e-6)
+    distance = np.abs(np.mod(hue - selected["center"] + .5, 1) - .5)
+    t = np.clip((distance / selected["range"] - .5) * 2, 0, 1)
+    chroma = np.clip(d / .08, 0, 1)
+    weight = (1 - t * t * (3 - 2 * t)) * chroma * chroma * (3 - 2 * chroma)
+    hue = np.mod(hue + selected["hue"] * weight / 6, 1)
+    saturation = np.clip(saturation * (1 + selected["saturation"] * weight), 0, 1)
+    light = np.clip(light + selected["luminance"] * weight * .25, 0, 1)
+    c = (1 - np.abs(2 * light - 1)) * saturation
+    x = c * (1 - np.abs(np.mod(hue * 6, 2) - 1))
+    z = np.zeros_like(c)
+    sector = np.minimum((hue * 6).astype(np.int32), 5)
+    out = np.stack([np.choose(sector, choices) for choices in ((c, x, z, z, x, c), (x, c, c, x, z, z), (z, z, x, c, c, x))], axis=-1)
+    return np.where(weight[..., None] > 0, out + (light - c / 2)[..., None], image).astype(np.float32)
+
+
+def gradient_mask(shape, gradient, origin=(0, 0), source_size=None):
+    """A manual gradient in normalized oriented-source coordinates, independent of the crop."""
+    h, w = shape[:2]
+    sw, sh = source_size or (w, h)
+    start, end = gradient["start"], gradient["end"]
+    dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+    x = (np.arange(w, dtype=np.float32) + origin[0] + .5) / sw - start["x"]
+    y = (np.arange(h, dtype=np.float32) + origin[1] + .5) / sh - start["y"]
+    t = (x[None, :] * dx + y[:, None] * dy) / max(dx * dx + dy * dy, 1e-6)
+    t = np.clip((t - .5) / gradient["feather"] + .5, 0, 1)
+    weight = 1 - t * t * (3 - 2 * t)
+    return 1 - weight if gradient["invert"] else weight
+
+
+def apply_gradient(image, gradient, origin=(0, 0), source_size=None):
+    if not gradient or not gradient["enabled"]:
+        return image
+    if not any(gradient[key] for key in ("exposure", "highlights", "temperature")):
+        return image
+    mask = gradient_mask(image.shape, gradient, origin, source_size)[..., None]
+    adjusted = apply_color(image, SimpleNamespace(**{key: gradient[key] for key in ("exposure", "highlights", "temperature")}))
+    return (image + (adjusted - image) * mask).astype(np.float32)
+
+
 def auto_adjustments(image):
     """Conservative global suggestions. Keep night scenes dark and sunset WB intact.
 
@@ -246,6 +298,21 @@ def style_pad_vectors(image, masks=None):
             "down": {"vibrance": -.35, "saturation": -.35},
         },
     }
+
+
+def luminance_stats(image):
+    y = np.clip(image @ LUMA, 0, 1)
+    low, median, high = np.percentile(y, [2, 50, 98])
+    return {"low": float(low), "median": float(median), "high": float(high), "clipped": float((y >= .99).mean())}
+
+
+def scene_kind(stats):
+    """Coarse scene class used to refuse exposure matching across very different scenes."""
+    if stats["median"] < .12:
+        return "night"
+    if stats["high"] > .8 and stats["median"] < .22:
+        return "silhouette"  # bright sky behind a dark subject
+    return "normal"
 
 
 def clean_exif(data, width, height):

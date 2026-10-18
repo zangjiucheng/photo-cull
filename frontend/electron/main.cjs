@@ -1,15 +1,26 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
-const { checkForUpdates, initUpdater } = require("./updater.cjs");
+const {
+  downloadVerified,
+  findRuntimePython,
+  isSupported,
+  managedPythonBuild,
+  managedPythonExecutable,
+  parseVersion,
+  SUPPORTED_LABEL,
+  describe: describePython,
+  systemTar,
+} = require("./python-runtime.cjs");
+const { checkForUpdates, initUpdater, updatesSupported } = require("./updater.cjs");
+const { describeBuild, readBuildInfo } = require("./build-info.cjs");
 
 const appName = "AI Photo Culling";
 app.setName(appName);
 app.setAboutPanelOptions({ applicationName: appName });
 
-const minAiRuntimePython = { major: 3, minor: 10 };
 const isPackaged = app.isPackaged;
 const repoRoot = isPackaged ? process.resourcesPath : path.resolve(__dirname, "..", "..");
 const backendHost = process.env.FLASK_HOST || "127.0.0.1";
@@ -23,7 +34,7 @@ const backendEntry = process.env.BACKEND_ENTRY
   ? path.resolve(repoRoot, process.env.BACKEND_ENTRY)
   : path.join(repoRoot, "app.py");
 const runtimeSourcePath = isPackaged ? path.join(process.resourcesPath, "runtime-source") : repoRoot;
-const appIconPath = path.join(__dirname, "assets", "icon.png");
+const appIconPath = path.join(__dirname, "assets", process.platform === "win32" ? "icon-win.png" : "icon.png");
 let backendProcess = null;
 let backendLogFd = null;
 let mainWindow = null;
@@ -46,8 +57,10 @@ function configureApplicationMenu() {
     ...(process.platform === "darwin" ? [{
       label: appName,
       submenu: [
-        { role: "about", label: `About ${appName}` },
+        { label: `About ${appName}`, click: () => void showAbout() },
         { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
+        { type: "separator" },
+        { label: "Settings...", accelerator: "Cmd+,", click: openSettings },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -69,6 +82,15 @@ function configureApplicationMenu() {
             targetWindow?.webContents.send("save-workspace-file-request");
           },
         },
+        { type: "separator" },
+        { label: "Back Up Library...", click: () => void backupLibrary() },
+        { label: "Restore Library...", click: () => void restoreLibrary() },
+        ...(process.platform === "darwin" ? [] : [
+          { type: "separator" },
+          { label: "Settings...", accelerator: "Ctrl+,", click: openSettings },
+          { type: "separator" },
+          { role: "quit", label: "Exit" },
+        ]),
       ],
     },
     {
@@ -104,9 +126,168 @@ function configureApplicationMenu() {
         { role: "close" },
       ],
     },
+    // macOS keeps update checks in the app menu; elsewhere they live under Help.
+    ...(process.platform === "darwin" ? [] : [{
+      label: "Help",
+      submenu: [
+        { label: "Welcome Guide", click: openOnboarding },
+        { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
+        { type: "separator" },
+        { label: `About ${appName}`, click: () => void showAbout() },
+      ],
+    }]),
   ];
+  if (process.platform === "darwin") {
+    template.push({ role: "help", submenu: [{ label: "Welcome Guide", click: openOnboarding }] });
+  }
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function openOnboarding() {
+  (BrowserWindow.getFocusedWindow() || mainWindow)?.webContents.send("open-onboarding-request");
+}
+
+function openSettings() {
+  (BrowserWindow.getFocusedWindow() || mainWindow)?.webContents.send("open-settings-request");
+}
+
+// App preferences that live outside the library database (they are about this machine).
+function settingsPath() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function readSettings() {
+  try {
+    return { pythonPath: null, ...JSON.parse(fs.readFileSync(settingsPath(), "utf8")) };
+  } catch {
+    return { pythonPath: null };
+  }
+}
+
+// A nightly build stays on nightlies until the user picks a channel.
+function updateChannel() {
+  const chosen = readSettings().updateChannel;
+  if (chosen === "stable" || chosen === "nightly") return chosen;
+  return app.getVersion().includes("-nightly") ? "nightly" : "stable";
+}
+
+let cachedBuildInfo = null;
+function buildInfo() {
+  cachedBuildInfo ||= readBuildInfo(path.resolve(__dirname, "..", ".."));
+  return cachedBuildInfo;
+}
+
+function versionLabel() {
+  return describeBuild(app.getVersion(), buildInfo());
+}
+
+async function showAbout() {
+  const options = {
+    type: "info",
+    buttons: ["OK", "Copy Version"],
+    defaultId: 0,
+    message: appName,
+    detail: `Version ${versionLabel()}\nUpdate channel: ${updateChannel()}`,
+  };
+  const { response } = await (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
+  if (response === 1) clipboard.writeText(versionLabel());
+}
+
+function updateSettings() {
+  const info = buildInfo();
+  return {
+    channel: updateChannel(),
+    version: app.getVersion(),
+    commit: info.commit,
+    dirty: Boolean(info.dirty),
+    builtAt: info.builtAt,
+    label: versionLabel(),
+    supported: updatesSupported(),
+  };
+}
+
+function writeSettings(updates) {
+  const next = { ...readSettings(), ...updates };
+  const partial = `${settingsPath()}.partial`;
+  fs.mkdirSync(path.dirname(partial), { recursive: true });
+  fs.writeFileSync(partial, JSON.stringify(next, null, 2));
+  fs.renameSync(partial, settingsPath());
+  return next;
+}
+
+async function backendJson(pathname, body) {
+  const response = await fetch(`http://${backendHost}:${backendPort}${pathname}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+function describeBackup(manifest) {
+  const c = manifest.counts || {};
+  const when = manifest.createdAt ? new Date(manifest.createdAt * 1000).toLocaleString() : "an unknown date";
+  return [
+    `Made ${when} by version ${manifest.appVersion || "unknown"}.`,
+    `${c.workspaces ?? 0} workspaces, ${c.photos ?? 0} photos, ${c.recipes ?? 0} edits, ${c.presets ?? 0} presets, ${c.snapshots ?? 0} versions.`,
+    "Original photos are not part of a backup; workspaces point at their folders.",
+  ].join("\n");
+}
+
+// Library backups: a consistent copy of the database plus a manifest, never the photos.
+async function backupLibrary() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: "Back Up Library",
+    defaultPath: path.join(app.getPath("documents"), `Photo Cull Backup ${stamp}.zip`),
+    filters: [{ name: "Photo Cull backup", extensions: ["zip"] }],
+  });
+  if (result.canceled || !result.filePath) return;
+  try {
+    const manifest = await backendJson("/api/backup", { destination: result.filePath });
+    await dialog.showMessageBox(mainWindow, { type: "info", message: "Library backed up.", detail: `${describeBackup(manifest)}\n\nSaved to ${result.filePath}` });
+  } catch (error) {
+    dialog.showErrorBox("Backup failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function restoreLibrary() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Restore Library",
+    properties: ["openFile"],
+    filters: [{ name: "Photo Cull backup", extensions: ["zip"] }],
+  });
+  const file = result.filePaths[0];
+  if (result.canceled || !file) return;
+  try {
+    const manifest = await backendJson("/api/backup/inspect", { path: file });
+    const missing = manifest.missingFolders
+      ? `\n\n${manifest.missingFolders} workspace folder(s) are not on this computer; you can reconnect them from the start screen.`
+      : "";
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Restore", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "Replace the current library with this backup?",
+      detail: `${describeBackup(manifest)}${missing}\n\nThe current library is kept as a copy next to it.`,
+    });
+    if (response !== 0) return;
+    const restored = await backendJson("/api/backup/restore", { path: file });
+    mainWindow?.webContents.reload();
+    await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      message: "Library restored.",
+      detail: restored.previousLibrary ? `The previous library was saved as ${restored.previousLibrary}.` : "",
+    });
+  } catch (error) {
+    dialog.showErrorBox("Restore failed", error instanceof Error ? error.message : String(error));
+  }
 }
 
 function prepareDbPath() {
@@ -158,6 +339,25 @@ function runtimePythonPath() {
   return process.platform === "win32"
     ? path.join(aiRuntimeVenvDir(), "Scripts", "python.exe")
     : path.join(aiRuntimeVenvDir(), "bin", "python");
+}
+
+// Visual C++ runtime DLLs bundled with the Windows app (see scripts/package-electron.cjs).
+function vcRuntimeDir() {
+  return path.join(process.resourcesPath, "vc-runtime");
+}
+
+// torch loads its DLLs with their own folder on the search path, so copies there satisfy c10.dll
+// on a PC without the VC++ Redistributable, with no admin rights. Also repairs existing installs.
+function ensureVcRuntime() {
+  if (process.platform !== "win32" || !fs.existsSync(vcRuntimeDir())) return;
+  const torchLib = path.join(aiRuntimeVenvDir(), "Lib", "site-packages", "torch", "lib");
+  if (!fs.existsSync(torchLib)) return;
+  for (const name of fs.readdirSync(vcRuntimeDir()).filter((file) => /\.dll$/i.test(file))) {
+    const target = path.join(torchLib, name);
+    if (fs.existsSync(target)) continue;
+    fs.copyFileSync(path.join(vcRuntimeDir(), name), target);
+    writeAiRuntimeLog(`[vc-runtime] placed ${name} in ${torchLib}`);
+  }
 }
 
 function runtimeInstalled() {
@@ -220,6 +420,7 @@ function runLogged(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd || runtimeSourcePath,
+      windowsHide: true,
       env: {
         ...process.env,
         PATH: runtimeSearchPath(),
@@ -257,81 +458,125 @@ function runtimeSearchPath() {
   return [...extraPaths, process.env.PATH || ""].filter(Boolean).join(path.delimiter);
 }
 
-function pythonVersion(command) {
-  const result = spawnSync(command, [
+function pythonVersion(candidate) {
+  const result = spawnSync(candidate.command, [
+    ...candidate.args,
     "-c",
     "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
   ], {
     encoding: "utf8",
+    windowsHide: true,
     env: {
       ...process.env,
       PATH: runtimeSearchPath(),
     },
   });
-  if (result.status !== 0) {
+  // The Windows Store "python" alias exits non-zero without printing a version.
+  return result.status === 0 ? parseVersion(result.stdout) : null;
+}
+
+function managedPythonDir() {
+  return path.join(aiRuntimeDir(), "python-dist");
+}
+
+// A relocatable CPython the app downloads for itself when the system has no suitable Python.
+async function ensureManagedPython() {
+  const build = managedPythonBuild();
+  if (!build) {
+    throw new Error("No downloadable Python is available for this platform; install Python 3.10–3.13 and try again.");
+  }
+  const dir = managedPythonDir();
+  const executable = { command: managedPythonExecutable(dir), args: [] };
+  if (fs.existsSync(executable.command)) {
+    const version = pythonVersion(executable);
+    if (isSupported(version)) return { ...executable, version };
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const archive = path.join(dir, "python.tar.gz");
+  const sizeMb = Math.round(build.bytes / 1e6);
+  setAiRuntimeStatus({ detail: `Downloading Python ${build.version} (${sizeMb} MB)` });
+  writeAiRuntimeLog(`[python] no suitable Python installed; downloading ${build.url}`);
+  let shown = -5;
+  await downloadVerified(build.url, archive, build.sha256, (fraction) => {
+    const percent = Math.floor(fraction * 100);
+    if (percent >= shown + 5) {
+      shown = percent;
+      setAiRuntimeStatus({ detail: `Downloading Python ${build.version} (${sizeMb} MB) ${percent}%` });
+    }
+  });
+  setAiRuntimeStatus({ detail: `Unpacking Python ${build.version}` });
+  // tar ships with macOS and with Windows 10 and later (System32\\tar.exe).
+  await runLogged(systemTar(), ["-xzf", archive, "-C", dir], { cwd: dir });
+  fs.rmSync(archive, { force: true });
+  const version = pythonVersion(executable);
+  if (!isSupported(version)) {
+    throw new Error(`The downloaded Python did not start (${executable.command}).`);
+  }
+  writeAiRuntimeLog(`[python] using downloaded Python ${version.label} at ${executable.command}`);
+  return { ...executable, version };
+}
+
+async function basePython() {
+  const custom = readSettings().pythonPath;
+  try {
+    return findRuntimePython({ probe: pythonVersion, log: writeAiRuntimeLog, custom });
+  } catch (error) {
+    // A Python named in AI_RUNTIME_PYTHON or Settings is the user's choice; report it instead of downloading.
+    if (process.env.AI_RUNTIME_PYTHON || custom) throw error;
+    writeAiRuntimeLog(`[python] ${error instanceof Error ? error.message : String(error)}`);
+    return ensureManagedPython();
+  }
+}
+
+function installedRuntimeInfo() {
+  try {
+    return JSON.parse(fs.readFileSync(aiRuntimeMarkerPath(), "utf8"));
+  } catch {
     return null;
   }
-  const match = result.stdout.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) {
-    return null;
-  }
+}
+
+function runtimeSettings() {
+  const managed = managedPythonBuild();
+  const installed = runtimeInstalled() ? installedRuntimeInfo() : null;
   return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-    label: match[0],
+    pythonPath: readSettings().pythonPath,
+    envPython: process.env.AI_RUNTIME_PYTHON || null,
+    supportedRange: SUPPORTED_LABEL,
+    managedPython: managed ? { version: managed.version, megabytes: Math.round(managed.bytes / 1e6) } : null,
+    installedWith: installed?.basePython || null,
   };
 }
 
-function isSupportedPython(version) {
-  if (!version) {
-    return false;
+// Check one Python, or (command null) report what the automatic search would pick.
+function checkPython(command) {
+  if (command) {
+    const version = pythonVersion({ command, args: [] });
+    return { command, version: version?.label || null, supported: isSupported(version) };
   }
-  if (version.major > minAiRuntimePython.major) {
-    return true;
+  try {
+    const { AI_RUNTIME_PYTHON: _ignored, ...env } = process.env;
+    const found = findRuntimePython({ probe: pythonVersion, env });
+    return { command: describePython(found), version: found.version.label, supported: true };
+  } catch (error) {
+    return { command: null, version: null, supported: false, message: error instanceof Error ? error.message : String(error) };
   }
-  return version.major === minAiRuntimePython.major && version.minor >= minAiRuntimePython.minor;
 }
 
-function systemPythonPath() {
-  if (process.env.AI_RUNTIME_PYTHON) {
-    const configuredVersion = pythonVersion(process.env.AI_RUNTIME_PYTHON);
-    writeAiRuntimeLog(`[python] AI_RUNTIME_PYTHON=${process.env.AI_RUNTIME_PYTHON} version=${configuredVersion?.label || "unavailable"}`);
-    if (isSupportedPython(configuredVersion)) {
-      return process.env.AI_RUNTIME_PYTHON;
-    }
-    throw new Error(`AI Runtime requires Python ${minAiRuntimePython.major}.${minAiRuntimePython.minor}+; AI_RUNTIME_PYTHON is ${configuredVersion?.label || "not runnable"}.`);
-  }
+// The UI is served by the backend, so its port is part of the page's origin and with it of
+// localStorage (export folders, unsaved-edit recovery). Prefer the same port every launch and only
+// fall back to a random one when it is taken.
+const preferredBackendPort = 47615;
 
-  const candidates = process.platform === "win32"
-    ? ["python3.13", "python3.12", "python3.11", "python3.10", "python"]
-    : [
-        "python3.13",
-        "python3.12",
-        "python3.11",
-        "python3.10",
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
-        "python3",
-      ];
-
-  for (const candidate of candidates) {
-    const version = pythonVersion(candidate);
-    writeAiRuntimeLog(`[python] candidate=${candidate} version=${version?.label || "unavailable"}`);
-    if (isSupportedPython(version)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`AI Runtime requires Python ${minAiRuntimePython.major}.${minAiRuntimePython.minor}+ because numpy/torch do not support the selected older Python. Install Python 3.10 or newer, or set AI_RUNTIME_PYTHON to a compatible Python executable.`);
-}
-
-function findAvailablePort(host) {
+function findAvailablePort(host, preferred = 0) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
-    server.on("error", reject);
-    server.listen(0, host, () => {
+    server.on("error", (error) => {
+      if (preferred) findAvailablePort(host).then(resolve, reject);
+      else reject(error);
+    });
+    server.listen(preferred, host, () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : null;
       server.close(() => {
@@ -371,10 +616,20 @@ function startBackend() {
   const uploadFolder = prepareUserDataDir("uploads");
   const logPath = path.join(app.getPath("userData"), "backend.log");
   const shouldUseAiRuntime = useAiRuntimeBackend();
+  if (shouldUseAiRuntime) {
+    try {
+      ensureVcRuntime();
+    } catch (error) {
+      writeAiRuntimeLog(`[vc-runtime] ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const command = shouldUseAiRuntime ? runtimePythonPath() : hasPackagedBackend ? packagedBackendPath : pythonBin;
   const args = shouldUseAiRuntime ? [path.join(runtimeSourcePath, "app.py")] : hasPackagedBackend ? [] : [backendEntry];
   backendLogFd = isPackaged ? fs.openSync(logPath, "a") : null;
   backendProcess = spawn(command, args, {
+    // The backend (PyInstaller exe or venv python.exe) is a console program; without this Windows
+    // opens a terminal window next to the app.
+    windowsHide: true,
     cwd: shouldUseAiRuntime ? runtimeSourcePath : repoRoot,
     env: {
       ...process.env,
@@ -384,6 +639,7 @@ function startBackend() {
       UPLOAD_FOLDER: uploadFolder,
       AI_RUNTIME_MODEL_DIR: aiRuntimeModelDir(),
       FLASK_DEBUG: "0",
+      AI_CULLING_APP_VERSION: app.getVersion(),
       PYTHONUNBUFFERED: "1",
     },
     stdio: isPackaged && backendLogFd ? ["ignore", backendLogFd, backendLogFd] : "inherit",
@@ -425,8 +681,13 @@ async function restartBackend() {
 }
 
 async function verifyAiRuntime(runtimePython) {
-  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','cv2','huggingface_hub'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
-  await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
+  // Importing (not just finding) torch and open_clip catches native libraries that cannot load.
+  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','cv2','huggingface_hub'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nif missing: sys.exit(1)\nimport torch, open_clip\nprint('torch', torch.__version__, 'loads')\n";
+  try {
+    await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
+  } catch {
+    throw new Error("The AI packages installed but torch could not load. See the install log for the Python error.");
+  }
 }
 
 async function installAiRuntime() {
@@ -451,14 +712,19 @@ async function installAiRuntime() {
       fs.rmSync(aiRuntimeMarkerPath(), { force: true });
     }
     writeAiRuntimeLog(`\n[${new Date().toISOString()}] Installing AI runtime`);
-    const python = systemPythonPath();
+    const python = await basePython();
+    if (backendProcess && useAiRuntimeBackend()) {
+      // Reinstalling: the backend runs from this venv, and Windows cannot delete a running python.exe.
+      setAiRuntimeStatus({ detail: "Stopping the AI backend" });
+      await stopBackend();
+    }
     if (fs.existsSync(aiRuntimeVenvDir())) {
       setAiRuntimeStatus({ detail: "Removing previous incomplete AI runtime venv" });
       writeAiRuntimeLog(`[venv] removing existing venv at ${aiRuntimeVenvDir()}`);
       fs.rmSync(aiRuntimeVenvDir(), { recursive: true, force: true });
     }
-    setAiRuntimeStatus({ detail: `Creating venv with ${python}` });
-    await runLogged(python, ["-m", "venv", aiRuntimeVenvDir()], { cwd: runtimeSourcePath });
+    setAiRuntimeStatus({ detail: `Creating venv with Python ${python.version.label}` });
+    await runLogged(python.command, [...python.args, "-m", "venv", aiRuntimeVenvDir()], { cwd: runtimeSourcePath });
 
     const runtimePython = runtimePythonPath();
     setAiRuntimeStatus({ detail: "Upgrading pip" });
@@ -477,12 +743,14 @@ async function installAiRuntime() {
       path.join(runtimeSourcePath, "requirements-faiss.txt"),
     ], { cwd: runtimeSourcePath });
 
+    ensureVcRuntime();
     setAiRuntimeStatus({ detail: "Verifying AI runtime packages" });
     await verifyAiRuntime(runtimePython);
 
     fs.writeFileSync(aiRuntimeMarkerPath(), JSON.stringify({
       installedAt: new Date().toISOString(),
       python: runtimePython,
+      basePython: { command: describePython(python), version: python.version.label },
       source: runtimeSourcePath,
     }, null, 2));
     setAiRuntimeStatus({
@@ -502,6 +770,16 @@ async function installAiRuntime() {
       error: error instanceof Error ? error.message : String(error),
       detail: `See ${path.join(app.getPath("userData"), "ai-runtime-install.log")}`,
     });
+    if (!backendProcess) {
+      // A failed reinstall stopped the AI backend; bring the bundled one back.
+      try {
+        closeBackendLog();
+        startBackend();
+        await waitForPort(backendHost, backendPort);
+      } catch (restartError) {
+        writeAiRuntimeLog(`[backend] restart failed: ${restartError instanceof Error ? restartError.message : String(restartError)}`);
+      }
+    }
   } finally {
     setAiRuntimeStatus({ installing: false });
   }
@@ -546,10 +824,34 @@ function workspaceFileDefaultName(name) {
   return `${safeName}.aiculling`;
 }
 
+// Renderer errors and GPU/renderer crashes go to renderer.log, so a blank window leaves a trace.
+function writeRendererLog(message) {
+  try {
+    fs.appendFileSync(path.join(app.getPath("userData"), "renderer.log"), `[${new Date().toISOString()}] ${message}\n`);
+  } catch {
+    // Logging must never break the app.
+  }
+}
+
+function watchRenderer(win) {
+  writeRendererLog(`start ${versionLabel()} ${process.platform}-${process.arch} electron ${process.versions.electron}`);
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) writeRendererLog(`${level === 3 ? "error" : "warn"} ${message} (${sourceId}:${line})`);
+  });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    writeRendererLog(`renderer gone: ${details.reason} (exit ${details.exitCode})`);
+    if (details.reason !== "clean-exit" && !win.isDestroyed()) win.webContents.reload();
+  });
+}
+
+app.on("child-process-gone", (_event, details) => {
+  if (details.type === "GPU") writeRendererLog(`GPU process gone: ${details.reason} (exit ${details.exitCode})`);
+});
+
 async function createWindow() {
   configureApplicationMenu();
   if (isPackaged && !configuredBackendPort) {
-    backendPort = await findAvailablePort(backendHost);
+    backendPort = await findAvailablePort(backendHost, preferredBackendPort);
   }
   startBackend();
   await waitForPort(backendHost, backendPort);
@@ -572,10 +874,11 @@ async function createWindow() {
     },
   });
   mainWindow = win;
+  watchRenderer(win);
 
   await win.loadURL(`http://${backendHost}:${backendPort}`);
   publishAiRuntimeStatus();
-  initUpdater({ getWindow: () => mainWindow });
+  initUpdater({ getWindow: () => mainWindow, getChannel: updateChannel });
 }
 
 ipcMain.handle("open-folder", async () => {
@@ -654,6 +957,53 @@ ipcMain.handle("reveal-folder", async (_event, folderPath) => {
 ipcMain.handle("ai-runtime-status", async () => aiRuntimePublicStatus());
 
 ipcMain.handle("install-ai-runtime", async () => installAiRuntime());
+
+ipcMain.handle("get-runtime-settings", async () => runtimeSettings());
+
+ipcMain.handle("get-update-settings", async () => updateSettings());
+
+// Kept in settings.json rather than localStorage so it survives a change of backend port.
+ipcMain.handle("get-onboarding-done", async () => Boolean(readSettings().onboardingDone));
+
+ipcMain.handle("set-onboarding-done", async () => {
+  writeSettings({ onboardingDone: true });
+  return true;
+});
+
+ipcMain.handle("set-update-channel", async (_event, channel) => {
+  if (channel !== "stable" && channel !== "nightly") throw new Error(`Unknown update channel ${channel}`);
+  writeSettings({ updateChannel: channel });
+  return updateSettings();
+});
+
+ipcMain.handle("check-for-updates", async () => {
+  await checkForUpdates({ manual: true });
+  return updateSettings();
+});
+
+ipcMain.handle("check-python", async (_event, command) => checkPython(command || null));
+
+ipcMain.handle("set-runtime-python", async (_event, command) => {
+  const pythonPath = typeof command === "string" && command.trim() ? command.trim() : null;
+  if (pythonPath) {
+    const check = checkPython(pythonPath);
+    if (!check.supported) {
+      throw new Error(`AI Runtime needs Python ${SUPPORTED_LABEL}; ${pythonPath} is ${check.version ? `Python ${check.version}` : "not runnable"}.`);
+    }
+  }
+  writeSettings({ pythonPath });
+  return runtimeSettings();
+});
+
+ipcMain.handle("choose-python", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose a Python for the AI runtime",
+    buttonLabel: "Use This Python",
+    properties: ["openFile", "showHiddenFiles"],
+    filters: process.platform === "win32" ? [{ name: "Python", extensions: ["exe"] }] : [],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 
 app.whenReady().then(createWindow).catch((error) => {
   dialog.showErrorBox("Failed to start", error instanceof Error ? error.message : String(error));

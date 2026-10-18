@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import importlib.util
 import io
+import logging
 import os
 from typing import Any
 
@@ -12,6 +13,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .config import AppConfig
 
+logger = logging.getLogger(__name__)
 
 RAW_EXTS = {".dng"}
 MAX_DISPLAY_EDGE = 2400
@@ -251,4 +253,8 @@ def delete_cached_renders(content_hashes: set[str] | list[str]) -> int:
                 deleted += 1
             except FileNotFoundError:
                 continue
+            except PermissionError:
+                # Windows refuses to delete a file that is still being served; a stale cache
+                # entry is harmless, so the workspace deletion carries on.
+                logger.warning("Could not remove cached render %s; it is in use", target_path)
     return deleted

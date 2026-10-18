@@ -5,7 +5,7 @@
 <h1 align="center">AI Photo Culling</h1>
 
 <p align="center">
-  Cull, edit and export drone RAWs in one local Mac app.<br>
+  Cull, edit and export drone RAWs in one local app for macOS and Windows.<br>
   <b>Cull → Auto → drag a few sliders → export.</b>
 </p>
 
@@ -15,29 +15,34 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zangjiucheng/photo-cull/releases/latest"><b>Download for macOS</b></a> ·
+  <a href="https://github.com/zangjiucheng/photo-cull/releases/latest"><b>Download for macOS &amp; Windows</b></a> ·
   <a href="https://zangjiucheng.github.io/photo-cull/">Website</a> ·
   <a href="docs/getting-started.md">Docs</a>
 </p>
 
-[![Watch the 40-second film](site/assets/promo-readme.jpg)](https://zangjiucheng.github.io/photo-cull/#film)
+[![Watch the one-minute film](site/assets/promo-readme.jpg)](https://zangjiucheng.github.io/photo-cull/#film)
 
 ## Highlights
 
 - **AI scoring and culling.** Every photo is scored for sharpness, exposure and clipping. Filter, sort, rate and queue the keepers.
 - **Near-duplicate groups.** Similar shots are grouped, with a suggested keeper in each group.
-- **Camera-accurate RAW base.** DJI DNGs are developed through the camera's own tone curve, so you start from the look of the in-camera JPEG.
+- **High-bit RAW base.** DJI DNGs use camera white balance and their embedded tone curve, with a tuned starting exposure.
 - **Tone/Color pad.** An Apple-style 2D pad that moves the real sliders, adapted to each photo. Fine-tune anything afterwards.
 - **18 styles.** Undertones, Moods and Black & White looks, inspired by Apple Photos, each with a strength slider.
+- **Finishing controls.** Native 100% detail, an edited-crop histogram, a local gradient, selective color, a neutral-gray white-balance picker, direct crop with horizon leveling, and exposure matching across a scene.
 - **Clean export.** sRGB JPEG or 16-bit TIFF with ICC profile and capture metadata (no GPS). Originals are never touched.
-- **Local and fast.** Everything runs on your Mac and updates itself from GitHub Releases.
+- **Recoverable.** Library backups with verified restore, named versions of each edit, and exports that resume after a crash.
+- **Local and fast.** Everything runs on your computer and updates itself from GitHub Releases.
 
 ## Install
 
-Download the Apple Silicon DMG from [Releases](https://github.com/zangjiucheng/photo-cull/releases/latest) and drag the app into Applications.
+Grab the latest build from [Releases](https://github.com/zangjiucheng/photo-cull/releases/latest):
+
+- **macOS** (Apple Silicon): open the DMG and drag the app into Applications.
+- **Windows** 10/11 (x64): double-click the `.msi`. It installs for your user, no admin rights needed.
 
 > [!NOTE]
-> Builds aren't notarized yet, so macOS may block the first launch. See [Getting started](docs/getting-started.md#first-launch-and-gatekeeper) for how to open the app.
+> Builds aren't code signed yet, so macOS Gatekeeper or Windows SmartScreen may warn on first launch. See [Getting started](docs/getting-started.md) for how to open the app.
 
 ## Quick start
 
@@ -66,4 +71,4 @@ make dev PYTHON="$PWD/.venv/bin/python"    # desktop app
 make test PYTHON="$PWD/.venv/bin/python"   # backend + frontend tests
 ```
 
-Pushing a `v*` tag builds the DMG and publishes a GitHub Release. See [Development](docs/development.md) for details and [Docker](docker/README.md) for the browser mode.
+CI runs on Ubuntu, macOS and Windows. Pushing a `v*` tag builds the macOS DMG and the Windows MSI and publishes a GitHub Release. See [Development](docs/development.md) for details and [Docker](docker/README.md) for the browser mode.

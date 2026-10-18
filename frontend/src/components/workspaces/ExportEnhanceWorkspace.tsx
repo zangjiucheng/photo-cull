@@ -14,7 +14,11 @@ import type {
   PhotoStylePreset,
   StylePad,
 } from "../../types";
-import { renderEditingPreview } from "../../api";
+import { renderEditingPreview, type ExposureMatch } from "../../api";
+import { CropOverlay, MAX_ANGLE, levelAngle, rotateCrop, viewCrop } from "../../editing/CropOverlay";
+import { PresetManager } from "../../editing/PresetManager";
+import { SnapshotList } from "../../editing/SnapshotList";
+import { isMac, modPrefix, shiftModPrefix } from "../../lib/platform";
 import {
   adjustmentGroups,
   applyAuto,
@@ -35,6 +39,14 @@ import {
   type EditingBase,
 } from "../../editing/renderer";
 import { Button } from "../ui/button";
+import { DetailView } from "../../editing/DetailView";
+import { Histogram } from "../../editing/Histogram";
+import { GradientOverlay, sourcePoint } from "../../editing/GradientOverlay";
+import {
+  hueOf,
+  neutralWhiteBalance,
+  sampleBase,
+} from "../../editing/colorPicker";
 import "./quick-editor.css";
 
 interface ExportEnhanceWorkspaceProps {
@@ -66,6 +78,9 @@ interface ExportEnhanceWorkspaceProps {
   onOutputFolderChange: (path: string) => void;
   onPreviewOpenChange: (open: boolean) => void;
   onStart: () => void;
+  onResume: (retryFailed: boolean) => void;
+  onMatchExposure: () => Promise<{ scene: string; limitEv: number; results: ExposureMatch[] }>;
+  onApplyExposureMatches: (exposures: Record<string, number>) => void;
   onCancel: () => void;
   onClearQueue: () => void;
 }
@@ -93,6 +108,7 @@ const labels: Record<SliderKey, string> = {
   sharpen: "Definition",
 };
 const groupLabels: Record<AdjustmentGroup, string> = {
+  local: "Local gradient",
   light: "Light",
   color: "Color",
   style: "Style",
@@ -102,8 +118,6 @@ const groupLabels: Record<AdjustmentGroup, string> = {
   crop: "Crop",
   output: "Export settings",
 };
-const PRESET_STORAGE = "photo-cull.editing-presets.v2";
-type SavedPreset = { name: string; settings: ExportEnhanceSettings };
 const thumbnailSettings = Object.fromEntries(
   Object.keys(presets).map((id) => [
     id,
@@ -205,8 +219,14 @@ function TonePad({
 }) {
   const move = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    const x = Math.max(
+      0,
+      Math.min(1, (event.clientX - rect.left) / rect.width),
+    );
+    const y = Math.max(
+      0,
+      Math.min(1, (event.clientY - rect.top) / rect.height),
+    );
     onChange(1 - y * 2, x * 2 - 1);
   };
   return (
@@ -291,7 +311,7 @@ function Slider({
       <span>
         <span>{label}</span>
         <output>
-          {max === 3
+          {label.toLowerCase().includes("exposure")
             ? `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`
             : Math.round(value * 100)}
         </output>
@@ -338,6 +358,7 @@ function PreviewCanvas({
   settings,
   original = false,
   clipping = false,
+  maskOverlay = false,
   onError,
   className = "",
 }: {
@@ -345,6 +366,7 @@ function PreviewCanvas({
   settings: ExportEnhanceSettings;
   original?: boolean;
   clipping?: boolean;
+  maskOverlay?: boolean;
   onError?: (message: string) => void;
   className?: string;
 }) {
@@ -380,7 +402,7 @@ function PreviewCanvas({
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => {
       try {
-        renderer.current?.draw(settings, original, clipping);
+        renderer.current?.draw(settings, original, clipping, maskOverlay);
       } catch (error) {
         onError?.(
           error instanceof Error ? error.message : "Preview unavailable",
@@ -388,7 +410,7 @@ function PreviewCanvas({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [base, settings, original, clipping, generation, onError]);
+  }, [base, settings, original, clipping, maskOverlay, generation, onError]);
   return (
     <canvas
       ref={canvas}
@@ -453,8 +475,9 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   const queued = queuedIds
     .map((id) => photos.find((photo) => photo.id === id))
     .filter((p): p is Photo => !!p);
+  // .at(0), not [0]: the index form is typed as always present, which hid that the queue can be empty.
   const photo =
-    queued.find((p) => p.id === selectedPhotoId) ?? queued[0] ?? null;
+    queued.find((p) => p.id === selectedPhotoId) ?? queued.at(0) ?? null;
   const photoKey = photo
     ? `${photo.id}:${photo.mtime}:${photo.orientationOverride}`
     : "";
@@ -486,7 +509,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   const [gpuError, setGpuError] = useState("");
   const [original, setOriginal] = useState(false),
     [clipping, setClipping] = useState(false),
-    [grid, setGrid] = useState(false);
+    [grid, setGrid] = useState(false),
+    [leveling, setLeveling] = useState(false),
+    [exposurePlan, setExposurePlan] = useState<ExposureMatch[] | null>(null),
+    [matching, setMatching] = useState(false);
   const [backendState, setBackendState] = useState<{
       key: string;
       url: string;
@@ -510,21 +536,17 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
     "style",
     "detail",
   ]);
-  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>(() => {
-    try {
-      const list = JSON.parse(localStorage.getItem(PRESET_STORAGE) ?? "[]");
-      return Array.isArray(list)
-        ? list.filter(
-            (p) =>
-              typeof p.name === "string" && p.settings?.recipeVersion === 2,
-          )
-        : [];
-    } catch {
-      return [];
-    }
-  });
-  const [presetName, setPresetName] = useState("");
   const [notice, setNotice] = useState("");
+  const [detail, setDetail] = useState(false);
+  const [gradientHandles, setGradientHandles] = useState(false);
+  const [gradientMask, setGradientMask] = useState(false);
+  const [picker, setPicker] = useState<"color" | "whiteBalance" | null>(null);
+  const [detailCenter, setDetailCenter] = useState({ x: 0.5, y: 0.5 });
+  const detailAvailable =
+    !!base &&
+    settings.recipeVersion === 2 &&
+    !settings.aiDenoise &&
+    !settings.upscale;
   const areaRef = useRef<HTMLDivElement>(null);
   const [area, setArea] = useState({ width: 1, height: 1 });
   const onGpuError = useCallback((message: string) => setGpuError(message), []);
@@ -542,8 +564,13 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         ((props.job.completed + props.job.failed) / props.job.total) * 100,
       )
     : 0;
+  // While the crop section is open the preview shows the whole image at the crop's angle, with
+  // the crop drawn on top (like Lightroom/Photos), instead of the cropped result.
+  const cropping = grid && !!base && !legacy;
+  const shownCrop = cropping ? viewCrop(settings.crop) : settings.crop;
+  const shownSettings = cropping ? { ...settings, crop: shownCrop } : settings;
   const frame = base
-    ? geometry(base.width, base.height, settings.crop)
+    ? geometry(base.width, base.height, shownCrop)
     : { width: 4, height: 3 };
   const frameScale = Math.min(
     area.width / frame.width,
@@ -575,6 +602,11 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
     setGpuError("");
     setOriginal(false);
     setAutoBusy(false);
+    setDetail(false);
+    setGradientHandles(false);
+    setGradientMask(false);
+    setPicker(null);
+    setDetailCenter({ x: 0.5, y: 0.5 });
     loadEditingBase(photo.id, controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
@@ -598,7 +630,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (!controller.signal.aborted && value)
-          setPadVectors({ key: photoKey, vectors: value as StylePad["vectors"] });
+          setPadVectors({
+            key: photoKey,
+            vectors: value as StylePad["vectors"],
+          });
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -647,13 +682,22 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         event.preventDefault();
         setOriginal(true);
       }
+      // Ctrl+Y is the usual redo on Windows and Linux.
+      if (!isMac && event.ctrlKey && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        props.onRedo();
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         event.stopImmediatePropagation();
         if (event.shiftKey) props.onRedo();
         else props.onUndo();
       }
-      if (event.key === "Escape") props.onPreviewOpenChange(false);
+      if (event.key === "Escape") {
+        setPicker(null);
+        props.onPreviewOpenChange(false);
+      }
     };
     const keyup = (event: KeyboardEvent) => {
       if (event.key === "\\") setOriginal(false);
@@ -726,25 +770,84 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
       if (currentPhoto.current === key) setAutoBusy(false);
     }
   };
-  const savePreset = () => {
-    const name = presetName.trim();
-    if (!name) return;
-    const next = [
-      ...savedPresets.filter((p) => p.name !== name),
-      { name, settings: cloneSettings(settings) },
-    ];
-    try {
-      localStorage.setItem(PRESET_STORAGE, JSON.stringify(next));
-      setSavedPresets(next);
-      setPresetName("");
-      setNotice(`Saved “${name}”`);
-    } catch {
-      setNotice("Unable to save preset on this device");
-    }
-  };
   const preview = photo ? (
     <div
-      className={`quick-image ${grid ? "show-grid" : ""}`}
+      className={`quick-image ${grid ? "show-grid" : ""} ${picker ? "quick-picking" : ""}`}
+      title={
+        picker
+          ? "Click a color in the photo"
+          : "Double click for native 100% detail"
+      }
+      onClick={(event) => {
+        if (!picker || !base) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const point = sourcePoint(
+          base.width,
+          base.height,
+          shownCrop,
+          (event.clientX - rect.left) / rect.width,
+          (event.clientY - rect.top) / rect.height,
+        );
+        const rgb = sampleBase(base, point);
+        try {
+          if (picker === "whiteBalance") {
+            const { temperature, tint, limited } = neutralWhiteBalance(rgb);
+            onSettingsChange({ ...settings, temperature, tint, auto: null });
+            setNotice(
+              limited
+                ? "White balance reached the slider limit. Choose a neutral gray surface."
+                : "Neutral white balance applied before style and local adjustments.",
+            );
+          } else {
+            const renderer = new EditingRenderer(
+              document.createElement("canvas"),
+              { width: 1, height: 1, pixels: new Float32Array(rgb) },
+            );
+            try {
+              renderer.draw({
+                ...settings,
+                crop: defaultSettings.crop,
+                gradient: null,
+                selectedColor: null,
+                sharpen: 0,
+              });
+              const center = hueOf(renderer.readPixel());
+              onSettingsChange({
+                ...settings,
+                selectedColor: {
+                  range: 0.12,
+                  hue: 0,
+                  saturation: 0,
+                  luminance: 0,
+                  ...settings.selectedColor,
+                  center,
+                },
+              });
+            } finally {
+              renderer.dispose();
+            }
+            setNotice(
+              "Color selected. Adjust hue, saturation or luminance below.",
+            );
+          }
+          setPicker(null);
+        } catch (error) {
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : "Unable to sample this color",
+          );
+        }
+      }}
+      onDoubleClick={(event) => {
+        if (!detailAvailable || picker) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        setDetailCenter({
+          x: (event.clientX - rect.left) / rect.width,
+          y: (event.clientY - rect.top) / rect.height,
+        });
+        setDetail(true);
+      }}
       style={{
         width: Math.max(1, frame.width * frameScale),
         height: Math.max(1, frame.height * frameScale),
@@ -753,13 +856,14 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
       {base && !legacy ? (
         <PreviewCanvas
           base={base}
-          settings={settings}
+          settings={shownSettings}
           original={original}
           clipping={clipping}
+          maskOverlay={gradientMask}
           onError={onGpuError}
         />
       ) : null}
-      {backendPreview && !original ? (
+      {backendPreview && !original && !cropping ? (
         <img
           className="quick-rendered"
           src={backendPreview}
@@ -767,18 +871,51 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         />
       ) : null}
       {base && gpuError && !legacy && (!backendPreview || original) ? (
-        <NeutralCanvas base={base} crop={settings.crop} />
+        <NeutralCanvas base={base} crop={shownCrop} />
       ) : null}
       {(!base || legacy) && (!backendPreview || original) ? (
         <img src={photo.url} alt={photo.name} />
       ) : null}
-      {grid ? (
+      {cropping && base && !original ? (
+        <CropOverlay
+          base={base}
+          crop={settings.crop}
+          leveling={leveling}
+          onChange={updateCrop}
+          onBegin={onBeginAdjustment}
+          onEnd={onEndAdjustment}
+          onLevel={(points) => {
+            setLeveling(false);
+            if (!points) {
+              setNotice("Click two points farther apart along the horizon.");
+              return;
+            }
+            const angle = levelAngle(base.width, base.height, points[0], points[1]);
+            if (Math.abs(angle) > MAX_ANGLE) {
+              setNotice(`That line is tilted ${angle.toFixed(1)}°; straightening is limited to ±${MAX_ANGLE}°.`);
+              return;
+            }
+            updateCrop(rotateCrop(base.width, base.height, settings.crop, angle));
+            setNotice(`Leveled to ${angle.toFixed(1)}°.`);
+          }}
+        />
+      ) : grid ? (
         <div className="quick-grid" aria-hidden="true">
           <i />
           <i />
           <b />
           <b />
         </div>
+      ) : null}
+      {base && settings.gradient?.enabled && gradientHandles && !original && !cropping ? (
+        <GradientOverlay
+          base={base}
+          crop={settings.crop}
+          gradient={settings.gradient}
+          onChange={(gradient) => onSettingsChange({ ...settings, gradient })}
+          onBegin={onBeginAdjustment}
+          onEnd={onEndAdjustment}
+        />
       ) : null}
     </div>
   ) : null;
@@ -842,9 +979,36 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
           {photo ? (
             <>
               <div className="quick-image-area" ref={areaRef}>
-                {preview}
+                {detail && detailAvailable && base ? (
+                  <DetailView
+                    key={photoKey}
+                    photoId={photo.id}
+                    base={base}
+                    settings={settings}
+                    original={original}
+                    clipping={clipping}
+                    initialCenter={detailCenter}
+                    onFit={() => setDetail(false)}
+                  />
+                ) : (
+                  preview
+                )}
               </div>
               <div className="quick-stage-tools">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-ghost ui-btn-sm"
+                  aria-pressed={detail && detailAvailable}
+                  disabled={!detailAvailable}
+                  title={
+                    detailAvailable
+                      ? "Native detail before output resize. Double click the photo to inspect a point."
+                      : "Turn off noise reduction and upscale to inspect native color detail"
+                  }
+                  onClick={() => setDetail(!detail)}
+                >
+                  {detail && detailAvailable ? "Fit" : "100%"}
+                </button>
                 <button
                   type="button"
                   className="ui-btn ui-btn-ghost ui-btn-sm"
@@ -915,6 +1079,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         </section>
         <aside className="quick-adjustments" aria-label="Photo adjustments">
           <fieldset disabled={!photo}>
+            {!legacy ? <Histogram base={base} settings={settings} /> : null}
             {legacy ? (
               <div className="quick-legacy">
                 <strong>Legacy edit preserved</strong>
@@ -955,7 +1120,9 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       onBegin={onBeginAdjustment}
                       onEnd={onEndAdjustment}
                       onChange={(value) =>
-                        onSettingsChange(rebasePad(autoStrength(settings, value)))
+                        onSettingsChange(
+                          rebasePad(autoStrength(settings, value)),
+                        )
                       }
                     />
                   ) : null}
@@ -1020,6 +1187,22 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 </details>
                 <details className="quick-section">
                   <summary>Light & color</summary>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!base}
+                    onClick={() => {
+                      setPicker(
+                        picker === "whiteBalance" ? null : "whiteBalance",
+                      );
+                      setDetail(false);
+                      setGradientHandles(false);
+                    }}
+                  >
+                    {picker === "whiteBalance"
+                      ? "Cancel neutral picker"
+                      : "Pick neutral gray"}
+                  </Button>
                   {(
                     [
                       "contrast",
@@ -1039,9 +1222,298 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     Show clipping (red / blue)
                   </label>
                 </details>
+                <details className="quick-section">
+                  <summary>Selective color</summary>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!base || backendNeeded}
+                    onClick={() => {
+                      setPicker(picker === "color" ? null : "color");
+                      setDetail(false);
+                      setGradientHandles(false);
+                    }}
+                  >
+                    {picker === "color"
+                      ? "Cancel color picker"
+                      : "Pick color from photo"}
+                  </Button>
+                  <div className="quick-color-swatches" aria-label="Color band">
+                    {(
+                      [
+                        "Red",
+                        "Yellow",
+                        "Green",
+                        "Cyan",
+                        "Blue",
+                        "Purple",
+                      ] as const
+                    ).map((name, i) => (
+                      <button
+                        type="button"
+                        key={name}
+                        aria-label={`Select ${name.toLowerCase()} colors`}
+                        title={name}
+                        style={{ background: `hsl(${i * 60} 60% 55%)` }}
+                        onClick={() =>
+                          onSettingsChange({
+                            ...settings,
+                            selectedColor: {
+                              range: 0.12,
+                              hue: 0,
+                              saturation: 0,
+                              luminance: 0,
+                              ...settings.selectedColor,
+                              center: i / 6,
+                            },
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                  {settings.selectedColor ? (
+                    <>
+                      <p className="quick-hint">
+                        Selected hue:{" "}
+                        {Math.round(settings.selectedColor.center * 360)}°
+                      </p>
+                      {(
+                        ["hue", "saturation", "luminance", "range"] as const
+                      ).map((key) => (
+                        <Slider
+                          key={key}
+                          label={
+                            {
+                              hue: "Selected hue",
+                              saturation: "Selected saturation",
+                              luminance: "Selected luminance",
+                              range: "Color range",
+                            }[key]
+                          }
+                          value={settings.selectedColor![key]}
+                          min={key === "range" ? 0.02 : -1}
+                          max={key === "range" ? 0.5 : 1}
+                          reset={key === "range" ? 0.12 : 0}
+                          onBegin={onBeginAdjustment}
+                          onEnd={onEndAdjustment}
+                          onChange={(value) =>
+                            onSettingsChange({
+                              ...settings,
+                              selectedColor: {
+                                ...settings.selectedColor!,
+                                [key]: value,
+                              },
+                            })
+                          }
+                        />
+                      ))}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          onSettingsChange({ ...settings, selectedColor: null })
+                        }
+                      >
+                        Reset selected color
+                      </Button>
+                    </>
+                  ) : null}
+                  <p className="quick-hint">
+                    Changes every matching color, including sky and water.
+                    Low-chroma grays are protected.
+                  </p>
+                </details>
+                <details className="quick-section">
+                  <summary>Local gradient</summary>
+                  {settings.gradient ? (
+                    <>
+                      <div className="quick-local-actions">
+                        <label className="quick-check">
+                          <input
+                            type="checkbox"
+                            checked={settings.gradient.enabled}
+                            onChange={(event) =>
+                              onSettingsChange({
+                                ...settings,
+                                gradient: {
+                                  ...settings.gradient!,
+                                  enabled: event.target.checked,
+                                },
+                              })
+                            }
+                          />{" "}
+                          Enabled
+                        </label>
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-ghost ui-btn-sm"
+                          onClick={() =>
+                            onSettingsChange({ ...settings, gradient: null })
+                          }
+                        >
+                          Delete
+                        </button>
+                      </div>
+                      <label className="quick-check">
+                        <input
+                          type="checkbox"
+                          checked={gradientHandles}
+                          onChange={(event) => {
+                            setGradientHandles(event.target.checked);
+                            setDetail(false);
+                          }}
+                        />{" "}
+                        Show handles
+                      </label>
+                      <label className="quick-check">
+                        <input
+                          type="checkbox"
+                          checked={gradientMask}
+                          disabled={backendNeeded}
+                          onChange={(event) => {
+                            setGradientMask(event.target.checked);
+                            setDetail(false);
+                          }}
+                        />{" "}
+                        Show affected area
+                      </label>
+                      <label className="quick-check">
+                        <input
+                          type="checkbox"
+                          checked={settings.gradient.invert}
+                          onChange={(event) =>
+                            onSettingsChange({
+                              ...settings,
+                              gradient: {
+                                ...settings.gradient!,
+                                invert: event.target.checked,
+                              },
+                            })
+                          }
+                        />{" "}
+                        Invert
+                      </label>
+                      {(
+                        [
+                          "exposure",
+                          "highlights",
+                          "temperature",
+                          "feather",
+                        ] as const
+                      ).map((key) => (
+                        <Slider
+                          key={key}
+                          label={
+                            {
+                              exposure: "Local exposure",
+                              highlights: "Local highlights",
+                              temperature: "Local warmth",
+                              feather: "Feather",
+                            }[key]
+                          }
+                          value={settings.gradient![key]}
+                          min={
+                            key === "feather"
+                              ? 0.05
+                              : key === "exposure"
+                                ? -2
+                                : -1
+                          }
+                          max={key === "exposure" ? 2 : 1}
+                          reset={key === "feather" ? 1 : 0}
+                          onBegin={onBeginAdjustment}
+                          onEnd={onEndAdjustment}
+                          onChange={(value) =>
+                            onSettingsChange({
+                              ...settings,
+                              gradient: { ...settings.gradient!, [key]: value },
+                            })
+                          }
+                        />
+                      ))}
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-ghost ui-btn-sm"
+                        disabled={!base}
+                        onClick={() => {
+                          if (!base) return;
+                          onSettingsChange({
+                            ...settings,
+                            gradient: {
+                              ...settings.gradient!,
+                              start: sourcePoint(
+                                base.width,
+                                base.height,
+                                settings.crop,
+                                0.5,
+                                0.2,
+                              ),
+                              end: sourcePoint(
+                                base.width,
+                                base.height,
+                                settings.crop,
+                                0.5,
+                                0.7,
+                              ),
+                            },
+                          });
+                          setGradientHandles(true);
+                          setDetail(false);
+                        }}
+                      >
+                        Center handles in crop
+                      </button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!base}
+                      onClick={() => {
+                        if (!base) return;
+                        onSettingsChange({
+                          ...settings,
+                          gradient: {
+                            start: sourcePoint(
+                              base.width,
+                              base.height,
+                              settings.crop,
+                              0.5,
+                              0.2,
+                            ),
+                            end: sourcePoint(
+                              base.width,
+                              base.height,
+                              settings.crop,
+                              0.5,
+                              0.7,
+                            ),
+                            enabled: true,
+                            invert: false,
+                            feather: 1,
+                            exposure: -0.3,
+                            highlights: 0,
+                            temperature: 0,
+                          },
+                        });
+                        setGradientHandles(true);
+                        setDetail(false);
+                      }}
+                    >
+                      Add gradient
+                    </Button>
+                  )}
+                  <p className="quick-hint">
+                    Drag the filled and open points to set the transition. A
+                    gradient affects everything across that area.
+                  </p>
+                </details>
                 <details
                   className="quick-section"
-                  onToggle={(event) => setGrid(event.currentTarget.open)}
+                  onToggle={(event) => {
+                    setGrid(event.currentTarget.open);
+                    if (!event.currentTarget.open) setLeveling(false);
+                  }}
                 >
                   <summary>Crop & straighten</summary>
                   <div className="quick-ratios">
@@ -1069,12 +1541,26 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     onBegin={onBeginAdjustment}
                     onEnd={onEndAdjustment}
                     onChange={(value) =>
-                      updateCrop({ ...settings.crop, angle: value * 15 })
+                      updateCrop(
+                        base
+                          ? rotateCrop(base.width, base.height, settings.crop, value * 15)
+                          : { ...settings.crop, angle: value * 15 },
+                      )
                     }
                   />
+                  <div className="quick-button-row">
+                    <button
+                      type="button"
+                      className={`ui-btn ui-btn-sm ${leveling ? "ui-btn-default" : "ui-btn-secondary"}`}
+                      aria-pressed={leveling}
+                      onClick={() => setLeveling(!leveling)}
+                    >
+                      {leveling ? "Click two points on the horizon…" : "Level horizon"}
+                    </button>
+                  </div>
                   <span className="quick-hint">
-                    {settings.crop.angle.toFixed(1)}° · edges automatically fit
-                    inside the photo
+                    {settings.crop.angle.toFixed(1)}° · drag the frame or its
+                    edges on the photo; Shift keeps the shape
                   </span>
                   <Slider
                     label="Crop size"
@@ -1208,64 +1694,90 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       Apply to queue
                     </button>
                   </div>
-                  <div className="quick-preset-save">
-                    <input
-                      className="ui-input"
-                      aria-label="Preset name"
-                      placeholder="Name this look"
-                      value={presetName}
-                      onChange={(event) => setPresetName(event.target.value)}
-                    />
+                  <div className="quick-button-row">
                     <button
                       type="button"
                       className="ui-btn ui-btn-secondary ui-btn-sm"
-                      disabled={!presetName.trim()}
-                      onClick={savePreset}
+                      disabled={queued.length < 2 || matching || legacy}
+                      title="Bring the other queued photos to this photo's brightness. Only exposure changes."
+                      onClick={() => {
+                        setMatching(true);
+                        setExposurePlan(null);
+                        props
+                          .onMatchExposure()
+                          .then((plan) => setExposurePlan(plan.results))
+                          .catch((error) =>
+                            setNotice(error instanceof Error ? error.message : "Unable to match exposure"),
+                          )
+                          .finally(() => setMatching(false));
+                      }}
                     >
-                      Save
+                      {matching ? "Measuring…" : "Match exposure to this photo"}
                     </button>
                   </div>
-                  {savedPresets.map((preset) => (
-                    <div className="quick-saved-preset" key={preset.name}>
-                      <button
-                        type="button"
-                        className="ui-btn ui-btn-secondary ui-btn-sm"
-                        onClick={() =>
-                          onSettingsChange(
-                            pasteSettings(settings, preset.settings, groups),
-                          )
-                        }
-                      >
-                        {preset.name}
-                      </button>
-                      <button
-                        type="button"
-                        className="ui-btn ui-btn-ghost ui-btn-sm ui-btn-icon"
-                        aria-label={`Delete preset ${preset.name}`}
-                        onClick={() => {
-                          const next = savedPresets.filter(
-                            (p) => p.name !== preset.name,
-                          );
-                          try {
-                            localStorage.setItem(
-                              PRESET_STORAGE,
-                              JSON.stringify(next),
+                  {exposurePlan ? (
+                    <div className="exposure-plan" role="region" aria-label="Exposure match preview">
+                      {exposurePlan.map((row) => (
+                        <div key={row.photoId} className={`exposure-plan-row ${row.status}`}>
+                          <span>{row.name}</span>
+                          <span>
+                            {row.status === "adjust"
+                              ? `${(row.deltaEv ?? 0) > 0 ? "+" : ""}${(row.deltaEv ?? 0).toFixed(2)} EV${row.limited ? " (capped)" : ""}`
+                              : row.status === "unchanged"
+                                ? "matches"
+                                : "skipped"}
+                          </span>
+                          {row.reason ? <small>{row.reason}</small> : null}
+                        </div>
+                      ))}
+                      <div className="quick-button-row">
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-default ui-btn-sm"
+                          disabled={!exposurePlan.some((row) => row.status === "adjust")}
+                          onClick={() => {
+                            props.onApplyExposureMatches(
+                              Object.fromEntries(
+                                exposurePlan
+                                  .filter((row) => row.status === "adjust" && row.proposed !== undefined)
+                                  .map((row) => [row.photoId, row.proposed as number]),
+                              ),
                             );
-                            setSavedPresets(next);
-                          } catch {
-                            setNotice("Unable to remove preset");
-                          }
-                        }}
-                      >
-                        ×
-                      </button>
+                            setExposurePlan(null);
+                          }}
+                        >
+                          Apply {exposurePlan.filter((row) => row.status === "adjust").length}
+                        </button>
+                        <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={() => setExposurePlan(null)}>
+                          Dismiss
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                  ) : null}
+                  <PresetManager
+                    settings={settings}
+                    onApply={(preset) =>
+                      onSettingsChange(pasteSettings(settings, preset, groups))
+                    }
+                    onNotice={setNotice}
+                  />
                   <small className="quick-hint">
-                    Exposure, warmth and crop stay individual unless selected
-                    above. Presets are saved on this device.
+                    Presets apply the groups selected above and are kept in
+                    the library, so backups include them.
                   </small>
                 </details>
+                {/* The panel stays visible (disabled) with an empty queue; versions need a photo. */}
+                {photo ? (
+                  <details className="quick-section">
+                    <summary>Versions</summary>
+                    <SnapshotList
+                      photoId={photo.id}
+                      settings={settings}
+                      onRestore={onSettingsChange}
+                      onNotice={setNotice}
+                    />
+                  </details>
+                ) : null}
                 <details className="quick-section">
                   <summary>Noise reduction & upscale</summary>
                   <label className="quick-check">
@@ -1469,7 +1981,11 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <span role="alert">
                 {props.saveError} · Keep this window open.
               </span>{" "}
-              <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={props.onRetrySave}>
+              <button
+                type="button"
+                className="ui-btn ui-btn-ghost ui-btn-sm"
+                onClick={props.onRetrySave}
+              >
                 Retry save
               </button>
             </>
@@ -1485,7 +2001,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                   {props.job.current ? ` · ${props.job.current}` : ""}
                 </>
               ) : (
-                " · ⌘Z Undo · ⇧⌘Z Redo"
+                ` · ${modPrefix}Z Undo · ${shiftModPrefix}Z Redo`
               )}
             </>
           )}
@@ -1493,19 +2009,43 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         {running ? (
           <>
             <progress max={100} value={progress} />
-            <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={props.onCancel}>
+            <button
+              type="button"
+              className="ui-btn ui-btn-ghost ui-btn-sm"
+              onClick={props.onCancel}
+            >
               Cancel export
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            className="ui-btn ui-btn-ghost ui-btn-sm"
-            disabled={!queued.length}
-            onClick={props.onClearQueue}
-          >
-            Clear queue
-          </button>
+          <>
+            {props.job?.resumable ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn-secondary ui-btn-sm"
+                onClick={() => props.onResume(false)}
+              >
+                Resume export ({props.job.pending} left)
+              </button>
+            ) : null}
+            {props.job?.failed ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn-ghost ui-btn-sm"
+                onClick={() => props.onResume(true)}
+              >
+                Retry {props.job.failed} failed
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="ui-btn ui-btn-ghost ui-btn-sm"
+              disabled={!queued.length}
+              onClick={props.onClearQueue}
+            >
+              Clear queue
+            </button>
+          </>
         )}
         {props.job?.failures.length ? (
           <details>

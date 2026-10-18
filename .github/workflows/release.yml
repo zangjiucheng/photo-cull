@@ -4,33 +4,103 @@ on:
   push:
     tags:
       - "v*"
+  # Nightly: a prerelease build of main every night (skipped when nothing changed), or on demand
+  # for any branch with `gh workflow run release.yml --ref <branch>`.
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+  # Dry run: pull requests that touch packaging build every installer without publishing.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "frontend/electron/**"
+      - "frontend/scripts/**"
+      - "frontend/package.json"
+      - "requirements*.txt"
 
 permissions:
   contents: write
 
 jobs:
-  build-mac:
-    runs-on: macos-latest
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      nightly: ${{ steps.pick.outputs.nightly }}
+      publish: ${{ steps.pick.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(node -p 'require("./frontend/package.json").version')
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              version=${GITHUB_REF_NAME#v}
+              nightly=false; [[ "$version" == *-nightly.* ]] && nightly=true
+              publish=true ;;
+            schedule|workflow_dispatch)
+              # Nightlies sort after the current release and before the next one: 0.3.1 -> 0.3.2-nightly.<UTC time>.
+              IFS=. read -r major minor patch <<< "${base%%-*}"
+              version="$major.$minor.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)"
+              nightly=true; publish=true
+              if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+                last=$(gh release list --limit 20 --json tagName,isPrerelease -q '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))][0].tagName')
+                if [ -n "$last" ] && [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$last" -q .sha)" = "$GITHUB_SHA" ]; then
+                  echo "main has not changed since $last"; publish=skip
+                fi
+              fi ;;
+            *)
+              version=""; nightly=false; publish=false ;;
+          esac
+          echo "version=$version nightly=$nightly publish=$publish"
+          { echo "version=$version"; echo "nightly=$nightly"; echo "publish=$publish"; } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    if: needs.version.outputs.publish != 'skip'
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac
+            os: macos-latest
+            backend: ai-culling-backend
+            artifacts: |
+              release/*.dmg
+              release/*.dmg.blockmap
+              release/*.zip
+          - name: windows
+            os: windows-latest
+            backend: ai-culling-backend.exe
+            artifacts: |
+              release/*.msi
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
+        if: runner.os == 'macOS'
         run: brew install libraw
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Set version from tag
-        run: |
-          TAG=${GITHUB_REF_NAME#v}
-          cd frontend && npm version "$TAG" --no-git-tag-version --allow-same-version
+      - name: Set version
+        if: needs.version.outputs.version != ''
+        run: cd frontend && npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Validate backend
         run: |
@@ -44,18 +114,109 @@ jobs:
           npm test
 
       - name: Build DMG and update zip
+        if: runner.os == 'macOS'
         run: make package
 
+      - name: Build installer
+        if: runner.os == 'Windows'
+        run: |
+          python -m venv .package-venv
+          .package-venv/Scripts/python.exe -m pip install --upgrade pip
+          .package-venv/Scripts/python.exe -m pip install -r requirements-package.txt
+          cd frontend
+          PYTHON="$GITHUB_WORKSPACE/.package-venv/Scripts/python.exe" npm run package:win
+          # torch needs these on PCs without the VC++ Redistributable.
+          for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+            test -f "../release/win-unpacked/resources/vc-runtime/$dll" || { echo "missing $dll in the package"; exit 1; }
+          done
+
+      # Installs the MSI exactly as the in-app updater does (same script, silent, per user), checks the
+      # app lands where the updater relaunches it from, then uninstalls.
+      - name: Install the MSI the way the updater does
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem release/*.msi | Select-Object -First 1).FullName
+          node -e "process.stdout.write(require('./frontend/electron/update-utils.cjs').windowsInstallScript())" | Set-Content -Encoding utf8 install-update.ps1
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\ai-photo-culling\AI Photo Culling.exe"
+          $log = Join-Path $env:RUNNER_TEMP "msi.log"
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File install-update.ps1 -AppPid 999999 -Msi $msi -Log $log -Exe $exe -Relaunch 0
+          Get-Content $log -Tail 2
+          if (-not (Test-Path -LiteralPath $exe)) {
+            Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs") -Directory | Select-Object FullName
+            throw "The MSI did not install the app at $exe"
+          }
+          Write-Host "installed: $exe"
+          Start-Process msiexec.exe -ArgumentList '/x', "`"$msi`"", '/qn' -Wait
+          if (Test-Path -LiteralPath $exe) { throw "Uninstalling the MSI left $exe behind" }
+
+      - name: Smoke test the bundled backend
+        run: |
+          export FLASK_PORT=5099 DB_PATH="$RUNNER_TEMP/smoke.db" UPLOAD_FOLDER="$RUNNER_TEMP/uploads"
+          "./build/backend/${{ matrix.backend }}" > "$RUNNER_TEMP/backend.log" 2>&1 &
+          pid=$!
+          for i in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:$FLASK_PORT/api/workspaces" > /dev/null; then
+              echo "backend answered after ${i}s"
+              kill "$pid" 2>/dev/null || taskkill //F //IM "${{ matrix.backend }}" > /dev/null 2>&1 || true
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/backend.log"
+          exit 1
+
+      - name: Smoke test the downloadable AI runtime Python
+        run: node frontend/scripts/check-managed-python.cjs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Generate checksums
-        working-directory: release
-        run: shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
+        working-directory: dist
+        run: sha256sum *.dmg *.zip *.msi > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Write nightly notes
+        if: needs.version.outputs.nightly == 'true'
+        run: |
+          {
+            echo "Nightly build of \`${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}\` at ${GITHUB_SHA::7}, built $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            echo "Less tested than a release: back up your library first. Choose the Nightly channel in Settings to get these as updates."
+          } > notes.md
 
       - name: Upload release artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          files: |
-            release/*.dmg
-            release/*.dmg.blockmap
-            release/*.zip
-            release/SHA256SUMS.txt
-          generate_release_notes: true
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.version.outputs.nightly == 'true' && format('Nightly {0}', env.VERSION) || format('v{0}', env.VERSION) }}
+          prerelease: ${{ needs.version.outputs.nightly == 'true' }}
+          make_latest: ${{ needs.version.outputs.nightly == 'true' && 'false' || 'true' }}
+          body_path: ${{ needs.version.outputs.nightly == 'true' && 'notes.md' || '' }}
+          generate_release_notes: ${{ needs.version.outputs.nightly != 'true' }}
+          files: dist/*
+
+      # Only the newest nightly is kept; it replaces the previous one once it is published.
+      - name: Remove older nightlies
+        if: needs.version.outputs.nightly == 'true'
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease,createdAt \
+            -q '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))] | sort_by(.createdAt) | reverse | .[1:] | .[].tagName' |
+            while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes; done

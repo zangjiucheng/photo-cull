@@ -12,6 +12,10 @@ export const quickKeys = [
 ] as const;
 export const defaultSettings: ExportEnhanceSettings = {
   recipeVersion: 2,
+  engineVersion: 1,
+  rawProfileVersion: 1,
+  gradient: null,
+  selectedColor: null,
   exposure: 0,
   brilliance: 0,
   highlights: 0,
@@ -103,7 +107,10 @@ export function applyAuto(
         ? before[k]
         : Math.max(
             k === "exposure" ? -3 : -1,
-            Math.min(k === "exposure" ? 3 : 1, before[k] + (suggestions[k] ?? 0)),
+            Math.min(
+              k === "exposure" ? 3 : 1,
+              before[k] + (suggestions[k] ?? 0),
+            ),
           ),
     ]),
   );
@@ -141,7 +148,8 @@ export function applyPad(
   const current = settings.pad;
   if (!current && !vectors) return settings;
   const pad: StylePad = {
-    base: current?.base ?? Object.fromEntries(padKeys.map((k) => [k, settings[k]])),
+    base:
+      current?.base ?? Object.fromEntries(padKeys.map((k) => [k, settings[k]])),
     vectors: current?.vectors ?? vectors!,
     tone: Math.max(-1, Math.min(1, tone)),
     colour: Math.max(-1, Math.min(1, colour)),
@@ -179,12 +187,13 @@ export const adjustmentGroups = {
     "blackPoint",
     "dehaze",
   ],
-  color: ["saturation", "vibrance"],
+  color: ["saturation", "vibrance", "selectedColor"],
   style: ["photoStyle"],
   detail: ["sharpen", "aiDenoise", "aiDenoiseStrength"],
   exposure: ["exposure"],
   whiteBalance: ["temperature", "tint"],
   crop: ["crop"],
+  local: ["gradient"],
   output: [
     "outputFormat",
     "quality",
@@ -206,5 +215,11 @@ export function pasteSettings(
       .flatMap((group) => adjustmentGroups[group])
       .map((key) => [key, structuredClone(source[key])]),
   );
-  return { ...copy, ...values, auto: null, pad: null, recipeVersion: 2 as const };
+  return {
+    ...copy,
+    ...values,
+    auto: null,
+    pad: null,
+    recipeVersion: 2 as const,
+  };
 }

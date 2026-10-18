@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+from uuid import uuid4
 
 from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from . import db, events, export_enhance, scoring, similarity, storage, editing, raw_pipeline
+from . import backup, db, events, export_enhance, scoring, similarity, storage, editing, raw_pipeline
 
 
 bp = Blueprint("api", __name__)
@@ -88,6 +90,49 @@ def create_workspace():
     except storage.InvalidWorkspaceError as exc:
         return error_response(str(exc), 400)
     return jsonify(workspace)
+
+
+@bp.route("/backup", methods=["POST"])
+def create_backup():
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(backup.create_backup(str(data.get("destination") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
+
+
+@bp.route("/backup/download", methods=["GET"])
+def download_backup():
+    # Browser mode has no save dialog on the server side; build the archive and stream it.
+    folder = os.path.join(os.path.dirname(db.get_config().db_path), "backups")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "photo-cull-backup.zip")
+    backup.create_backup(path)
+    return send_file(path, mimetype="application/zip", as_attachment=True, download_name="photo-cull-backup.zip")
+
+
+@bp.route("/backup/inspect", methods=["POST"])
+def inspect_backup():
+    try:
+        return jsonify(backup.inspect_backup(str((request.get_json(silent=True) or {}).get("path") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
+
+
+@bp.route("/backup/restore", methods=["POST"])
+def restore_backup():
+    try:
+        return jsonify(backup.restore_backup(str((request.get_json(silent=True) or {}).get("path") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
+
+
+@bp.route("/workspaces/<workspace_id>/relocate", methods=["POST"])
+def relocate_workspace(workspace_id):
+    try:
+        return jsonify(backup.relocate_workspace(workspace_id, str((request.get_json(silent=True) or {}).get("root_path") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
 
 
 @bp.route("/workspaces/<workspace_id>", methods=["DELETE"])
@@ -198,7 +243,8 @@ def export():
 
     unique_ids = list(dict.fromkeys(str(photo_id) for photo_id in selected_ids))
     mem = storage.build_export_zip(unique_ids)
-    return send_file(mem, download_name="selected.zip", as_attachment=True)
+    # Explicit type: Windows maps .zip to application/x-zip-compressed.
+    return send_file(mem, mimetype="application/zip", download_name="selected.zip", as_attachment=True)
 
 
 @bp.route("/workspaces/<workspace_id>/export-enhance-settings", methods=["PUT"])
@@ -247,6 +293,104 @@ def create_export_enhance_job():
     return jsonify(export_enhance.serialize_job(job))
 
 
+@bp.route("/export-enhance/jobs", methods=["GET"])
+def list_export_enhance_jobs():
+    workspace_id = request.args.get("workspace_id", "")
+    if db.fetch_workspace(workspace_id) is None:
+        return error_response("Workspace not found", 404)
+    return jsonify({"jobs": [export_enhance.serialize_job(job) for job in export_enhance.queue.list(workspace_id)]})
+
+
+@bp.route("/export-enhance/jobs/<job_id>/resume", methods=["POST"])
+def resume_export_enhance_job(job_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        job = export_enhance.queue.resume(job_id, retry_failed=bool(data.get("retry_failed")))
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+    if job is None:
+        return error_response("Enhance & Export job not found", 404)
+    return jsonify(export_enhance.serialize_job(job))
+
+
+@bp.route("/photos/<photo_id>/snapshots", methods=["GET", "POST"])
+def photo_snapshots(photo_id):
+    if db.fetch_photo(photo_id) is None:
+        return error_response("Photo not found", 404)
+    if request.method == "GET":
+        return jsonify({"snapshots": db.list_snapshots(photo_id)})
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()[:80]
+    if not name:
+        return error_response("name is required", 400)
+    try:
+        settings = export_enhance.serialize_settings(export_enhance.parse_settings(data.get("settings")))
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+    return jsonify(db.insert_snapshot(f"snap-{uuid4().hex}", photo_id, name, settings)), 201
+
+
+@bp.route("/snapshots/<snapshot_id>", methods=["PATCH", "DELETE"])
+def snapshot(snapshot_id):
+    if request.method == "DELETE":
+        return jsonify({"deleted": db.delete_snapshot(snapshot_id)})
+    name = str((request.get_json(silent=True) or {}).get("name") or "").strip()[:80]
+    if not name:
+        return error_response("name is required", 400)
+    renamed = db.rename_snapshot(snapshot_id, name)
+    return jsonify(renamed) if renamed else error_response("Snapshot not found", 404)
+
+
+@bp.route("/presets", methods=["GET", "POST"])
+def presets():
+    if request.method == "GET":
+        return jsonify({"presets": db.list_presets()})
+    data = request.get_json(silent=True) or {}
+    # A list imports several presets at once (preset files and the one-time localStorage move).
+    entries = data.get("presets") if isinstance(data.get("presets"), list) else [data]
+    saved = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()[:80]
+        if not name:
+            return error_response("Every preset needs a name", 400)
+        try:
+            settings = export_enhance.serialize_settings(export_enhance.parse_settings(entry.get("settings")))
+        except export_enhance.ExportEnhanceError as exc:
+            return error_response(f"{name}: {exc}", 400)
+        saved.append(db.upsert_preset(f"preset-{uuid4().hex}", name, settings))
+    return jsonify({"presets": db.list_presets(), "saved": saved})
+
+
+@bp.route("/presets/<preset_id>", methods=["PATCH", "DELETE"])
+def preset(preset_id):
+    if request.method == "DELETE":
+        return jsonify({"deleted": db.delete_preset(preset_id), "presets": db.list_presets()})
+    name = str((request.get_json(silent=True) or {}).get("name") or "").strip()[:80]
+    if not name:
+        return error_response("name is required", 400)
+    try:
+        renamed = db.rename_preset(preset_id, name)
+    except sqlite3.IntegrityError:
+        return error_response(f"A preset named \u201c{name}\u201d already exists", 409)
+    return jsonify({"preset": renamed, "presets": db.list_presets()}) if renamed else error_response("Preset not found", 404)
+
+
+@bp.route("/export-enhance/match-exposure", methods=["POST"])
+def match_exposure():
+    data = request.get_json(silent=True) or {}
+    targets = data.get("targets") if isinstance(data.get("targets"), dict) else {}
+    try:
+        return jsonify(export_enhance.match_exposure(
+            str(data.get("reference_id") or ""),
+            export_enhance.parse_settings(data.get("reference_settings")),
+            {str(pid): export_enhance.parse_settings(raw) for pid, raw in targets.items() if isinstance(raw, dict)},
+        ))
+    except export_enhance.ExportEnhanceError as exc:
+        return error_response(str(exc), 400)
+
+
 @bp.route("/export-enhance/jobs/<job_id>", methods=["GET"])
 def get_export_enhance_job(job_id):
     job = export_enhance.queue.get(job_id)
@@ -286,11 +430,29 @@ def editing_base(photo_id):
         return error_response("Photo not found", 404)
     try:
         image = export_enhance.queue._loader.load_scaled(photo, 1600)
+        source_width, source_height = export_enhance.queue._loader.source_size(photo)
     except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
         return error_response(str(exc), 400)
     return Response(image.astype("<f4").tobytes(), mimetype="application/octet-stream",
                     headers={"X-Image-Width": str(image.shape[1]), "X-Image-Height": str(image.shape[0]),
+                             "X-Source-Width": str(source_width), "X-Source-Height": str(source_height),
                              "Cache-Control": "no-store"})
+
+
+@bp.route("/photos/<photo_id>/editing-detail", methods=["POST"])
+def editing_detail(photo_id):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return error_response("Expected an editing detail request", 400)
+    try:
+        image, (ow, oh, x, y) = export_enhance.render_detail(photo_id,
+            export_enhance.parse_settings(data.get("settings")), data.get("region"), data.get("original") is True)
+    except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
+        return error_response(str(exc), 400)
+    return Response(image.astype("<f4").tobytes(), mimetype="application/octet-stream",
+        headers={"X-Image-Width": str(image.shape[1]), "X-Image-Height": str(image.shape[0]),
+                 "X-Output-Width": str(ow), "X-Output-Height": str(oh),
+                 "X-Region-X": str(x), "X-Region-Y": str(y), "Cache-Control": "no-store"})
 
 
 @bp.route("/photos/<photo_id>/auto-adjustments", methods=["GET"])

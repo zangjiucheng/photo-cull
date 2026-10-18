@@ -60,6 +60,8 @@ export interface PhotoWorkspace {
   createdAt: number;
   updatedAt: number;
   lastScannedAt: number | null;
+  /** False when the folder moved or its disk is not mounted. */
+  folderFound?: boolean;
 }
 
 export interface LibraryPayload {
@@ -165,7 +167,7 @@ export type ViewMode = "grid" | "list";
 export type RatingFilter = "all" | "unrated" | "1" | "2" | "3" | "4" | "5";
 export type StatusTone = "" | "ok" | "warn" | "error" | "busy";
 export type SortMode = "score-desc" | "score-asc" | "name-asc" | "name-desc" | "mtime-desc" | "mtime-asc";
-export type ToolTab = "browse" | "review" | "duplicates" | "export-enhance" | "stats" | "debug";
+export type ToolTab = "browse" | "review" | "duplicates" | "export-enhance" | "stats" | "settings";
 export type WorkspaceTab = ToolTab;
 export type SimilarityScope = "current" | "library";
 
@@ -186,6 +188,38 @@ export interface AiRuntimeStatus {
   logTail: string[];
 }
 
+export interface RuntimeSettings {
+  /** Python chosen in Settings; null means find one automatically. */
+  pythonPath: string | null;
+  /** AI_RUNTIME_PYTHON from the environment, which overrides pythonPath. */
+  envPython: string | null;
+  supportedRange: string;
+  managedPython: { version: string; megabytes: number } | null;
+  installedWith: { command: string; version: string } | null;
+}
+
+export type UpdateChannel = "stable" | "nightly";
+
+export interface UpdateSettings {
+  channel: UpdateChannel;
+  version: string;
+  commit: string | null;
+  /** Built from a working tree with uncommitted changes. */
+  dirty: boolean;
+  builtAt: string | null;
+  /** "0.3.1 (a1b2c3d, 2026-10-18 15:30 UTC)" */
+  label: string;
+  /** False in development builds, which never update themselves. */
+  supported: boolean;
+}
+
+export interface PythonCheck {
+  command: string | null;
+  version: string | null;
+  supported: boolean;
+  message?: string;
+}
+
 export type PadDirections = { up: Record<string, number>; down: Record<string, number> };
 export interface StylePad {
   tone: number;
@@ -196,6 +230,10 @@ export interface StylePad {
 
 export interface ExportEnhanceSettings {
   recipeVersion: 1 | 2;
+  engineVersion: 1;
+  rawProfileVersion: 1;
+  gradient: LinearGradient | null;
+  selectedColor: { center: number; range: number; hue: number; saturation: number; luminance: number } | null;
   brilliance: number;
   vibrance: number;
   blackPoint: number;
@@ -219,6 +257,17 @@ export interface ExportEnhanceSettings {
   quality: number;
   resizeMaxEdge: number | null;
   photoStyle: PhotoStyle;
+}
+
+export interface LinearGradient {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  enabled: boolean;
+  invert: boolean;
+  feather: number;
+  exposure: number;
+  highlights: number;
+  temperature: number;
 }
 
 // v2 ids come from server/editing_presets.json; "muted" and "dramatic" also name legacy (v1) styles.
@@ -249,6 +298,9 @@ export interface ExportEnhanceJob {
   outputFolder: string;
   outputs: string[];
   failures: Array<{ photo_id?: string; photoId?: string; name: string; error: string }>;
+  /** Photos not written yet; an interrupted or cancelled job can resume them. */
+  pending?: number;
+  resumable?: boolean;
   createdAt: number;
   updatedAt: number;
 }
