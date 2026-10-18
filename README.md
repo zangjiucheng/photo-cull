@@ -29,7 +29,7 @@
 - **High-bit RAW base.** DJI DNGs use camera white balance and their embedded tone curve, with a tuned starting exposure.
 - **Tone/Color pad.** An Apple-style 2D pad that moves the real sliders, adapted to each photo. Fine-tune anything afterwards.
 - **18 styles.** Undertones, Moods and Black & White looks, inspired by Apple Photos, each with a strength slider.
-- **Finishing controls (development).** Native 100% detail, an edited-crop histogram, a manual local gradient, selective color and a neutral-gray white-balance picker. See [unreleased changes](docs/releases/unreleased.md).
+- **Finishing controls.** Native 100% detail, an edited-crop histogram, a local gradient, selective color, a neutral-gray white-balance picker, direct crop with horizon leveling, and exposure matching across a scene.
 - **Clean export.** sRGB JPEG or 16-bit TIFF with ICC profile and capture metadata (no GPS). Originals are never touched.
 - **Recoverable.** Library backups with verified restore, named versions of each edit, and exports that resume after a crash.
 - **Local and fast.** Everything runs on your computer and updates itself from GitHub Releases.
