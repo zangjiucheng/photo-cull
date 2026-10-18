@@ -121,6 +121,35 @@ def test_straighten_keeps_edges_inside_source_and_ratio():
     assert out.shape[0] < image.shape[0]
 
 
+def test_profile_tone_curve_adds_contrast_and_preserves_hue():
+    curve = np.array([[0, 0], [.1, .05], [.18, .26], [.5, .67], [1, 1]], np.float32)
+    linear = np.array([[[.02, .02, .02], [.18, .18, .18], [.6, .6, .6], [.4, .2, .1]]], np.float32)
+    out = editing.apply_profile_tone(linear, curve)
+    assert out[0, 0, 0] < .02 and out[0, 1, 0] > .18 and out[0, 2, 0] > .6
+    assert np.allclose(out[0, :3, 0], out[0, :3, 1]) and np.allclose(out[0, :3, 1], out[0, :3, 2])
+    # The middle channel keeps its relative position, so the hue does not drift.
+    r, g, b = out[0, 3]
+    assert np.isclose((g - b) / (r - b), (.2 - .1) / (.4 - .1), atol=1e-5)
+
+
+def test_profile_tone_curve_reads_dng_tag_and_rejects_invalid(tmp_path):
+    import tifffile
+    good, bad, missing = tmp_path / "good.dng", tmp_path / "bad.dng", tmp_path / "none.dng"
+    pairs = [0, 0, .5, .7, 1, 1]
+    tifffile.imwrite(good, np.zeros((2, 2), np.uint8), extratags=[(50940, "f", len(pairs), pairs, False)])
+    tifffile.imwrite(bad, np.zeros((2, 2), np.uint8), extratags=[(50940, "f", 4, [0, 0, 0, 1], False)])
+    tifffile.imwrite(missing, np.zeros((2, 2), np.uint8))
+    assert np.allclose(raw_pipeline.profile_tone_curve(str(good)), [[0, 0], [.5, .7], [1, 1]])
+    assert raw_pipeline.profile_tone_curve(str(bad)) is None
+    assert raw_pipeline.profile_tone_curve(str(missing)) is None
+
+
+def test_auto_does_not_flatten_a_normal_daylight_scene():
+    gradient = np.repeat(np.linspace(.08, .8, 64, dtype=np.float32)[:, None, None], 3, axis=2)
+    auto = editing.auto_adjustments(np.repeat(gradient, 8, axis=1))
+    assert auto["shadows"] == 0 and auto["highlights"] == 0 and auto["vibrance"] > 0
+
+
 def test_auto_preserves_dark_scene_and_never_rebalances_sunset():
     night = editing.auto_adjustments(np.full((32, 32, 3), .04, np.float32))
     sunset = editing.auto_adjustments(np.full((32, 32, 3), [.8, .35, .1], np.float32))

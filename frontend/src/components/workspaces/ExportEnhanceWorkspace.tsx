@@ -15,6 +15,7 @@ import type {
 import { renderEditingPreview } from "../../api";
 import {
   adjustmentGroups,
+  applyAuto,
   autoStrength,
   cloneSettings,
   defaultSettings,
@@ -536,26 +537,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         JSON.stringify(latestSettings.current) !== JSON.stringify(before)
       )
         return;
-      const baseControls = Object.fromEntries(
-        quickKeys.map((k) => [k, before[k]]),
-      );
-      const target = Object.fromEntries(
-        quickKeys.map((k) => [
-          k,
-          k === "temperature"
-            ? before[k]
-            : Math.max(
-                k === "exposure" ? -3 : -1,
-                Math.min(k === "exposure" ? 3 : 1, before[k] + suggestions[k]),
-              ),
-        ]),
-      );
-      onSettingsChange(
-        autoStrength(
-          { ...before, auto: { base: baseControls, target, strength: 1 } },
-          1,
-        ),
-      );
+      onSettingsChange(applyAuto(before, suggestions));
     } catch (error) {
       if (currentPhoto.current === key)
         setNotice(

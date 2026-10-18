@@ -155,6 +155,22 @@ def load_full_raw_image(path: str, orientation_override: int | None = None) -> I
         raise InvalidRawImageError("File is not a valid DNG image") from exc
 
 
+def profile_tone_curve(path: str) -> np.ndarray | None:
+    """Return the DNG ProfileToneCurve (tag 50940) as (N, 2) linear in/out pairs, if embedded."""
+    try:
+        import tifffile
+        with tifffile.TiffFile(path) as tif:
+            tag = tif.pages[0].tags.get(50940)
+            if tag is None:
+                return None
+            curve = np.asarray(tag.value, dtype=np.float32).reshape(-1, 2)
+    except Exception:
+        return None
+    if len(curve) < 2 or not np.all(np.isfinite(curve)) or np.any(np.diff(curve[:, 0]) <= 0):
+        return None
+    return curve
+
+
 def load_full_raw_array(path: str, orientation_override: int | None = None) -> np.ndarray:
     """Editing base: camera WB, linear sRGB primaries, fixed exposure, 16-bit decode.
 

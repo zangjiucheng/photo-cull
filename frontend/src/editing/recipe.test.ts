@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyAuto,
   autoStrength,
   cloneSettings,
   defaultSettings,
@@ -47,6 +48,23 @@ describe("editing recipes", () => {
     expect(zero.highlights).toBe(-0.4);
     expect(zero.temperature).toBe(0.6);
     expect(autoStrength(settings, 0.5).exposure).toBe(0.4);
+  });
+  it("re-running auto replaces the previous suggestion instead of stacking", () => {
+    const start = { ...cloneSettings(defaultSettings), exposure: 0.2, shadows: 0.1 };
+    const suggestions = { exposure: 0.3, shadows: 0.15, vibrance: 0.1, temperature: 0.5 };
+    const once = applyAuto(start, suggestions);
+    const twice = applyAuto(applyAuto(once, suggestions), suggestions);
+    expect(once.exposure).toBeCloseTo(0.5);
+    expect(once.shadows).toBeCloseTo(0.25);
+    expect(once.temperature).toBe(0);
+    for (const key of ["exposure", "shadows", "vibrance", "temperature"] as const)
+      expect(twice[key]).toBeCloseTo(once[key]);
+    expect(twice.auto?.base.exposure).toBe(0.2);
+    expect(autoStrength(twice, 0).exposure).toBe(0.2);
+  });
+  it("auto after a manual edit builds on the edited values", () => {
+    const edited = { ...applyAuto(cloneSettings(defaultSettings), { exposure: 0.3 }), auto: null, exposure: 1 };
+    expect(applyAuto(edited, { exposure: 0.3 }).exposure).toBeCloseTo(1.3);
   });
   it("selective paste keeps individual exposure, warmth and crop", () => {
     const source = {

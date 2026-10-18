@@ -260,8 +260,11 @@ class ImageLoader:
         except Exception:
             exif = None
         if raw_pipeline.is_raw_image(source_path):
-            arr = editing.encode_srgb(raw_pipeline.load_full_raw_array(source_path, row["orientation_override"]))
-            return arr, exif, source_path
+            linear = raw_pipeline.load_full_raw_array(source_path, row["orientation_override"])
+            curve = raw_pipeline.profile_tone_curve(source_path)
+            if curve is not None:
+                linear = editing.apply_profile_tone(linear * 2 ** editing.BASE_EXPOSURE_EV, curve)
+            return editing.encode_srgb(linear), exif, source_path
 
         with Image.open(source_path) as image:
             oriented = ImageOps.exif_transpose(image)

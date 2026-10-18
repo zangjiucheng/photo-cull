@@ -30,6 +30,27 @@ def decode_srgb(rgb):
                     ((np.maximum(rgb, 0) + 0.055) / 1.055) ** 2.4).astype(np.float32)
 
 
+# Camera JPEGs and Lightroom render DJI DNGs through the embedded ProfileToneCurve. This lift
+# before the curve matched FC3170 camera JPEG midtones on real samples without clipping skies.
+BASE_EXPOSURE_EV = 0.6
+
+
+def apply_profile_tone(linear, curve):
+    """Apply a linear-in/linear-out DNG tone curve while preserving hue (RGB-tone style).
+
+    The max and min channels go through the curve and the middle channel keeps its relative
+    position between them, so saturated skies do not shift hue the way per-channel curves do.
+    """
+    # RAW input is 16-bit, so a 16-bit lookup table is exact enough and much faster than interp.
+    lut = np.interp(np.linspace(0, 1, 65536), curve[:, 0], curve[:, 1]).astype(np.float32)
+    linear = np.clip(linear, 0, 1)
+    high, low = linear.max(axis=-1), linear.min(axis=-1)
+    high_out = lut[(high * 65535 + .5).astype(np.uint16)]
+    low_out = lut[(low * 65535 + .5).astype(np.uint16)]
+    scale = np.where(high - low > 1e-6, (high_out - low_out) / np.maximum(high - low, 1e-6), 0)
+    return (low_out[..., None] + (linear - low[..., None]) * scale[..., None]).astype(np.float32)
+
+
 def apply_color(image, settings):
     def value(key):
         return float(getattr(settings, key, 0))
@@ -122,15 +143,19 @@ def apply_geometry(image, crop):
 
 
 def auto_adjustments(image):
-    """Conservative global suggestions. Keep night scenes dark and sunset WB intact."""
+    """Conservative global suggestions. Keep night scenes dark and sunset WB intact.
+
+    The editing base already carries the camera tone curve, so auto only recovers clipped ends
+    and never lifts shadows by default; a flat lift is what made earlier results look washed out.
+    """
     y = np.clip(image @ LUMA, 0, 1)
     low, median, high = np.percentile(y, [5, 50, 98])
     night = median < .12
     exposure = float(np.clip(math.log2(.42 / max(median, .01)) * .35, -.35, .35)) if not night else 0.0
-    return {"exposure": exposure, "brilliance": 0.08 if night else .18,
-            "highlights": -.18 if high > .88 else -.05,
-            "shadows": .05 if night else (.15 if low < .18 else .05),
-            "vibrance": .08, "temperature": 0.0}
+    return {"exposure": exposure, "brilliance": .04 if night else .08,
+            "highlights": -.2 if high > .92 else (-.08 if high > .85 else 0.0),
+            "shadows": .05 if night or low < .04 else 0.0,
+            "vibrance": .08 if night else .14, "temperature": 0.0}
 
 
 def clean_exif(data, width, height):

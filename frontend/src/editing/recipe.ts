@@ -87,6 +87,28 @@ export function autoStrength(
   return next;
 }
 
+// Re-running auto starts from the pre-auto values, so repeated clicks replace the previous
+// suggestion instead of stacking on top of it.
+export function applyAuto(
+  settings: ExportEnhanceSettings,
+  suggestions: Record<string, number>,
+) {
+  const before = settings.auto ? autoStrength(settings, 0) : settings;
+  const base = Object.fromEntries(quickKeys.map((k) => [k, before[k]]));
+  const target = Object.fromEntries(
+    quickKeys.map((k) => [
+      k,
+      k === "temperature"
+        ? before[k]
+        : Math.max(
+            k === "exposure" ? -3 : -1,
+            Math.min(k === "exposure" ? 3 : 1, before[k] + (suggestions[k] ?? 0)),
+          ),
+    ]),
+  );
+  return autoStrength({ ...before, auto: { base, target, strength: 1 } }, 1);
+}
+
 export const adjustmentGroups = {
   light: [
     "brilliance",
