@@ -1,116 +1,116 @@
-# Mavic Air 2：快速 RAW 调色研究与改版建议
+# Mavic Air 2: research and redesign proposal for quick RAW editing
 
-研究初稿日期：2026-10-17。下文源码问题记录的是改版前的状态。用户随后授权按依赖顺序实施；已完成快速编辑功能及 24 张实际 DJI DNG 的初步验证，实施细节、证据和仍待覆盖的条件见 [实现与验收记录](../validation/quick-raw-editor.md)。
+First research draft: 2026-10-17. The source-code issues below describe the state before the redesign. The user then authorized implementation in dependency order; the quick editing features and a preliminary check on 24 real DJI DNGs are done. Implementation details, evidence, and conditions still to be covered are in the [implementation and validation record](../validation/quick-raw-editor.md).
 
-开发记录在 [Linear 项目：Photo Cull — 快速 RAW 调色](https://linear.app/jiucheng-zang/project/photo-cull-快速-raw-调色-396f85133d41)，包含 P0/P1/P2 三个里程碑与 PER-339 至 PER-352 共 14 项任务，已设置优先级、依赖和验收标准。项目已进入实施；任务状态及验证结果同步在 Linear 中。
+Development is tracked in the [Linear project: Photo Cull — Quick RAW editing](https://linear.app/jiucheng-zang/project/photo-cull-快速-raw-调色-396f85133d41), with three milestones (P0/P1/P2) and 14 tasks, PER-339 to PER-352, each with priority, dependencies, and acceptance criteria. The project is in implementation; task status and verification results are kept in sync in Linear.
 
-[Linear 完整研究文档](https://linear.app/jiucheng-zang/document/mavic-air-2-快速调色研究交互与验收方案-d0b37490126c)另存了本次研究内容。
+The [full research document in Linear](https://linear.app/jiucheng-zang/document/mavic-air-2-快速调色研究交互与验收方案-d0b37490126c) keeps a separate copy of this research.
 
-## 已确认的使用目标
+## Confirmed usage goals
 
-- 相机：DJI Mavic Air 2，通常拍单张 RAW。
-- 现有评分与 duplicate 识别保留，调色是本轮重点。
-- 选片后在本软件内完成调色、导出，不再进入 Lightroom。
-- 当前滤镜大多不满意；希望像 Apple Photos 一样，简单拖动就能快速完成调整。
+- Camera: DJI Mavic Air 2, usually shooting single RAW frames.
+- Keep the existing scoring and duplicate detection; editing is the focus of this round.
+- After culling, finish editing and export in this app, without going into Lightroom.
+- Most current filters are unsatisfying; the goal is quick adjustment with a few simple drags, like Apple Photos.
 
-建议产品路径：**选片 → 自动增强 → 拖几下滑杆 → 导出**。第一版集中做好自然、可控、即时的调色体验。
+Proposed product path: **cull → auto enhance → drag a few sliders → export**. The first version concentrates on a natural, controllable, instant editing experience.
 
-## 源码中确认的问题
+## Issues confirmed in the source code
 
-| 位置 | 当前实现 | 对改版的意义 |
+| Location | Current implementation | What it means for the redesign |
 | --- | --- | --- |
-| `server/raw_pipeline.py:139` | 完整 RAW 解码明确使用 `output_bps=8`，转 `uint8` | 进入后续浮点处理前已经量化。应先保留 16-bit 解码结果，再转浮点工作数据 |
-| `server/export_enhance.py:517` | TIFF 虽写入 16-bit，但输入来自上述链路；缩放、锐化也会经过 8-bit PIL | 文件位深不能恢复已经丢掉的输入精度，需要检查整条链路 |
-| `server/export_enhance.py:198` | 显示用 RGB 上做简单曝光、通道增益及多次截断 | 应明确工作色彩空间、RAW 白平衡和高光处理，避免把简单变亮当作完整 RAW 显影 |
-| `server/export_enhance.py:350` | `standard`、tone/colour 为零时，仍执行天空与植被着色；默认 palette 为 100 | 应增加严格中性的“原始”基准。零调整不得偷偷改变颜色 |
-| `server/export_enhance.py:249` | 天空、植被主要按颜色规则判断；可选模型入口针对人物 | 蓝水、蓝屋顶、暖色地面等可能被误判；实际误判率仍需样片验证。默认调色不宜依赖这些遮罩 |
-| `frontend/src/components/workspaces/ExportEnhanceWorkspace.tsx:117` | GPU shader 没有实现后端预设中的 shadow/highlight tint | 即使输入图相同，预览与导出算法也不完全一致 |
-| 同文件 `:198` | effect 依赖 style，每次改变参数会重建 Image、program、shader 和 texture；清理只标记 disposed | 应保留 GPU 资源，拖动时仅更新 uniform；当前实际帧率和显存影响尚未测量 |
-| `server/export_enhance.py:684` | 后端预览用 `full_raw=False`，导出任务使用完整 RAW | 预览可能来自机内内嵌 JPEG，而导出重新显影 RAW；存在色调、白平衡与细节偏差风险 |
-| `server/export_enhance.py:479` | “AI Denoise”实际上是 OpenCV 非局部均值或 PIL 滤波 | 可先准确标为“降噪”，不作为本轮快速调色的核心 |
-| `server/export_enhance.py:517` | 导出没有显式传入 ICC profile；TIFF 分支也没有写入当前取得的 EXIF | 增加输出色彩管理和元数据策略，确保成片可正确显示 |
+| `server/raw_pipeline.py:139` | Full RAW decoding explicitly uses `output_bps=8` and converts to `uint8` | Data is quantized before any floating-point processing. Keep the 16-bit decode first, then convert to floating-point working data |
+| `server/export_enhance.py:517` | TIFF is written at 16 bits, but its input comes from the chain above; resizing and sharpening also go through 8-bit PIL | File bit depth cannot recover input precision that was already lost; the whole chain needs checking |
+| `server/export_enhance.py:198` | Simple exposure, per-channel gains, and repeated clipping on display RGB | Define the working color space, RAW white balance, and highlight handling explicitly; don't treat simple brightening as full RAW development |
+| `server/export_enhance.py:350` | With `standard` and tone/colour at zero, sky and foliage tinting still runs; the default palette is 100 | Add a strictly neutral "Original" base. Zero adjustments must not quietly change colors |
+| `server/export_enhance.py:249` | Sky and foliage are judged mainly by color rules; the optional model hook targets people | Blue water, blue roofs, warm ground, etc. may be misclassified; the real error rate still needs sample photos. Default editing should not depend on these masks |
+| `frontend/src/components/workspaces/ExportEnhanceWorkspace.tsx:117` | The GPU shader does not implement the shadow/highlight tint from the backend presets | Even with the same input image, preview and export algorithms do not fully match |
+| Same file `:198` | The effect depends on style, so every parameter change rebuilds the Image, program, shader, and texture; cleanup only marks things disposed | Keep GPU resources and only update uniforms while dragging; actual frame rate and VRAM impact are not yet measured |
+| `server/export_enhance.py:684` | The backend preview uses `full_raw=False` while export jobs use the full RAW | The preview may come from the embedded in-camera JPEG while export re-develops the RAW; risk of tone, white balance, and detail differences |
+| `server/export_enhance.py:479` | "AI Denoise" is actually OpenCV non-local means or a PIL filter | Label it accurately as "Noise reduction" first; not core to quick editing in this round |
+| `server/export_enhance.py:517` | Export passes no explicit ICC profile; the TIFF branch also doesn't write the EXIF already obtained | Add an output color-management and metadata policy so finished photos display correctly |
 
-这些问题能解释现有设计的局限，但还不能证明用户所说的每款“不可用滤镜”分别由哪一处导致；需要真实照片复现。
+These issues explain the limits of the current design, but they do not yet prove which one causes each "unusable filter" the user mentioned; that needs reproduction on real photos.
 
-## 借鉴 Apple Photos 的交互
+## What to borrow from Apple Photos' interaction
 
-Apple 官方描述的关键模式是：自动分析后调整、少量基础控制、可展开细调、单项复位与临时关闭效果。Brilliance（鲜明度）组合处理明暗和对比，适合减少用户逐项操作。这些是可借鉴的交互与目标效果，不代表能够复制 Apple 未公开的算法。[Apple 调整说明](https://support.apple.com/en-il/guide/photos/pht806aea6a6/mac)
+The key patterns Apple officially describes are: adjust after automatic analysis, a few basic controls, expandable fine-tuning, per-control reset, and temporarily turning effects off. Brilliance combines light/dark handling and contrast, which reduces how many controls the user has to touch. These are interaction patterns and target effects worth borrowing; they do not mean Apple's unpublished algorithms can be copied. [Apple adjustment guide](https://support.apple.com/en-il/guide/photos/pht806aea6a6/mac)
 
-建议编辑区：左侧保留大照片，右侧窄调整栏，底部是选中照片的缩略图。用一个主预览展示最终效果；渲染状态用轻量提示表示。
+Proposed editing area: the large photo on the left, a narrow adjustments column on the right, and thumbnails of the selected photos along the bottom. One main preview shows the final result; rendering status is shown as a light hint.
 
-推荐操作顺序：
+Recommended order of operations:
 
-1. 打开照片，得到中性的 RAW 基准预览。
-2. 点“自动增强”，可用强度滑杆减弱效果。
-3. 按需要调整少量常用滑杆。
-4. 按住对比原图；左右键切下一张，设置自动保存。
-5. 选择导出预设，批量生成成片。
+1. Open a photo and get a neutral RAW base preview.
+2. Click "Auto enhance"; a strength slider can weaken the effect.
+3. Adjust a few everyday sliders as needed.
+4. Hold to compare with the original; left/right keys go to the next photo, and settings save automatically.
+5. Choose an export preset and produce the finished photos in a batch.
 
-### 第一屏的六个常用滑杆
+### Six everyday sliders on the first screen
 
-| 控件 | 用户意图 | 实现要点 |
+| Control | User intent | Implementation notes |
 | --- | --- | --- |
-| 曝光 | 整体亮一点或暗一点 | 在明确的工作空间处理，避免提前裁掉高光 |
-| 鲜明度 | 暗部更清楚、整体更通透 | 组合明暗与适量局部对比；控制光晕和噪声放大 |
-| 高光 | 把云、天空压回来 | 区分显示变暗与 RAW 中仍有信息的高光恢复 |
-| 阴影 | 看清地面、建筑 | 保留黑位，避免把夜景和剪影强制拉灰 |
-| 自然饱和度 | 颜色更好看 | 控制已高饱和颜色，避免天空过蓝、植被荧光绿 |
-| 冷暖 | 快速调整氛围 | 与 RAW 白平衡参数对应，避免仅用显示 RGB 偏色模拟 |
+| Exposure | Overall a bit brighter or darker | Process in a well-defined working space; don't clip highlights early |
+| Brilliance | Clearer shadows, more open overall | Combine light/dark and moderate local contrast; control halos and noise amplification |
+| Highlights | Bring clouds and sky back | Distinguish darkening for display from recovering highlights that still have data in the RAW |
+| Shadows | See the ground and buildings | Keep the black point; don't force night scenes and silhouettes to gray |
+| Vibrance | Nicer colors | Restrain already-saturated colors; avoid over-blue skies and fluorescent green foliage |
+| Warmth | Quickly change the mood | Map to RAW white balance parameters; avoid faking it with a display-RGB color cast |
 
-“更多”里再放去雾、对比度、黑位、色调、细节与降噪。去雾是航拍值得补充的工具，但应可选、可减弱，保留雾景创作空间。Adobe 官方也将其用于大气雾霾及部分低反差照片。[去雾说明](https://helpx.adobe.com/lightroom-classic/desktop/help/tone-control-adjustment.html)
+"More" then holds Dehaze, Contrast, Black point, Tint, Detail, and Noise reduction. Dehaze is a worthwhile addition for aerial photos, but it should be optional and adjustable, leaving room for creative hazy scenes. Adobe also documents it for atmospheric haze and some low-contrast photos. [Dehaze guide](https://helpx.adobe.com/lightroom-classic/desktop/help/tone-control-adjustment.html)
 
-拖动过程中直接显示结果，不要求额外点击 Render Preview。双击滑杆复位；支持撤销/重做、全部还原、单项开关。一次拖动只产生一条撤销记录，避免连续事件塞满历史。
+Results show directly while dragging, with no extra click on Render Preview. Double-click a slider to reset it; support undo/redo, reset all, and per-item toggles. One drag creates only one undo entry, so continuous events don't flood the history.
 
-## 自动增强应当做什么
+## What auto enhance should do
 
-先做可解释、可调整的参数建议器：读取图像分布，提出曝光、明暗、白平衡和自然饱和度的保守调整；结果落回同一套滑杆，并可撤销。
+Start with an explainable, adjustable parameter suggester: read the image distribution and propose conservative changes to exposure, light/dark, white balance, and vibrance; the result lands on the same sliders and can be undone.
 
-- 日景、日落、夜景采用不同约束，不能一律追求相同平均亮度。
-- 光照修正与风格分开；“自动”不默认套强烈色偏。
-- 保留 RAW 中可用的高光信息；完全饱和的区域不承诺恢复真实纹理。
-- 自动强度通过有界参数映射控制效果，保证零强度回到自动调整前的状态。
-- 第一版无需大模型训练。优先验证参数建议能否减少真实操作次数。
+- Daytime, sunset, and night scenes use different constraints; don't push everything to the same average brightness.
+- Keep light correction separate from style; "Auto" does not apply strong color casts by default.
+- Keep usable highlight information from the RAW; fully saturated areas are not promised to recover real texture.
+- Auto strength controls the effect through bounded parameter mapping, guaranteeing that zero strength returns to the pre-auto state.
+- The first version needs no large-model training. First verify whether parameter suggestions reduce the actual number of operations.
 
-## 滤镜如何重做
+## How to rebuild the filters
 
-把当前 Tone/Colour 二维板降为可选功能，主流程使用明确滑杆。先只保留“原始、自然清透、暖日落、清冷、黑白”等少量候选风格，使用当前照片生成缩略图，并提供独立的 0–100 强度。
+Demote the current Tone/Colour 2D pad to an optional feature; the main flow uses explicit sliders. Start with just a few candidate styles such as "Original, Natural & clear, Warm sunset, Cool, Black & white", generate thumbnails from the current photo, and provide an independent 0–100 strength.
 
-滤镜应基于统一的显影结果，再应用可审查的曲线和颜色变换；不默认给所有蓝色区域加蓝或给绿色区域加绿。“自然清透”等只是待调校的产品名称，不能当作已验证的 Mavic Air 2 相机 profile。Apple Photos 的滤镜也提供强度调整，值得借鉴。[Apple 滤镜说明](https://support.apple.com/en-ie/guide/photos/phte0af949f0/12.0/mac/27)
+Filters should be based on a single developed result, followed by reviewable curves and color transforms; do not add blue to every blue area or green to every green area by default. Names like "Natural & clear" are product names still to be tuned and must not be treated as a validated Mavic Air 2 camera profile. Apple Photos filters also offer adjustable strength, which is worth borrowing. [Apple filter guide](https://support.apple.com/en-ie/guide/photos/phte0af949f0/12.0/mac/27)
 
-## 实现顺序
+## Implementation order
 
-| 阶段 | 范围 | 验收目标 |
+| Phase | Scope | Acceptance target |
 | --- | --- | --- |
-| P0：画质与一致性 | RAW 高位深处理、中性默认、统一参数与处理次序、预览/导出输入一致、输出 ICC | 零调整可复现；导出缩小后与主预览无明显色调偏差；16-bit 路径不提前经过 8-bit |
-| P1：快速调整 | 自动增强、六个常用滑杆、资源复用的即时预览、原图对比、自动保存与撤销 | 连续拖动不卡顿、不闪回旧结果；单次拖动一次撤销；切图和重启后设置保留 |
-| P1：少量可靠风格 | 精简重做滤镜、照片缩略图、独立强度 | 强度零不改变基准；多类航拍照片不出现明显异常偏色 |
-| P2：完成成片 | 裁切与拉直、去雾、复制/选择性粘贴调整、个人预设、导出预设 | 单张完整流程可以在本软件完成；批量同步风格时允许保留各张独立曝光和裁切 |
-| 后续 | 手动渐变/画笔局部调整，再评估天空/地面智能遮罩 | 遮罩可查看、可修正，对水面和天空等易混区域单独验证 |
+| P0: quality and consistency | High-bit-depth RAW processing, neutral defaults, unified parameters and processing order, same input for preview/export, output ICC | Zero adjustments are reproducible; a downscaled export shows no obvious tonal deviation from the main preview; the 16-bit path never goes through 8 bits early |
+| P1: quick adjustments | Auto enhance, six everyday sliders, instant preview with resource reuse, compare to original, autosave and undo | Continuous dragging doesn't stutter or flash back to old results; one drag is one undo; settings persist across photo switches and restarts |
+| P1: a few reliable styles | Leaner rebuilt filters, photo thumbnails, independent strength | Zero strength does not change the base; no obvious abnormal color casts across many kinds of aerial photos |
+| P2: finishing | Crop and straighten, dehaze, copy/selective paste of adjustments, personal presets, export presets | A complete single-photo flow can be done in this app; batch style sync can keep each photo's own exposure and crop |
+| Later | Manual gradient/brush local adjustments, then evaluate smart sky/ground masks | Masks can be viewed and corrected; confusable areas like water and sky are validated separately |
 
-评分和 duplicate 继续保留；AEB/HDR、全景、地图和 Lightroom 对接在当前使用习惯下优先级较低。Real-ESRGAN 已有实现，本轮资源优先用于基础成片质量。
+Scoring and duplicates stay; AEB/HDR, panoramas, maps, and Lightroom integration are lower priority given current habits. Real-ESRGAN already exists; this round's resources go first to basic finished-photo quality.
 
-## 技术路线与改动落点
+## Technical route and where changes land
 
-短期推荐延续当前 rawpy + NumPy + WebGL 架构，先完成 P0/P1 的小闭环。rawpy 官方提供 16-bit 输出、白平衡、曝光与高光相关参数，但本项目锁定版本为 0.26.1，具体参数行为需在该版本验证。[rawpy 参数](https://letmaik.github.io/rawpy/api/rawpy.Params.html)
+In the short term, continue the current rawpy + NumPy + WebGL architecture and close the small P0/P1 loop first. rawpy officially provides 16-bit output, white balance, exposure, and highlight-related parameters, but this project pins version 0.26.1, so the specific parameter behavior must be verified on that version. [rawpy parameters](https://letmaik.github.io/rawpy/api/rawpy.Params.html)
 
-- `server/raw_pipeline.py`：分离浏览缩略图与编辑基准，保留高位深解码数据，定义显影参数与缓存键。
-- `server/export_enhance.py`：拆开基础显影、自动参数建议、风格和输出；保持中性默认；明确 ICC、位深和元数据策略。
-- `frontend/src/components/workspaces/ExportEnhanceWorkspace.tsx`：以一个主预览和调整栏组织工作流，初始化一次 GPU 资源，参数变化只更新所需状态。
-- `frontend/src/App.tsx`、`frontend/src/types.ts`、`server/db.py`：扩展并版本化每张照片的编辑配方，保存已存在的照片设置，定义撤销、复位和批量粘贴语义。
-- GPU/CPU 使用同一份预设数据与数学定义；对相同基准像素做数值及图像对比，避免维护两套悄悄不同的效果。
+- `server/raw_pipeline.py`: separate browse thumbnails from the editing base, keep high-bit-depth decoded data, define development parameters and cache keys.
+- `server/export_enhance.py`: split base development, auto parameter suggestions, styles, and output; keep neutral defaults; make ICC, bit depth, and metadata policies explicit.
+- `frontend/src/components/workspaces/ExportEnhanceWorkspace.tsx`: organize the workflow around one main preview and an adjustments column, initialize GPU resources once, and only update the needed state when parameters change.
+- `frontend/src/App.tsx`, `frontend/src/types.ts`, `server/db.py`: extend and version each photo's edit recipe, save settings for existing photos, and define undo, reset, and batch-paste semantics.
+- GPU and CPU use the same preset data and math definitions; do numeric and image comparisons on the same base pixels, to avoid maintaining two quietly different effects.
 
-如果此路线在真实 DNG 上难以达到可接受画质，再用少量样片比较 darktable CLI 作为内部显影引擎的方案。官方 CLI 支持无界面导出、处理历史/风格和 ICC 选项；用户仍可只操作本软件。代价是打包、版本兼容、启动和参数映射更复杂，目前不建议直接迁移。[darktable CLI](https://docs.darktable.org/usermanual/5.6/en/special-topics/program-invocation/darktable-cli/)
+If this route can't reach acceptable quality on real DNGs, compare darktable CLI as an internal development engine on a few sample photos. The official CLI supports headless export, history/styles, and ICC options; users could still operate only this app. The cost is more complex packaging, version compatibility, startup, and parameter mapping, so migrating directly is not recommended for now. [darktable CLI](https://docs.darktable.org/usermanual/5.6/en/special-topics/program-invocation/darktable-cli/)
 
-输出默认建议 sRGB JPEG，同时提供 16-bit TIFF 存档。工作空间与输出空间必须明确转换，不能仅添加标签。darktable 官方说明输出 profile 应参与转换并嵌入文件，以供其他应用解释颜色。[输出色彩管理](https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/output-color-profile/)
+The recommended default output is sRGB JPEG, with 16-bit TIFF also offered for archiving. The working space and output space must be converted explicitly, not just tagged. darktable documents that the output profile should take part in the conversion and be embedded in the file so other applications can interpret the colors. [Output color management](https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/output-color-profile/)
 
-## 用什么证据决定“好用”
+## What evidence decides "easy to use"
 
-后续实现用约 20–30 张用户真实 Mavic Air 2 DNG 建立小样本集，覆盖日景、逆光、晚霞、雾景、夜景，以及天空/水面/植被/建筑。当前未取得这些照片，因此不宣称已验证滤镜效果。
+Later implementation builds a small sample set from about 20–30 of the user's real Mavic Air 2 DNGs, covering daylight, backlight, sunset glow, fog, and night, as well as sky/water/foliage/buildings. These photos have not been obtained yet, so no claim is made that filter results are validated.
 
-- 画质：看云层渐变、高光、暗部噪声、植被颜色、建筑边缘和水面；100% 查看细节。
-- 一致性：同一张照片在主预览、后端渲染和导出缩略图中并排比较；按色彩空间与缩放条件解释误差。
-- 操作：记录从打开到满意的时间、操作次数，以及自动增强后还需调整多少项。
-- 性能：在实际 Mac 上测量拖动延迟、长时间拖动的资源占用、RAW 首次加载及切图时间。初步目标为预热后常用滑杆交互约 30 fps、可见反馈约 50 ms 内；这是设计目标，尚未实测。
-- 输出：在 macOS Preview、浏览器及用户实际分享设备上检查色调，并检查 ICC、像素尺寸与位深。
+- Quality: look at cloud gradients, highlights, shadow noise, foliage color, building edges, and water; check detail at 100%.
+- Consistency: compare the same photo side by side in the main preview, the backend render, and a downscaled export; explain differences in terms of color space and scaling.
+- Operation: record the time and number of operations from opening to a satisfying result, and how many controls still need adjusting after auto enhance.
+- Performance: on a real Mac, measure drag latency, resource use during long drags, first RAW load, and photo switch time. Preliminary targets are about 30 fps for everyday slider interaction after warm-up and visible feedback within about 50 ms; these are design targets, not yet measured.
+- Output: check tone in macOS Preview, browsers, and the user's actual sharing devices, and check ICC, pixel dimensions, and bit depth.
 
-最小可用改版应交付：**中性 RAW 基准 + 自动增强 + 六个滑杆 + 一致即时预览 + 正确导出**，然后再以真实照片筛选可保留的风格。
+The minimum viable redesign should deliver: **a neutral RAW base + auto enhance + six sliders + a consistent instant preview + correct export**, and then use real photos to decide which styles to keep.

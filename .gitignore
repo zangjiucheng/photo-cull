@@ -43,3 +43,6 @@ static/dist/
 .playwright-cli
 output/
 frontend/qa/fixtures.json
+
+# The GitHub Pages site lives in site/ (overrides a global ignore of /site).
+!/site/

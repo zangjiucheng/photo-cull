@@ -184,3 +184,21 @@ def test_pad_state_roundtrips_and_clamps():
     assert again.pad == parsed.pad
     with pytest.raises(export_enhance.ExportEnhanceError):
         export_enhance.parse_settings({"recipeVersion": 2, "pad": {"tone": 0}})
+
+
+def test_style_presets_are_complete_and_render():
+    keys = {"exposure", "brilliance", "highlights", "shadows", "contrast", "blackPoint",
+            "vibrance", "saturation", "temperature", "tint"}
+    image = np.random.default_rng(9).random((16, 16, 3), dtype=np.float32)
+    assert len(editing.PRESETS) >= 15
+    for preset_id, preset in editing.PRESETS.items():
+        assert keys <= set(preset) and preset["label"] and preset["group"], preset_id
+        out = editing.apply_style(image, export_enhance.PhotoStyle(preset=preset_id, palette=100))
+        assert np.isfinite(out).all() and out.min() >= -1e-6 and out.max() <= 1 + 1e-6
+        assert export_enhance.parse_settings({"recipeVersion": 2, "photoStyle": {"preset": preset_id}}).photo_style.preset == preset_id
+    # Styles that existed before keep their exact values so saved edits render unchanged.
+    assert {k: editing.PRESETS["warm"][k] for k in ("temperature", "brilliance", "highlights", "vibrance", "contrast")} == \
+        {"temperature": .18, "brilliance": .06, "highlights": -.1, "vibrance": .08, "contrast": .04}
+    assert editing.PRESETS["mono"]["saturation"] == -1 and editing.PRESETS["mono"]["contrast"] == .14
+    rose = editing.apply_style(np.full((4, 4, 3), .5, np.float32), export_enhance.PhotoStyle(preset="rose_gold", palette=100))
+    assert rose[0, 0, 1] < rose[0, 0, 0]  # tint reaches the CPU path (magenta: less green)

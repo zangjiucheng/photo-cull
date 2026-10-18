@@ -119,6 +119,73 @@ const thumbnailSettings = Object.fromEntries(
   ]),
 );
 
+const presetGroups = Object.entries(presets).reduce<
+  Array<{ group: string; ids: string[] }>
+>((groups, [id, preset]) => {
+  const last = groups[groups.length - 1];
+  if (last?.group === preset.group) last.ids.push(id);
+  else groups.push({ group: preset.group, ids: [id] });
+  return groups;
+}, []);
+
+// Style thumbnails share one offscreen WebGL renderer that is released after drawing: one context
+// per thumbnail would exceed the browser's ~16 live WebGL contexts and evict the main preview.
+function StyleThumbnails({
+  base,
+  selected,
+  onSelect,
+}: {
+  base: EditingBase | null;
+  selected: string;
+  onSelect: (id: string) => void;
+}) {
+  const canvases = useRef(new Map<string, HTMLCanvasElement>());
+  useEffect(() => {
+    if (!base) return;
+    const offscreen = document.createElement("canvas");
+    let renderer: EditingRenderer | null = null;
+    try {
+      renderer = new EditingRenderer(offscreen, base);
+      for (const [id, target] of canvases.current) {
+        renderer.draw(thumbnailSettings[id]);
+        target.width = offscreen.width;
+        target.height = offscreen.height;
+        target.getContext("2d")?.drawImage(offscreen, 0, 0);
+      }
+    } catch {
+      // Thumbnails are a convenience; the placeholders stay if WebGL is unavailable.
+    } finally {
+      renderer?.dispose();
+    }
+  }, [base]);
+  return (
+    <div className="quick-styles">
+      {presetGroups.map(({ group, ids }) => (
+        <div className="quick-style-group" key={group}>
+          <span className="quick-style-group-label">{group}</span>
+          {ids.map((id) => (
+            <button
+              type="button"
+              className={selected === id ? "active" : ""}
+              aria-pressed={selected === id}
+              key={id}
+              onClick={() => onSelect(id)}
+            >
+              <canvas
+                ref={(element) => {
+                  if (element) canvases.current.set(id, element);
+                  else canvases.current.delete(id);
+                }}
+              />
+              <span>{presets[id as keyof typeof presets].label}</span>
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Apple-style Tone (vertical) / Color (horizontal) pad. It moves the sliders below rather than
 // adding a hidden layer, so anything it does can be fine-tuned afterwards.
 function TonePad({
@@ -919,39 +986,21 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 </section>
                 <details className="quick-section" open>
                   <summary>Styles</summary>
-                  <div className="quick-styles">
-                    {Object.entries(presets).map(([id, preset]) => (
-                      <button
-                        type="button"
-                        className={
-                          settings.photoStyle.preset === id ? "active" : ""
-                        }
-                        aria-pressed={settings.photoStyle.preset === id}
-                        key={id}
-                        onClick={() =>
-                          onSettingsChange({
-                            ...settings,
-                            photoStyle: {
-                              preset: id as PhotoStylePreset,
-                              tone: 0,
-                              colour: 0,
-                              palette: settings.photoStyle.palette,
-                            },
-                          })
-                        }
-                      >
-                        {thumbnailBase ? (
-                          <PreviewCanvas
-                            base={thumbnailBase}
-                            settings={thumbnailSettings[id]}
-                          />
-                        ) : (
-                          <span className="quick-style-placeholder" />
-                        )}
-                        <span>{preset.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <StyleThumbnails
+                    base={thumbnailBase}
+                    selected={settings.photoStyle.preset}
+                    onSelect={(id) =>
+                      onSettingsChange({
+                        ...settings,
+                        photoStyle: {
+                          preset: id as PhotoStylePreset,
+                          tone: 0,
+                          colour: 0,
+                          palette: settings.photoStyle.palette,
+                        },
+                      })
+                    }
+                  />
                   <Slider
                     label="Style strength"
                     value={settings.photoStyle.palette / 100}

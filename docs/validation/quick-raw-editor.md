@@ -1,57 +1,57 @@
-# 快速 RAW 编辑：实现与验收
+# Quick RAW editing: implementation and validation
 
-实施日期：2026-10-17（Toronto）。对应 Linear PER-339–PER-352。
+Implementation date: 2026-10-17 (Toronto). Corresponds to Linear PER-339–PER-352.
 
-## 用户流程与界面
+## User flow and interface
 
-从 Browse / Review 将选片加入队列，进入 Enhance & Export：自动增强 → 六个常用滑杆 → 导出。常用项为曝光、鲜明度、高光、阴影、自然饱和度和冷暖。风格缩略图使用当前照片；原图、自然、暖日落、冷色和黑白有独立强度。
+Add culled photos to the queue from Browse / Review, then enter Enhance & Export: auto enhance → six everyday sliders → export. The everyday controls are Exposure, Brilliance, Highlights, Shadows, Vibrance, and Warmth. Style thumbnails use the current photo; Original, Natural, Warm sunset, Cool, and Black & white each have their own strength.
 
-按住对比按钮或 `\` 查看中性 RAW 基准；双击滑杆复位；`Cmd/Ctrl+Z` 撤销，`Shift+Cmd/Ctrl+Z` 重做。一段拖动记一次历史。复位包含裁切和调整，保留导出设置。编辑历史限 50 步，属于当前会话；照片配方保存到数据库，关闭窗口前未完成的保存有本机恢复副本。保存失败在编辑区明确显示并可重试。
+Hold the compare button or `\` to see the neutral RAW base; double-click a slider to reset it; `Cmd/Ctrl+Z` undoes and `Shift+Cmd/Ctrl+Z` redoes. One drag is one history entry. Reset covers crop and adjustments and keeps export settings. Edit history is limited to 50 steps and belongs to the current session; photo recipes are saved to the database, and saves still pending when the window closes have a local recovery copy. Save failures are shown clearly in the editor and can be retried.
 
-高级区包含对比、黑位、去雾、饱和度、色调、细节和剪裁警示；裁切支持常用比例、位置、大小、±15° 拉直和三分网格。旋转后自动收进有效图像范围，避免黑边。复制、粘贴和批量应用可选择调整组，默认保留每张的曝光、白平衡和裁切。个人预设存在当前设备；预设应用也遵循选择的组。Share JPEG / Archive TIFF 为内置导出预设。
+The advanced section contains Contrast, Black point, Dehaze, Saturation, Tint, Detail, and a clipping warning; crop supports common ratios, position, size, ±15° straighten, and a rule-of-thirds grid. After rotation the crop is automatically pulled back inside the valid image area to avoid black edges. Copy, paste, and batch apply can select adjustment groups and by default keep each photo's own exposure, white balance, and crop. Personal presets are stored on the current device; applying a preset also respects the selected groups. Share JPEG / Archive TIFF are built-in export presets.
 
-界面取舍：照片为主，隐藏编辑时的文件夹侧栏，一张大图、右侧调整栏、底部选片条。使用系统字体；画布 `#161616`、主背景 `#191919`、面板 `#252525`、分隔 `#393939`、正文 `#f3f3f3`、选择色 `#f6cc52`。照片居中适配，参数标签左对齐、数值右对齐。第一轮检查删去了双预览、Tone/Colour 二维控制和手动 Render 按钮，减少常用流程的操作量。
+Interface trade-offs: the photo comes first, the folder sidebar is hidden while editing, with one large photo, an adjustments column on the right, and a selection strip at the bottom. System fonts are used; canvas `#161616`, main background `#191919`, panels `#252525`, separators `#393939`, body text `#f3f3f3`, selection color `#f6cc52`. Photos are centered and fitted; parameter labels are left-aligned and values right-aligned. The first review pass removed the dual preview, the Tone/Colour 2D control, and the manual Render button, reducing the number of operations in the common flow.
 
 ```text
-文件名                         撤销 重做 复位 目录 导出
+Filename                       Undo Redo Reset Folder Export
 ┌───────────────────────────┬────────────────┐
-│                           │ 自动增强       │
-│         主照片            │ 六个滑杆       │
-│                           │ 风格缩略图     │
-│                           │ 折叠的高级项   │
+│                           │ Auto enhance   │
+│        Main photo         │ Six sliders    │
+│                           │ Style thumbs   │
+│                           │ Collapsed adv. │
 ├───────────────────────────┤                │
-│ 按住对比     选片缩略图   │ 导出设置       │
+│ Hold to compare  Strip    │ Export setup   │
 └───────────────────────────┴────────────────┘
 ```
 
-## 处理链路
+## Processing pipeline
 
-1. 新配方 `recipeVersion: 2`。RAW 用 rawpy 解码为 16 位线性 sRGB，camera WB、固定曝光（`no_auto_bright=True`），随后转 float32 编码 sRGB。LibRaw 的默认高光裁剪策略保留，不能恢复传感器已饱和的信号。冷暖/色调是相对相机白平衡的线性 RGB 调节，不声称是绝对 Kelvin 重显影。
-2. 曝光、相对冷暖在线性光中计算；明暗及风格采用明确的显示亮度数学。预设参数来自 `server/editing_presets.json`，CPU 与 GPU 共用。中性零点为 identity，无默认天空/植物染色。
-3. 编辑主图通过 float32 RGB 数据传给持久 WebGL 纹理；浏览缩略图单独使用快速 JPEG。滑杆更新 uniform，不重新加载照片、编译 shader 或建立纹理。实例销毁释放 GPU 资源；不支持 WebGL 时自动请求后端预览。
-4. 后端解码缓存按路径、mtime ns、大小、旋转失效，最多两项 / 384 MiB（单张超过上限时保留一项）。浏览器请求可取消且结果带照片/配方归属，旧响应不能覆盖新设置。后端预览驻内存，不累积临时 JPEG。
-5. 未带版本的旧配方保留为 version 1，并继续走旧算法。界面提供明确的切换入口；切到新控制从中性开始，可以撤销。未编辑的队列照片单独使用默认值，避免意外套用当前照片的参数。
-6. 常规缩放、锐化、几何处理保持浮点；JPEG 在最终写入量化到 8 位，TIFF 在最终写入量化到 16 位。ICC 为真实 sRGB 工作结果的输出标记。8 位带 ICC 的输入经 LittleCMS 转换到 sRGB。Photo Cull 输出的 16 位 TIFF 可无损精度重读；其他 16 位 TIFF 配置文件目前明确拒绝，避免悄悄降位深。
-7. JPEG / TIFF 写入 sRGB ICC，更新 Orientation=1、尺寸、软件名，并保留受支持的相机、曝光、日期、作者标签。TIFF 的安全 Exif IFD 在不改变 16 位像素的情况下附加。GPS、XMP、MakerNote 和 RAW 特有偏移不复制。文件名自动避让，原片不覆盖。
-8. 降噪准确称为传统降噪，运行时报告 OpenCV 非局部均值或 Pillow 回退。降噪与 Real-ESRGAN 是独立的可选处理，会经过 8 位图像；默认关闭。Real-ESRGAN 需要可选 runtime，本轮未下载新模型或宣称 AI RAW 降噪。
+1. New recipes are `recipeVersion: 2`. RAW is decoded with rawpy to 16-bit linear sRGB, with camera WB and fixed exposure (`no_auto_bright=True`), then converted to float32 encoded sRGB. LibRaw's default highlight clipping policy is kept; signal already saturated on the sensor cannot be recovered. Warmth/Tint are linear RGB adjustments relative to the camera white balance, and do not claim to be an absolute Kelvin re-development.
+2. Exposure and relative warmth are computed in linear light; light/dark and styles use explicit display-luminance math. Preset parameters come from `server/editing_presets.json`, shared by CPU and GPU. The neutral zero point is the identity, with no default sky/foliage tinting.
+3. The main editing image is passed as float32 RGB data to a persistent WebGL texture; browse thumbnails use fast JPEGs separately. Sliders update uniforms without reloading the photo, compiling shaders, or creating textures. Destroying an instance releases its GPU resources; when WebGL is unavailable, a backend preview is requested automatically.
+4. The backend decode cache is invalidated by path, mtime ns, size, and rotation, and holds at most two entries / 384 MiB (one entry is kept if a single photo exceeds the limit). Browser requests can be cancelled and results carry their photo/recipe ownership, so old responses cannot overwrite new settings. Backend previews stay in memory and do not accumulate temporary JPEGs.
+5. Old unversioned recipes are kept as version 1 and continue to use the old algorithm. The interface offers an explicit switch; switching to the new controls starts from neutral and can be undone. Unedited queued photos use defaults separately, so the current photo's parameters are not applied by accident.
+6. Regular resizing, sharpening, and geometry stay in floating point; JPEG is quantized to 8 bits only at final write, and TIFF to 16 bits only at final write. The ICC is the output tag for a genuine sRGB working result. 8-bit inputs with an ICC profile are converted to sRGB via LittleCMS. 16-bit TIFFs written by Photo Cull can be re-read without loss of precision; other 16-bit TIFF profiles are currently rejected explicitly, to avoid silently reducing bit depth.
+7. JPEG / TIFF embed an sRGB ICC, update Orientation=1, dimensions, and software name, and keep supported camera, exposure, date, and author tags. The safe Exif IFD for TIFF is appended without changing the 16-bit pixels. GPS, XMP, MakerNote, and RAW-specific offsets are not copied. Filenames are de-duplicated automatically and originals are never overwritten.
+8. Noise reduction is accurately called traditional noise reduction, and the runtime reports OpenCV non-local means or the Pillow fallback. Noise reduction and Real-ESRGAN are independent optional steps that go through an 8-bit image and are off by default. Real-ESRGAN requires the optional runtime; this round did not download new models or claim AI RAW denoising.
 
-## 验证证据
+## Validation evidence
 
-- Python：75 项通过。覆盖 API、真实浮点传输及源变更失效、RAW 16 位解码参数、超过 256 级精度、JPEG/TIFF ICC 和 Exif、渐变缩放与锐化、裁切无黑边、旧配方、非有限数值、降噪回退等。
-- 前端：19 项通过；TypeScript + Vite 生产构建通过。新增配方测试覆盖自动强度零点、选择性复制、白平衡/曝光/裁切隔离及深复制。
-- 实际 Mac / Brave WebGL：30 组 CPU/GPU 合成像素对比，显示量化后最大差 0/255。1600×1200 预览，60 次绘制并等待 GPU 完成，中位 0.20 ms，P95 5.60 ms。此数据只表示当前机器的绘制耗时，不等于所有机器的端到端拖动延迟。
-- 浏览器人工流程：连续拖动后一步撤销、重做、自动增强强度 0、逐片参数隔离、数据库保存后重新加载、三张队列 JPEG 导出已验证；真实 RAW 的撤销/重做、16:9 裁切和拉直也已运行。检查发现并修复了工作区载入时空状态覆盖配方，以及首次 GPU 绘制早于资源初始化导致风格缩略图黑屏的问题。
-- 真实样片：只读使用已有本机目录的 24 张 DJI FC3170 DNG，4000×3000，涵盖白天、逆光、水面、日落、城市、树林。全部显影成功；首次解码中位 1.59 s，最大 2.42 s。检查了自动增强后的五种风格联系表，未见默认局部染色或明显全局异常。这是初步目视检查，不是用户审美认可或全面画质评级。
-- 一张实际 DNG 完整导出 4000×3000 uint16 TIFF，核验尺寸、ICC。其缩小导出与同配方预览比较：平均绝对误差 0.00053/255，P99 0.00192/255，最大约 10.18/255（少量边缘重采样差异）。不同分辨率的插值、细节和降噪不保证逐像素相同。
-- 原始 DNG 的大小和修改时间前后保持一致。样片、联系表、测试导出只在 `/tmp`；没有写入生产照片目录或上传到 Linear。
-- PyInstaller 后端构建及运行通过，显式加入 rawpy 和共享风格 JSON，防止打包漏资源。独立二进制在隔离测试数据库中实际返回 1600×1200 float32 RAW 基准，并完成三张 DNG 导出（逐片设置，一张裁切后的 3994×2247 uint16 TIFF，两张 JPEG）；TIFF 的 ICC、Exif IFD、Orientation=1 读回通过。完整 Electron 分发包及可选 AI runtime 仍需单独验收。
+- Python: 75 tests pass. Covers the API, real float transfer and invalidation on source changes, RAW 16-bit decode parameters, precision beyond 256 levels, JPEG/TIFF ICC and Exif, gradient resizing and sharpening, crop without black edges, legacy recipes, non-finite values, noise-reduction fallback, and more.
+- Frontend: 19 tests pass; the TypeScript + Vite production build passes. New recipe tests cover the auto-strength zero point, selective copy, isolation of white balance/exposure/crop, and deep copy.
+- Real Mac / Brave WebGL: 30 synthetic CPU/GPU pixel comparisons show a maximum difference of 0/255 after display quantization. For a 1600×1200 preview, 60 draws waiting for the GPU to finish took a median of 0.20 ms and P95 of 5.60 ms. This only reflects draw time on this machine, not end-to-end drag latency on every machine.
+- Manual browser flow: one-step undo after continuous dragging, redo, auto enhance at strength 0, per-photo parameter isolation, reload after database save, and export of three queued JPEGs were verified; undo/redo, 16:9 crop, and straighten on real RAWs were also run. Testing found and fixed an empty state overwriting recipes while the workspace loaded, and black style thumbnails caused by the first GPU draw happening before resources were initialized.
+- Real samples: 24 DJI FC3170 DNGs, 4000×3000, from an existing local folder, used read-only, covering daylight, backlight, water, sunset, city, and forest. All developed successfully; first decode median 1.59 s, max 2.42 s. A contact sheet of the five styles after auto enhance was checked, with no default local tinting or obvious global anomalies. This is a preliminary visual check, not user aesthetic approval or a full quality rating.
+- One real DNG was fully exported as a 4000×3000 uint16 TIFF, with dimensions and ICC verified. Its downscaled export compared with the same-recipe preview: mean absolute error 0.00053/255, P99 0.00192/255, max about 10.18/255 (a few edge resampling differences). Interpolation, detail, and noise reduction at different resolutions are not guaranteed to be pixel-identical.
+- The original DNGs' sizes and modification times were unchanged before and after. Samples, contact sheets, and test exports stayed in `/tmp`; nothing was written to production photo folders or uploaded to Linear.
+- The PyInstaller backend build and run pass, explicitly including rawpy and the shared style JSON so packaging doesn't miss resources. The standalone binary, in an isolated test database, actually returned a 1600×1200 float32 RAW base and completed a three-DNG export (per-photo settings, one cropped 3994×2247 uint16 TIFF, two JPEGs); reading back the TIFF's ICC, Exif IFD, and Orientation=1 passed. The full Electron distribution and the optional AI runtime still need separate acceptance testing.
 
-## 复现
+## Reproduction
 
-Python 3.11 已验证。安装 requirements-dev.txt 后执行 `.venv/bin/python -m pytest -q`；在 frontend 运行 `npm test` 与 `npm run build`。
+Python 3.11 is verified. After installing requirements-dev.txt, run `.venv/bin/python -m pytest -q`; in frontend run `npm test` and `npm run build`.
 
-GPU 比对：运行 `.venv/bin/python scripts/editing_qa.py` 生成被 git 忽略的 fixture，然后在 frontend 运行 `npm run dev -- --host 127.0.0.1`，打开 `http://127.0.0.1:5173/qa/editing.html`，点 Run checks。此页面仅为开发测试入口，不属于生产构建。
+GPU comparison: run `.venv/bin/python scripts/editing_qa.py` to generate a git-ignored fixture, then in frontend run `npm run dev -- --host 127.0.0.1`, open `http://127.0.0.1:5173/qa/editing.html`, and click Run checks. This page is a development test entry only and is not part of the production build.
 
-## 尚未覆盖
+## Not yet covered
 
-PER-352 保持验收状态：实际高 ISO 夜景、48 MP DNG、大批连续切图的长期内存、完整 Electron 包、可选模型 runtime，以及用户对最终风格的审美选择尚未全部覆盖。P0/P1/P2 功能实现与上述已测范围分开记录，不以合成测试替代这些条件。
+PER-352 stays in acceptance: real high-ISO night scenes, 48 MP DNGs, long-term memory during large batches of continuous photo switching, the full Electron package, the optional model runtime, and the user's aesthetic choice of final styles are not all covered yet. The P0/P1/P2 feature implementation is recorded separately from the tested scope above, and synthetic tests are not used in place of these conditions.

@@ -221,7 +221,8 @@ export interface ExportEnhanceSettings {
   photoStyle: PhotoStyle;
 }
 
-export type PhotoStylePreset = "standard" | "bright" | "dramatic" | "warm" | "cool" | "muted" | "mono";
+// v2 ids come from server/editing_presets.json; "muted" and "dramatic" also name legacy (v1) styles.
+export type PhotoStylePreset = string;
 
 export interface PhotoStyle {
   preset: PhotoStylePreset;

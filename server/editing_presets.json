@@ -1,7 +1,20 @@
 {
-  "standard": {"label": "Original", "exposure": 0, "brilliance": 0, "highlights": 0, "shadows": 0, "vibrance": 0, "temperature": 0, "contrast": 0, "saturation": 0},
-  "bright": {"label": "Natural", "exposure": 0.08, "brilliance": 0.16, "highlights": -0.1, "shadows": 0.08, "vibrance": 0.12, "temperature": 0, "contrast": 0.04, "saturation": 0},
-  "warm": {"label": "Warm sunset", "exposure": 0, "brilliance": 0.06, "highlights": -0.1, "shadows": 0, "vibrance": 0.08, "temperature": 0.18, "contrast": 0.04, "saturation": 0},
-  "cool": {"label": "Cool", "exposure": 0, "brilliance": 0.08, "highlights": -0.06, "shadows": 0.04, "vibrance": 0.06, "temperature": -0.14, "contrast": 0.06, "saturation": -0.04},
-  "mono": {"label": "Black & white", "exposure": 0, "brilliance": 0.1, "highlights": -0.1, "shadows": 0.04, "vibrance": 0, "temperature": 0, "contrast": 0.14, "saturation": -1}
+  "standard": {"label": "Standard", "group": "Undertones", "exposure": 0, "brilliance": 0, "highlights": 0, "shadows": 0, "contrast": 0, "blackPoint": 0, "vibrance": 0, "saturation": 0, "temperature": 0, "tint": 0},
+  "amber": {"label": "Amber", "group": "Undertones", "exposure": 0, "brilliance": 0, "highlights": 0, "shadows": 0.04, "contrast": 0, "blackPoint": 0, "vibrance": 0.08, "saturation": 0, "temperature": 0.24, "tint": 0.06},
+  "gold": {"label": "Gold", "group": "Undertones", "exposure": 0, "brilliance": 0.06, "highlights": 0, "shadows": 0, "contrast": 0, "blackPoint": 0, "vibrance": 0.18, "saturation": 0, "temperature": 0.18, "tint": -0.1},
+  "rose_gold": {"label": "Rose Gold", "group": "Undertones", "exposure": 0, "brilliance": 0.04, "highlights": 0, "shadows": 0, "contrast": 0, "blackPoint": 0, "vibrance": 0.04, "saturation": 0, "temperature": 0.1, "tint": 0.26},
+  "neutral": {"label": "Neutral", "group": "Undertones", "exposure": 0, "brilliance": 0, "highlights": 0, "shadows": 0, "contrast": 0, "blackPoint": 0, "vibrance": -0.1, "saturation": -0.08, "temperature": -0.08, "tint": 0},
+  "cool_rose": {"label": "Cool Rose", "group": "Undertones", "exposure": 0, "brilliance": 0, "highlights": 0, "shadows": 0, "contrast": 0, "blackPoint": 0, "vibrance": 0.03, "saturation": 0, "temperature": -0.18, "tint": 0.18},
+  "vibrant": {"label": "Vibrant", "group": "Moods", "exposure": 0, "brilliance": 0.04, "highlights": 0, "shadows": 0, "contrast": 0.06, "blackPoint": 0, "vibrance": 0.32, "saturation": 0.08, "temperature": 0, "tint": 0},
+  "bright": {"label": "Natural", "group": "Moods", "exposure": 0.08, "brilliance": 0.16, "highlights": -0.1, "shadows": 0.08, "contrast": 0.04, "blackPoint": 0, "vibrance": 0.12, "saturation": 0, "temperature": 0, "tint": 0},
+  "luminous": {"label": "Luminous", "group": "Moods", "exposure": 0.1, "brilliance": 0.24, "highlights": -0.12, "shadows": 0.14, "contrast": -0.05, "blackPoint": 0, "vibrance": 0.1, "saturation": 0, "temperature": 0, "tint": 0},
+  "dramatic": {"label": "Dramatic", "group": "Moods", "exposure": 0, "brilliance": -0.04, "highlights": -0.18, "shadows": -0.14, "contrast": 0.24, "blackPoint": 0.12, "vibrance": -0.06, "saturation": 0, "temperature": 0, "tint": 0},
+  "quiet": {"label": "Quiet", "group": "Moods", "exposure": 0.03, "brilliance": 0, "highlights": 0, "shadows": 0.1, "contrast": -0.14, "blackPoint": -0.08, "vibrance": -0.12, "saturation": -0.16, "temperature": 0, "tint": 0},
+  "cozy": {"label": "Cozy", "group": "Moods", "exposure": -0.07, "brilliance": 0, "highlights": 0, "shadows": -0.06, "contrast": 0.08, "blackPoint": 0, "vibrance": 0, "saturation": -0.08, "temperature": 0.2, "tint": 0.05},
+  "ethereal": {"label": "Ethereal", "group": "Moods", "exposure": 0.08, "brilliance": 0.1, "highlights": -0.06, "shadows": 0, "contrast": -0.16, "blackPoint": -0.1, "vibrance": 0, "saturation": -0.14, "temperature": -0.03, "tint": 0.05},
+  "warm": {"label": "Warm Sunset", "group": "Moods", "exposure": 0, "brilliance": 0.06, "highlights": -0.1, "shadows": 0, "contrast": 0.04, "blackPoint": 0, "vibrance": 0.08, "saturation": 0, "temperature": 0.18, "tint": 0},
+  "cool": {"label": "Cool", "group": "Moods", "exposure": 0, "brilliance": 0.08, "highlights": -0.06, "shadows": 0.04, "contrast": 0.06, "blackPoint": 0, "vibrance": 0.06, "saturation": -0.04, "temperature": -0.14, "tint": 0},
+  "mono": {"label": "Classic B&W", "group": "Black & White", "exposure": 0, "brilliance": 0.1, "highlights": -0.1, "shadows": 0.04, "contrast": 0.14, "blackPoint": 0, "vibrance": 0, "saturation": -1, "temperature": 0, "tint": 0},
+  "mono_muted": {"label": "Muted B&W", "group": "Black & White", "exposure": 0, "brilliance": 0.06, "highlights": 0, "shadows": 0.08, "contrast": -0.08, "blackPoint": -0.06, "vibrance": 0, "saturation": -1, "temperature": 0, "tint": 0},
+  "mono_stark": {"label": "Stark B&W", "group": "Black & White", "exposure": 0, "brilliance": 0, "highlights": -0.08, "shadows": -0.12, "contrast": 0.3, "blackPoint": 0.16, "vibrance": 0, "saturation": -1, "temperature": 0, "tint": 0}
 }

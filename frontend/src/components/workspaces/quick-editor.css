@@ -351,9 +351,20 @@
 /* Styles: photo thumbnails, the chosen one outlined in white. */
 .quick-styles {
   display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.quick-style-group {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2) 6px;
-  margin-bottom: var(--space-3);
+}
+.quick-style-group-label {
+  grid-column: 1 / -1;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .quick-styles button {
   display: grid;
@@ -372,8 +383,7 @@
   white-space: nowrap;
 }
 .quick-styles button:hover { color: var(--text-2); }
-.quick-styles button > canvas,
-.quick-style-placeholder {
+.quick-styles button > canvas {
   display: block;
   width: 100%;
   height: 46px;
@@ -382,8 +392,7 @@
   object-fit: cover;
 }
 .quick-styles button.active { color: var(--text); }
-.quick-styles button.active > canvas,
-.quick-styles button.active > .quick-style-placeholder {
+.quick-styles button.active > canvas {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

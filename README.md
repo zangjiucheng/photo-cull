@@ -3,67 +3,93 @@
 [![CI](https://github.com/zangjiucheng/photo-cull/actions/workflows/ci.yml/badge.svg)](https://github.com/zangjiucheng/photo-cull/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zangjiucheng/photo-cull)](https://github.com/zangjiucheng/photo-cull/releases/latest)
 
-本地照片选片与 RAW 调色工具。面向 DJI 航拍照片，把评分、相似照片筛选、快速调整和成片导出放在一个工作区里。
+**AI Photo Culling** is a local macOS app for culling and RAW-editing photos, built around DJI drone shots. Scoring, similar-photo review, quick adjustments, and export live in one workspace.
 
-**选片 → 自动增强 → 拖几下滑杆 → 导出。**
+**Cull → Auto → drag a few sliders → export.**
 
-## 安装
+Website: <https://zangjiucheng.github.io/photo-cull/>
 
-从 [GitHub Releases](https://github.com/zangjiucheng/photo-cull/releases/latest) 下载 macOS Apple Silicon（arm64）DMG，打开后将 **AI Photo Culling.app** 拖到 Applications。
+![The Enhance & Export editor with the Tone/Color pad](site/assets/editor.webp)
 
-基础评分、RAW 编辑与导出所需的 Python 后端包含在安装包中，无需另外安装 Python。当前发布流程未配置 Developer ID 签名和公证，首次打开可能受到 macOS 安全检查限制。
+## Documentation
 
-应用每次启动都会检查 GitHub Releases 上的新版本，也可以通过菜单 **AI Photo Culling → Check for Updates...** 手动检查。确认更新后，应用会下载对应架构的 zip，按 `SHA256SUMS.txt` 做校验，然后在退出时替换当前的 `.app` 并重新启动。自动替换要求应用位于可写目录，例如 `/Applications`；如果是直接从 DMG 中运行，会改为打开发布页。设置 `AI_CULLING_DISABLE_UPDATES=1` 可以关闭更新检查。Intel Mac、Windows 和 Linux 尚未提供已验证的安装包。
+- [Getting started](docs/getting-started.md): install, first run, Gatekeeper, updates
+- [Editing](docs/editing.md): the quick RAW editor and its controls
+- [Keyboard shortcuts](docs/shortcuts.md)
+- [Development](docs/development.md): setup, run, test, package, release
+- [Docker browser mode](docker/README.md)
+- Release notes: [v0.3.0](docs/releases/v0.3.0.md), [v0.2.2](docs/releases/v0.2.2.md), [v0.2.1](docs/releases/v0.2.1.md), [v0.2.0](docs/releases/v0.2.0.md)
+- Background: [quick RAW editing research](docs/research/quick-raw-editing.md), [implementation and validation record](docs/validation/quick-raw-editor.md)
 
-## 功能
+## Install
 
-| 环节 | 能做什么 |
+Download the macOS Apple Silicon (arm64) DMG from [GitHub Releases](https://github.com/zangjiucheng/photo-cull/releases/latest), open it, and drag **AI Photo Culling.app** into Applications.
+
+The Python backend needed for basic scoring, RAW editing, and export is bundled, so you don't need to install Python. Builds are **not** signed with a Developer ID or notarized, so macOS Gatekeeper may block the first launch; see [Getting started](docs/getting-started.md#first-launch-and-gatekeeper) for how to open it. Intel Macs, Windows, and Linux don't have verified builds yet.
+
+### Updates
+
+The app checks GitHub Releases for a new version on every launch, and you can check manually from **AI Photo Culling → Check for Updates...**. When you accept an update, the app downloads the zip for your architecture, verifies it against `SHA256SUMS.txt`, checks the bundled version, and then replaces the `.app` and relaunches (right away, or the next time you quit). If the replacement fails, the previous version is restored.
+
+In-place updates need the app to live in a writable folder such as `/Applications`; when it runs straight from the DMG, the release page opens instead. Set `AI_CULLING_DISABLE_UPDATES=1` to turn update checks off. v0.2.0 and earlier have no updater and need a one-time manual install.
+
+## Features
+
+| Workspace | What it does |
 | --- | --- |
-| 选片 | 文件夹工作区、照片评分、星级、筛选与逐张查看 |
-| 相似照片 | 检索相似/重复照片，比较后决定保留哪些 |
-| 快速调色 | 大图即时预览，曝光、鲜明度、高光、阴影、自然饱和度、冷暖六个常用滑杆 |
-| 自动增强 | 保守的明暗与色彩建议，可调强度，结果可继续手动修改 |
-| 风格 | Original、Natural、Warm sunset、Cool、Black & white，当前照片缩略图与独立强度 |
-| 精调 | 对比、黑位、去雾、饱和度、色调、细节、剪裁警示 |
-| 构图 | 非破坏裁切、常用画幅、±15° 拉直和三分网格 |
-| 批量编辑 | 选择性复制/粘贴调整、应用到导出队列、设备个人预设 |
-| 导出 | sRGB JPEG、16 位 sRGB TIFF，逐片配方、尺寸与质量设置、文件名避让 |
+| Browse | Folder workspace with grid/list views, filename search, minimum AI score, star filter, sorting (score, name, date), and an Inspector with score reasons, model metrics, photo signals, and a manual score override |
+| Review | One photo at a time with a resizable preview, zoom, star rating, and queue toggle; **AI Rate Folder** scores the whole folder |
+| Similarity | Groups similar and duplicate photos (pHash first, then CLIP + FAISS when available), suggests a keeper per group, and removes the rest from the workspace; originals stay on disk and can be restored |
+| Enhance & Export | Quick RAW editor for the export queue and the batch export |
+| Stats | Rating coverage, filter retention, queue size, and background scoring progress |
+| Debug | Installs the optional AI runtime and shows its install log |
 
-普通编辑在本地进行，打开文件夹会原地索引照片；编辑参数单独保存，导出不会覆盖原片。可选 AI runtime 需要联网安装依赖和获取模型，不是基础调色的前置条件。
+**Scoring.** Every photo gets a score from built-in signals (sharpness, exposure, contrast, clipping, brightness). With the optional AI runtime installed, image-quality models (via pyiqa) also contribute. Stars and manual overrides are kept when you refresh AI scores.
 
-## 快速使用
+**Quick RAW editor** (Enhance & Export):
 
-1. **Open Folder** 打开照片目录，等待索引完成。
-2. 在 **Browse / Review / Similarity** 评分、比较照片，将要处理的照片加入队列。
-3. 打开 **Enhance & Export**，点 **Auto**，再按需要拖动常用滑杆或选择风格。
-4. 展开 **Crop & straighten** 调整构图；需要统一观感时，在 **Copy adjustments & presets** 选择要复制的调整组。默认保留各片独立的曝光、白平衡和裁切。
-5. 选择 **Share JPEG** 或 **Archive TIFF**，设置输出目录，点击 **Export**。每张照片使用自己的配方；导出预设也属于逐片设置，可通过复制调整中的 **Export settings** 同步到队列。
-
-编辑参数会自动保存，底栏显示保存状态。关闭后可恢复配方；撤销历史只保留在当前会话中，最多 50 步。个人预设保存在当前设备的本地存储中。
-
-| 操作 | 快捷方式 |
+| Area | Controls |
 | --- | --- |
-| 撤销 / 重做 | `⌘/Ctrl+Z` / `⇧+⌘/Ctrl+Z` |
-| 临时查看原图 | 按住 `\` 或画布下方的对比按钮 |
-| 单项复位 | 双击滑杆 |
-| 切换照片 | 左右方向键 |
-| 保存工作区入口文件 | 桌面版 `⌘/Ctrl+S`；入口文件记录目录，不打包照片或编辑数据库 |
+| Base | DJI DNGs are developed through the tone curve embedded in the DNG (the curve the in-camera JPEG and Lightroom use), so the starting point already looks like the camera's JPEG |
+| Auto | Conservative per-photo suggestions with an Auto strength slider; clicking Auto again replaces the previous result |
+| Tone/Color pad | Apple-style 2D pad (More Tone ↔ Softer, Muted ↔ Vivid) that moves the real sliders, adapted per photo |
+| Everyday sliders | Exposure, Brilliance, Highlights, Shadows, Vibrance, Warmth |
+| Styles | 18 Apple Photos-style looks in three groups: Undertones (Standard, Amber, Gold, Rose Gold, Neutral, Cool Rose), Moods (Vibrant, Natural, Luminous, Dramatic, Quiet, Cozy, Ethereal, Warm Sunset, Cool) and Black & White (Classic, Muted, Stark), previewed on the current photo, with Style strength |
+| Light & color | Contrast, Black point, Dehaze, Saturation, Tint, Definition, clipping overlay |
+| Crop & straighten | Non-destructive crop, Original / 1:1 / 4:3 / 3:2 / 16:9 / 9:16, ±15° straighten, rule-of-thirds grid |
+| Batch | Selective copy/paste by group, Apply to queue, personal presets saved on this device |
+| Export | Share JPEG / Archive TIFF presets; sRGB JPEG or 16-bit sRGB TIFF, JPEG quality, longest edge, per-photo recipes, filename de-duplication |
 
-## RAW、色彩与输出说明
+Editing happens locally. Opening a folder indexes the photos in place; edit recipes are stored separately and export never overwrites originals. The optional AI runtime needs a network connection to install dependencies and fetch models, and is not required for basic editing. See [Editing](docs/editing.md) for the full workflow.
 
-- 新配方使用 rawpy 16 位显影，固定曝光、相机白平衡，后续基础处理保留 float32。GPU 预览与 CPU 导出共享风格数据和调整数学；浏览缩略图仍使用快速预览。
-- 冷暖是相对相机白平衡的调整，不是以 Kelvin 为单位重新显影。高光控制不能恢复传感器已饱和的细节。
-- 常规缩放、锐化和裁切保持浮点，最终写入 JPEG 时量化到 8 位，TIFF 时量化到 16 位。预览和全尺寸导出的插值、细节处理可能存在差异。
-- 输出带 sRGB ICC，保留受支持的相机、曝光、日期、作者元数据，更新方向和尺寸；不复制 GPS、XMP 或 MakerNote。
-- 旧版未标记版本的配方继续使用旧算法；在编辑区可主动切换到新控制，从中性基准开始。
-- 降噪使用传统滤波，界面报告 OpenCV 非局部均值或 Pillow 回退；Real-ESRGAN 放大需要可选 runtime。两者默认关闭，启用后会经过 8 位处理。
-- 本软件输出的 16 位 TIFF 可保留精度重新导入；带其他 ICC 配置文件的 16 位 TIFF 暂不支持。
+## Quick start
 
-本轮已用 24 张 DJI FC3170 / 4000×3000 DNG 做初步检查。高 ISO 真夜景、48 MP RAW、长期大量切图的内存占用，以及可选模型 runtime 尚未完成全面验收。详细证据见 [实现与验收记录](docs/validation/quick-raw-editor.md)。
+1. Click **Open Folder...** and wait for indexing to finish.
+2. Rate and compare photos in **Browse / Review / Similarity**, and add the ones you want to finish to the export queue (`Q`).
+3. Open **Enhance & Export**, click **Auto**, then drag the Tone/Color pad or the sliders, or pick a style.
+4. Open **Crop & straighten** to frame the shot. To give the queue a consistent look, use **Copy adjustments & presets** and pick the groups to copy; by default each photo keeps its own exposure, white balance, and crop.
+5. Choose **Share JPEG** or **Archive TIFF**, set the output folder, and click **Export**. Every photo uses its own recipe.
 
-## 开发运行
+Edits save automatically and the status bar shows the save state. Undo history holds up to 50 steps for the current session. See [Keyboard shortcuts](docs/shortcuts.md).
 
-已验证 Python **3.11**；CI 使用 Node.js **24** 和 npm。macOS 桌面开发需要 Electron，首次安装会下载其运行文件。
+## RAW, color, and output
+
+- New (v2) recipes develop RAW with rawpy at 16 bits, fixed exposure, and camera white balance, then keep float32 for the base processing. DJI DNGs with an embedded `ProfileToneCurve` go through it with a +0.6 EV lift and hue-preserving application. DNGs without a tone curve develop as before.
+- GPU preview and CPU export share the style data and adjustment math. Browse thumbnails still use fast previews.
+- Warmth is relative to the camera white balance, not a Kelvin re-development. Highlights cannot recover detail that is clipped on the sensor.
+- Resizing, sharpening, and cropping stay in floating point; output is quantized to 8 bits for JPEG and 16 bits for TIFF only at the final write. Preview and full-size export can differ slightly in interpolation and detail.
+- Output embeds an sRGB ICC profile, keeps supported camera, exposure, date, and author metadata, and updates orientation and size. GPS, XMP, and MakerNote are not copied.
+- v1 recipes from before v0.2.0 keep the legacy engine and show **Legacy edit preserved**; **Use new controls** switches to the new base and starts from neutral (undo brings the old recipe back).
+- Noise reduction is a traditional filter (OpenCV non-local means, or a Pillow fallback); Real-ESRGAN upscaling needs the optional runtime. Both are off by default and run through an 8-bit image when enabled.
+- 16-bit TIFFs written by this app can be re-imported at full precision; other 16-bit TIFFs with other ICC profiles aren't supported yet.
+
+Performance (from the [v0.3.0 notes](docs/releases/v0.3.0.md)): switching back to an opened photo takes about 0.01 s instead of about 2.7 s, preview rendering about 0.09 s instead of 0.7 s, and a batch export of 3 full-size JPEGs about 3.5–4.7 s instead of about 12–13.6 s, with identical output pixels.
+
+Initial checks used 24 DJI FC3170 4000×3000 DNGs. High-ISO real night scenes, 48 MP RAWs, memory use over long sessions, and the optional model runtime are not fully validated yet. Details are in the [validation record](docs/validation/quick-raw-editor.md).
+
+## Development
+
+Python **3.11** is verified; CI uses Node.js **24** and npm.
 
 ```bash
 git clone https://github.com/zangjiucheng/photo-cull.git
@@ -71,50 +97,26 @@ cd photo-cull
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
-cd frontend
-npm ci
-cd ..
-make dev PYTHON="$PWD/.venv/bin/python"
-```
-
-仅在浏览器中调试：
-
-```bash
-make dev-web PYTHON="$PWD/.venv/bin/python"
-```
-
-打开 `http://127.0.0.1:5050`。浏览器模式的目录输入需要填写后端机器可访问的路径。
-
-```bash
+cd frontend && npm ci && cd ..
+make dev PYTHON="$PWD/.venv/bin/python"       # desktop app
+make dev-web PYTHON="$PWD/.venv/bin/python"   # browser only, http://127.0.0.1:5050
 make test PYTHON="$PWD/.venv/bin/python"
-make build-web
 ```
 
-可选 AI 评分与 FAISS 相似检索依赖分别在 `requirements-ai.txt`、`requirements-faiss.txt` 中；也可在桌面版的 Debug 页面安装 AI runtime。基础编辑不需要这些大模型依赖。
+Build a DMG for the local architecture with `make package-dmg PYTHON=python3.11` (output in `release/`). Pushing a `v*` tag runs the release workflow, which tests, builds the DMG and update zip, writes `SHA256SUMS.txt`, and publishes a GitHub Release. See [Development](docs/development.md) for details.
 
-## 构建与发布
+Docker runs the browser mode locally; see the [Docker notes](docker/README.md). The app has no account authentication, so Docker binds to the loopback address only.
 
-在 macOS 上构建本机架构的 DMG：
+## Data
 
-```bash
-make package-dmg PYTHON=python3.11
-```
+On macOS, desktop data lives in `~/Library/Application Support/AI Photo Culling/`: the SQLite workspace database, preview caches, and logs. Back up the database together with your photo folders; a workspace file (**File → Save Workspace File...**, `⌘S`) only records folder references. Installing a new version doesn't clear this data.
 
-此命令创建独立打包环境，以 PyInstaller 打包后端，再用 electron-builder 构建桌面应用；产物位于 `release/`。`make package-dir` 生成供本地检查的未封装应用目录。
-
-GitHub Actions 在 `main` 的 push / PR 上运行后端测试、前端测试与生产构建。推送 `v*` 标签触发 macOS 发布流程：校验、构建 DMG 和应用内更新所用的 zip、生成 SHA-256 校验文件并上传 GitHub Release。版本来自标签，发布配置见 [release.yml](.github/workflows/release.yml)。
-
-Docker 用于本机浏览器模式，启动方法、照片目录挂载和数据持久化见 [Docker 说明](docker/README.md)。此应用未实现账户鉴权，Docker 默认仅绑定本机回环地址。
-
-## 数据与目录
-
-macOS 桌面数据默认保存在 `~/Library/Application Support/AI Photo Culling/`，包含 SQLite 工作区数据库、预览缓存和日志。备份时请同时保留数据库和照片目录；工作区入口文件只保存目录引用。安装新版本不会主动清除这些数据。
-
-| 环境变量 | 用途 |
+| Variable | Purpose |
 | --- | --- |
-| `DB_PATH` | 覆盖 SQLite 数据库路径 |
-| `UPLOAD_FOLDER` | 浏览器后端的上传目录；桌面版由应用管理 |
-| `RAW_RENDER_CACHE` | RAW 浏览预览缓存目录 |
-| `FLASK_HOST` / `FLASK_PORT` | 浏览器后端绑定地址与端口；开发默认 `127.0.0.1:5050` |
+| `DB_PATH` | Override the SQLite database path |
+| `UPLOAD_FOLDER` | Upload folder for the browser backend; managed by the app on desktop |
+| `RAW_RENDER_CACHE` | RAW browse preview cache folder |
+| `FLASK_HOST` / `FLASK_PORT` | Browser backend bind address and port; development default `127.0.0.1:5050` |
+| `AI_CULLING_DISABLE_UPDATES` | Set to `1` to disable update checks |
 
-主要代码：`frontend/src` 为 React / TypeScript 编辑界面，`frontend/electron` 为桌面壳，`server` 为 Flask、RAW 处理和导出队列。研究依据见 [快速 RAW 调色研究](docs/research/quick-raw-editing.md)；开发 GPU 对比入口及复现方法见 [验收记录](docs/validation/quick-raw-editor.md)。
+Code layout: `frontend/src` is the React / TypeScript UI, `frontend/electron` the desktop shell (including the updater), and `server` the Flask backend, RAW processing, and export queue.

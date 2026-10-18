@@ -23,7 +23,8 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageCms
 from . import db, events, raw_pipeline, editing
 
 
-STYLE_PRESETS = {"standard", "bright", "dramatic", "warm", "cool", "muted", "mono"}
+# Legacy (v1) style ids plus every v2 preset in editing_presets.json.
+STYLE_PRESETS = {"standard", "bright", "dramatic", "warm", "cool", "muted", "mono"} | set(editing.PRESETS)
 UPSCALE_SCALES = {2, 4}
 DENOISE_STRENGTHS = {"low", "medium", "high"}
 REALESRGAN_SOURCE_BASE = "https://raw.githubusercontent.com/ai-forever/Real-ESRGAN/main/RealESRGAN"

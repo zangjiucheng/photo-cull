@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Photo Culling</title>
+  <meta name="description" content="A local macOS app for culling and RAW-editing DJI drone photos: AI scoring, similar-photo groups, a quick RAW editor with a Tone/Color pad, and JPEG or 16-bit TIFF export.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#000000">
+  <meta property="og:title" content="AI Photo Culling">
+  <meta property="og:description" content="Cull, edit, and export DJI drone RAWs in one local macOS app.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://zangjiucheng.github.io/photo-cull/assets/editor.webp">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#top" aria-label="AI Photo Culling, home">
+        <img src="assets/icon.svg" alt="" width="28" height="28">
+        <span>AI Photo Culling</span>
+      </a>
+      <nav aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#editing">Editing</a>
+        <a href="#install">Install</a>
+        <a href="#docs">Docs</a>
+        <a href="https://github.com/zangjiucheng/photo-cull">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="wrap">
+        <img class="hero-icon" src="assets/icon.svg" alt="AI Photo Culling app icon" width="88" height="88">
+        <h1>AI Photo Culling</h1>
+        <p class="lede">Cull, edit, and export your DJI drone RAWs in one local Mac app.<br class="br-wide"> Score, compare, hit Auto, drag a few sliders, export.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://github.com/zangjiucheng/photo-cull/releases/latest">Download for macOS (Apple Silicon)</a>
+          <a class="btn" href="https://github.com/zangjiucheng/photo-cull">View on GitHub</a>
+        </div>
+        <p class="fineprint">arm64 DMG · Python backend bundled · updates in place from GitHub Releases</p>
+      </div>
+      <figure class="wrap shot shot-hero">
+        <img src="assets/editor.webp" width="1440" height="900" fetchpriority="high" decoding="async"
+             alt="The Enhance &amp; Export editor: a large aerial photo of a forested mountain, a filmstrip of queued photos, and the Adjust panel with the Tone/Color pad, six sliders, and style thumbnails.">
+      </figure>
+    </section>
+
+    <section id="features" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Workflow</p>
+        <h2>From a full SD card to the keepers</h2>
+        <p class="section-lede">Open a folder and it is indexed in place. Every photo gets a score in the background, and you work through six workspaces: Browse, Review, Similarity, Enhance &amp; Export, Stats, and Debug.</p>
+      </div>
+
+      <article class="feature wrap">
+        <div class="feature-text">
+          <h3>Browse and score</h3>
+          <p>A grid or list of the whole folder with filename search, a minimum AI score, star filters, and sorting by score, name, or date. The Inspector explains each score: sharpness, exposure, contrast, clipping, and, with the optional AI runtime, image-quality model metrics. Override any score by hand.</p>
+        </div>
+        <figure class="shot">
+          <img src="assets/browse.webp" width="1192" height="900" loading="lazy" decoding="async"
+               alt="Browse workspace: a grid of aerial photo thumbnails with AI scores, star ratings and Queued labels, and an Inspector panel listing score reasons and photo signals.">
+        </figure>
+      </article>
+
+      <article class="feature feature-flip wrap">
+        <div class="feature-text">
+          <h3>Review one frame at a time</h3>
+          <p>A large preview with zoom, star ratings, and a filmstrip. Move with <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd>, press <kbd>Q</kbd> to queue a photo for export, and <kbd>Space</kbd> to enlarge it. <strong>AI Rate Folder</strong> scores everything in one go.</p>
+        </div>
+        <figure class="shot">
+          <img src="assets/review.webp" width="1192" height="900" loading="lazy" decoding="async"
+               alt="Review workspace: a large aerial photo of a campus with mountains and water behind it, three stars, a Queued for Export badge, and a strip of thumbnails below.">
+        </figure>
+      </article>
+
+      <article class="feature wrap">
+        <div class="feature-text">
+          <h3>Collapse the near-duplicates</h3>
+          <p>Similarity groups burst shots and near-duplicates with perceptual hashes, then CLIP and FAISS when they are installed. Each group suggests a keeper and marks the rest. Removing photos only takes them out of the workspace; the files stay on disk and can be restored.</p>
+        </div>
+        <figure class="shot">
+          <img src="assets/similarity.webp" width="1192" height="900" loading="lazy" decoding="async"
+               alt="Similarity workspace: groups of similar photos, each with one Keep photo and the others struck through and checked for removal.">
+        </figure>
+      </article>
+
+      <div class="wrap">
+        <ul class="facts">
+          <li><h3>Local</h3><p>Photos are indexed in place. Recipes live in a local database, and export never overwrites an original.</p></li>
+          <li><h3>Batch</h3><p>Copy and paste adjustments by group, apply them to the whole queue, or save a look as a preset.</p></li>
+          <li><h3>Export</h3><p>sRGB JPEG or 16-bit sRGB TIFF with an embedded ICC profile. Capture metadata is kept; GPS is not copied.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="editing" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Editing</p>
+        <h2>A RAW editor that starts in the right place</h2>
+      </div>
+      <div class="wrap editing">
+        <figure class="shot shot-pad">
+          <img src="assets/tone-pad.webp" width="279" height="535" loading="lazy" decoding="async"
+               alt="The Adjust panel: an Auto button, a square Tone/Color pad labeled More Tone, Softer, Muted and Vivid with a dot near the upper right, and the Exposure, Brilliance, Highlights, Shadows, Vibrance and Warmth sliders.">
+        </figure>
+        <div class="editing-text">
+          <h3>The camera's own tone curve</h3>
+          <p>DJI DNGs embed a <code>ProfileToneCurve</code>, the same curve the in-camera JPEG and Lightroom use. The editor develops the RAW at 16 bits with camera white balance, lifts it +0.6&nbsp;EV, and applies that curve without shifting hue. At zero, a photo already looks like the camera's JPEG instead of flat and gray.</p>
+
+          <h3>Auto</h3>
+          <p>Conservative, per-photo suggestions that land on the regular sliders. Night scenes stay dark, crushed shadows and near-clipped highlights get attention, and an Auto strength slider scales the result.</p>
+
+          <h3>The Tone/Color pad</h3>
+          <p>One square, two axes: <strong>More Tone ↔ Softer</strong> vertically, <strong>Muted ↔ Vivid</strong> horizontally. Dragging it moves Contrast, Black point, Shadows, Highlights, Brilliance, Vibrance, and Saturation together, in directions worked out from each photo's histogram and skin and sky detection. Deep shadows aren't pushed deeper, highlights near clipping are protected, and skies get gentler saturation. It moves the real sliders, so you can fine-tune anything afterwards.</p>
+
+          <h3>Everything else you reach for</h3>
+          <ul class="ticks">
+            <li>Exposure, Brilliance, Highlights, Shadows, Vibrance, Warmth</li>
+            <li>Contrast, Black point, Dehaze, Saturation, Tint, Definition, clipping overlay</li>
+            <li>18 Apple Photos-style looks: Undertones, Moods and Black &amp; White, with strength</li>
+            <li>Crop to Original, 1:1, 4:3, 3:2, 16:9, 9:16; straighten ±15°</li>
+            <li>Hold <kbd>\</kbd> for the original, <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd>, autosave</li>
+          </ul>
+        </div>
+      </div>
+      <div class="wrap">
+        <dl class="stats" aria-label="Performance in v0.3.0">
+          <div><dt>0.01&nbsp;s</dt><dd>to switch back to an opened photo, down from about 2.7&nbsp;s</dd></div>
+          <div><dt>0.09&nbsp;s</dt><dd>preview render, down from 0.7&nbsp;s</dd></div>
+          <div><dt>3.5–4.7&nbsp;s</dt><dd>to export 3 full-size JPEGs, down from about 12–13.6&nbsp;s</dd></div>
+        </dl>
+        <p class="note">Measured for the v0.3.0 release; output pixels are identical to before.</p>
+      </div>
+    </section>
+
+    <section id="install" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Install</p>
+        <h2>Get it running</h2>
+        <div class="cols">
+          <div>
+            <h3>1. Download</h3>
+            <p>Grab the DMG from the <a href="https://github.com/zangjiucheng/photo-cull/releases/latest">latest release</a> and drag <strong>AI Photo Culling.app</strong> into Applications. Apple Silicon only for now. Each release publishes <code>SHA256SUMS.txt</code>.</p>
+          </div>
+          <div>
+            <h3>2. Allow it to open</h3>
+            <p>The app isn't signed with a Developer ID or notarized, so Gatekeeper blocks the first launch. Open it once, then go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong>. If macOS says the app is damaged, run:</p>
+            <pre><code>xattr -dr com.apple.quarantine \
+  "/Applications/AI Photo Culling.app"</code></pre>
+          </div>
+          <div>
+            <h3>3. Stay current</h3>
+            <p>The app checks GitHub Releases on launch, or via <strong>Check for Updates...</strong>. Updates are verified against <code>SHA256SUMS.txt</code> and swapped in on restart or quit. Keep the app in <code>/Applications</code> for this to work. <code>AI_CULLING_DISABLE_UPDATES=1</code> turns it off.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="docs" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Docs</p>
+        <h2>Read more</h2>
+        <ul class="links">
+          <li><a href="https://github.com/zangjiucheng/photo-cull/blob/main/docs/getting-started.md"><span>Getting started</span><small>Install, first run, Gatekeeper, updates</small></a></li>
+          <li><a href="https://github.com/zangjiucheng/photo-cull/blob/main/docs/editing.md"><span>Editing</span><small>The editor workflow and every control</small></a></li>
+          <li><a href="https://github.com/zangjiucheng/photo-cull/blob/main/docs/shortcuts.md"><span>Keyboard shortcuts</span><small>Global, Review, Similarity, editor</small></a></li>
+          <li><a href="https://github.com/zangjiucheng/photo-cull/blob/main/docs/development.md"><span>Development</span><small>Setup, run, test, package, release</small></a></li>
+          <li><a href="https://github.com/zangjiucheng/photo-cull/blob/main/docker/README.md"><span>Docker</span><small>Run the browser mode locally</small></a></li>
+          <li><a href="https://github.com/zangjiucheng/photo-cull/tree/main/docs/releases"><span>Release notes</span><small>What changed in each version</small></a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <span>AI Photo Culling</span>
+      <a href="https://github.com/zangjiucheng/photo-cull">github.com/zangjiucheng/photo-cull</a>
+    </div>
+  </footer>
+</body>
+</html>

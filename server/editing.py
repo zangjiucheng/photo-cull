@@ -133,7 +133,9 @@ def apply_style(image, style):
     preset = PRESETS.get(style.preset, PRESETS["standard"])
     if style.palette <= 0 or (style.preset == "standard" and not style.tone and not style.colour):
         return image.copy()
-    controls = {key: val for key, val in preset.items() if key != "label"}
+    # Preset files use the frontend's camelCase names; apply_color reads snake_case.
+    controls = {("black_point" if key == "blackPoint" else key): val
+                for key, val in preset.items() if key not in ("label", "group")}
     controls["contrast"] += style.tone / 100 * .15
     controls["temperature"] += style.colour / 100 * .12
     styled = apply_color(image, SimpleNamespace(**controls))
