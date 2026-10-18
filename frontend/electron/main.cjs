@@ -3,6 +3,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const { checkForUpdates, initUpdater } = require("./updater.cjs");
 
 const appName = "AI Photo Culling";
 app.setName(appName);
@@ -46,6 +47,7 @@ function configureApplicationMenu() {
       label: appName,
       submenu: [
         { role: "about", label: `About ${appName}` },
+        { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -573,6 +575,7 @@ async function createWindow() {
 
   await win.loadURL(`http://${backendHost}:${backendPort}`);
   publishAiRuntimeStatus();
+  initUpdater({ getWindow: () => mainWindow });
 }
 
 ipcMain.handle("open-folder", async () => {

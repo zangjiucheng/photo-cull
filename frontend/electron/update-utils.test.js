@@ -1,0 +1,48 @@
+import { createRequire } from "node:module";
+import { describe, expect, it } from "vitest";
+
+const require = createRequire(import.meta.url);
+const { compareVersions, parseChecksums, selectZipAsset } = require("./update-utils.cjs");
+
+describe("compareVersions", () => {
+  it("orders semantic versions and ignores the tag prefix", () => {
+    expect(compareVersions("v0.2.1", "0.2.0")).toBeGreaterThan(0);
+    expect(compareVersions("0.10.0", "0.9.9")).toBeGreaterThan(0);
+    expect(compareVersions("v0.2.0", "0.2.0")).toBe(0);
+    expect(compareVersions("0.1.9", "0.2.0")).toBeLessThan(0);
+  });
+
+  it("treats a release as newer than its prerelease", () => {
+    expect(compareVersions("0.3.0", "0.3.0-beta.1")).toBeGreaterThan(0);
+    expect(compareVersions("0.3.0-beta.1", "0.3.0")).toBeLessThan(0);
+  });
+
+  it("never reports an update for unparseable versions", () => {
+    expect(compareVersions("nightly", "0.2.0")).toBe(0);
+  });
+});
+
+describe("parseChecksums", () => {
+  it("keys entries by GitHub asset name", () => {
+    const hash = "a".repeat(64);
+    const checksums = parseChecksums(`${hash}  AI Photo Culling-0.2.1-arm64-mac.zip\n`);
+    expect(checksums.get("AI.Photo.Culling-0.2.1-arm64-mac.zip")).toBe(hash);
+  });
+});
+
+describe("selectZipAsset", () => {
+  const assets = [
+    { name: "AI.Photo.Culling-0.2.1-arm64.dmg" },
+    { name: "AI.Photo.Culling-0.2.1-arm64-mac.zip" },
+    { name: "AI.Photo.Culling-0.2.1-mac.zip" },
+  ];
+
+  it("picks the zip for the running architecture", () => {
+    expect(selectZipAsset(assets, "arm64")?.name).toBe("AI.Photo.Culling-0.2.1-arm64-mac.zip");
+    expect(selectZipAsset(assets, "x64")?.name).toBe("AI.Photo.Culling-0.2.1-mac.zip");
+  });
+
+  it("returns null when no matching zip was published", () => {
+    expect(selectZipAsset([{ name: "AI.Photo.Culling-0.2.0-arm64.dmg" }], "arm64")).toBeNull();
+  });
+});

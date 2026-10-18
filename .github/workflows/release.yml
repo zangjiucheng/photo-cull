@@ -43,12 +43,12 @@ jobs:
           npm ci
           npm test
 
-      - name: Build DMG
-        run: make package-dmg
+      - name: Build DMG and update zip
+        run: make package
 
       - name: Generate checksums
         working-directory: release
-        run: shasum -a 256 *.dmg > SHA256SUMS.txt
+        run: shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
@@ -56,5 +56,6 @@ jobs:
           files: |
             release/*.dmg
             release/*.dmg.blockmap
+            release/*.zip
             release/SHA256SUMS.txt
           generate_release_notes: true

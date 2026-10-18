@@ -11,7 +11,9 @@
 
 从 [GitHub Releases](https://github.com/zangjiucheng/photo-cull/releases/latest) 下载 macOS Apple Silicon（arm64）DMG，打开后将 **AI Photo Culling.app** 拖到 Applications。
 
-基础评分、RAW 编辑与导出所需的 Python 后端包含在安装包中，无需另外安装 Python。当前发布流程未配置 Developer ID 签名和公证，首次打开可能受到 macOS 安全检查限制。Intel Mac、Windows 和 Linux 尚未提供已验证的安装包。
+基础评分、RAW 编辑与导出所需的 Python 后端包含在安装包中，无需另外安装 Python。当前发布流程未配置 Developer ID 签名和公证，首次打开可能受到 macOS 安全检查限制。
+
+应用每次启动都会检查 GitHub Releases 上的新版本，也可以通过菜单 **AI Photo Culling → Check for Updates...** 手动检查。确认更新后，应用会下载对应架构的 zip，按 `SHA256SUMS.txt` 做校验，然后在退出时替换当前的 `.app` 并重新启动。自动替换要求应用位于可写目录，例如 `/Applications`；如果是直接从 DMG 中运行，会改为打开发布页。设置 `AI_CULLING_DISABLE_UPDATES=1` 可以关闭更新检查。Intel Mac、Windows 和 Linux 尚未提供已验证的安装包。
 
 ## 功能
 
@@ -100,7 +102,7 @@ make package-dmg PYTHON=python3.11
 
 此命令创建独立打包环境，以 PyInstaller 打包后端，再用 electron-builder 构建桌面应用；产物位于 `release/`。`make package-dir` 生成供本地检查的未封装应用目录。
 
-GitHub Actions 在 `main` 的 push / PR 上运行后端测试、前端测试与生产构建。推送 `v*` 标签触发 macOS 发布流程：校验、构建 DMG、生成 SHA-256 校验文件并上传 GitHub Release。版本来自标签，发布配置见 [release.yml](.github/workflows/release.yml)。
+GitHub Actions 在 `main` 的 push / PR 上运行后端测试、前端测试与生产构建。推送 `v*` 标签触发 macOS 发布流程：校验、构建 DMG 和应用内更新所用的 zip、生成 SHA-256 校验文件并上传 GitHub Release。版本来自标签，发布配置见 [release.yml](.github/workflows/release.yml)。
 
 Docker 用于本机浏览器模式，启动方法、照片目录挂载和数据持久化见 [Docker 说明](docker/README.md)。此应用未实现账户鉴权，Docker 默认仅绑定本机回环地址。
 
