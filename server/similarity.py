@@ -421,7 +421,7 @@ def find_similar_groups(
     # so whether CLIP can run is part of the cache identity.
     use_clip = bool(include_clip) and clip_available()
     signature = _signature_digest((
-        "similar-v1",
+        "similar-v2",
         bool(include_clip),
         use_clip,
         PHASH_EXACT_DISTANCE,
@@ -431,7 +431,7 @@ def find_similar_groups(
         rows_signature,
     ))
     cache_key = (
-        "similar-v1",
+        "similar-v2",
         workspace_id,
         folder_path,
         bool(include_clip),
@@ -464,6 +464,11 @@ def find_similar_groups(
         "groups": build_groups(candidates, matches),
         "stages": _stages_payload(clip_status),
     }
+    # CLIP is installed but failed to load (e.g. a missing system DLL): keep the result out of the
+    # caches so the next scan tries CLIP again instead of replaying the failure.
+    if use_clip and clip_status.startswith("unavailable"):
+        _load_clip_model.cache_clear()
+        return _with_cache_info(payload, False, "computed")
     _cache_set(cache_key, payload)
     if workspace_id:
         db.save_similarity_group_cache(workspace_id, folder_path, include_clip, signature, payload)

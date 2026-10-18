@@ -341,6 +341,25 @@ function runtimePythonPath() {
     : path.join(aiRuntimeVenvDir(), "bin", "python");
 }
 
+// Visual C++ runtime DLLs bundled with the Windows app (see scripts/package-electron.cjs).
+function vcRuntimeDir() {
+  return path.join(process.resourcesPath, "vc-runtime");
+}
+
+// torch loads its DLLs with their own folder on the search path, so copies there satisfy c10.dll
+// on a PC without the VC++ Redistributable, with no admin rights. Also repairs existing installs.
+function ensureVcRuntime() {
+  if (process.platform !== "win32" || !fs.existsSync(vcRuntimeDir())) return;
+  const torchLib = path.join(aiRuntimeVenvDir(), "Lib", "site-packages", "torch", "lib");
+  if (!fs.existsSync(torchLib)) return;
+  for (const name of fs.readdirSync(vcRuntimeDir()).filter((file) => /\.dll$/i.test(file))) {
+    const target = path.join(torchLib, name);
+    if (fs.existsSync(target)) continue;
+    fs.copyFileSync(path.join(vcRuntimeDir(), name), target);
+    writeAiRuntimeLog(`[vc-runtime] placed ${name} in ${torchLib}`);
+  }
+}
+
 function runtimeInstalled() {
   return fs.existsSync(aiRuntimeMarkerPath()) && fs.existsSync(runtimePythonPath());
 }
@@ -589,6 +608,13 @@ function startBackend() {
   const uploadFolder = prepareUserDataDir("uploads");
   const logPath = path.join(app.getPath("userData"), "backend.log");
   const shouldUseAiRuntime = useAiRuntimeBackend();
+  if (shouldUseAiRuntime) {
+    try {
+      ensureVcRuntime();
+    } catch (error) {
+      writeAiRuntimeLog(`[vc-runtime] ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const command = shouldUseAiRuntime ? runtimePythonPath() : hasPackagedBackend ? packagedBackendPath : pythonBin;
   const args = shouldUseAiRuntime ? [path.join(runtimeSourcePath, "app.py")] : hasPackagedBackend ? [] : [backendEntry];
   backendLogFd = isPackaged ? fs.openSync(logPath, "a") : null;
@@ -647,8 +673,13 @@ async function restartBackend() {
 }
 
 async function verifyAiRuntime(runtimePython) {
-  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','cv2','huggingface_hub'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nsys.exit(1 if missing else 0)\n";
-  await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
+  // Importing (not just finding) torch and open_clip catches native libraries that cannot load.
+  const script = "import importlib.util, sys\nmissing=[m for m in ['pyiqa','torch','open_clip','faiss','cv2','huggingface_hub'] if importlib.util.find_spec(m) is None]\nprint('missing=' + ','.join(missing))\nif missing: sys.exit(1)\nimport torch, open_clip\nprint('torch', torch.__version__, 'loads')\n";
+  try {
+    await runLogged(runtimePython, ["-c", script], { cwd: runtimeSourcePath });
+  } catch {
+    throw new Error("The AI packages installed but torch could not load. See the install log for the Python error.");
+  }
 }
 
 async function installAiRuntime() {
@@ -704,6 +735,7 @@ async function installAiRuntime() {
       path.join(runtimeSourcePath, "requirements-faiss.txt"),
     ], { cwd: runtimeSourcePath });
 
+    ensureVcRuntime();
     setAiRuntimeStatus({ detail: "Verifying AI runtime packages" });
     await verifyAiRuntime(runtimePython);
 

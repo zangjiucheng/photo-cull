@@ -126,6 +126,10 @@ jobs:
           .package-venv/Scripts/python.exe -m pip install -r requirements-package.txt
           cd frontend
           PYTHON="$GITHUB_WORKSPACE/.package-venv/Scripts/python.exe" npm run package:win
+          # torch needs these on PCs without the VC++ Redistributable.
+          for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+            test -f "../release/win-unpacked/resources/vc-runtime/$dll" || { echo "missing $dll in the package"; exit 1; }
+          done
 
       - name: Smoke test the bundled backend
         run: |

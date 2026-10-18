@@ -513,6 +513,26 @@ def test_similar_cache_is_recomputed_when_clip_becomes_available(client, tmp_pat
     similarity._load_clip_model.cache_clear()
 
 
+def test_similar_does_not_cache_a_clip_load_failure(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    make_image(source / "b.jpg", "blue")
+    workspace = open_workspace(client, source)
+    similarity.clear_similarity_cache()
+    url = f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=1&scope=library"
+    monkeypatch.setattr(similarity, "clip_available", lambda: True)
+
+    # open_clip is installed but torch cannot load (WinError 126 on a PC without the VC++ runtime).
+    monkeypatch.setattr(similarity, "clip_matches", lambda candidates: ([], "unavailable: [WinError 126] c10.dll"))
+    failed = client.get(url).get_json()
+    assert failed["stages"]["clip"]["status"].startswith("unavailable")
+    assert client.get(url).get_json()["cache"]["hit"] is False
+
+    # Once torch loads, CLIP runs instead of the failure being replayed from the cache.
+    monkeypatch.setattr(similarity, "clip_matches", lambda candidates: ([], "ready:numpy"))
+    assert client.get(url).get_json()["stages"]["clip"]["status"] == "ready:numpy"
+
+
 def test_invalid_score_and_missing_photo(client):
     bad_score = client.patch("/api/photos/missing/score", json={"manual_score": 120})
     assert bad_score.status_code == 400

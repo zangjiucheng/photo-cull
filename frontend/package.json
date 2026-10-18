@@ -83,6 +83,15 @@
             "x64"
           ]
         }
+      ],
+      "extraResources": [
+        {
+          "from": "../build/vc-runtime",
+          "to": "vc-runtime",
+          "filter": [
+            "*.dll"
+          ]
+        }
       ]
     },
     "nsis": {

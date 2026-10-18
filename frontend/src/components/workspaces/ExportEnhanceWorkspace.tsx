@@ -475,8 +475,9 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   const queued = queuedIds
     .map((id) => photos.find((photo) => photo.id === id))
     .filter((p): p is Photo => !!p);
+  // .at(0), not [0]: the index form is typed as always present, which hid that the queue can be empty.
   const photo =
-    queued.find((p) => p.id === selectedPhotoId) ?? queued[0] ?? null;
+    queued.find((p) => p.id === selectedPhotoId) ?? queued.at(0) ?? null;
   const photoKey = photo
     ? `${photo.id}:${photo.mtime}:${photo.orientationOverride}`
     : "";
@@ -1765,15 +1766,18 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     the library, so backups include them.
                   </small>
                 </details>
-                <details className="quick-section">
-                  <summary>Versions</summary>
-                  <SnapshotList
-                    photoId={photo.id}
-                    settings={settings}
-                    onRestore={onSettingsChange}
-                    onNotice={setNotice}
-                  />
-                </details>
+                {/* The panel stays visible (disabled) with an empty queue; versions need a photo. */}
+                {photo ? (
+                  <details className="quick-section">
+                    <summary>Versions</summary>
+                    <SnapshotList
+                      photoId={photo.id}
+                      settings={settings}
+                      onRestore={onSettingsChange}
+                      onNotice={setNotice}
+                    />
+                  </details>
+                ) : null}
                 <details className="quick-section">
                   <summary>Noise reduction & upscale</summary>
                   <label className="quick-check">
