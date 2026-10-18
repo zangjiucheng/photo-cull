@@ -44,3 +44,12 @@ jobs:
 
       - name: Build frontend
         run: cd frontend && npm run build
+
+      # Electron's WebGL runs on ANGLE: Direct3D 11 on Windows, Metal on macOS. Compile and draw the
+      # live preview there, so a shader that only one backend struggles with is caught here.
+      - name: Check the live preview in Chrome (ANGLE)
+        if: runner.os != 'Linux'
+        run: |
+          cd frontend
+          npm install --no-save puppeteer-core@23.11.1
+          node scripts/check-webgl-preview.cjs
