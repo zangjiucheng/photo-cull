@@ -46,6 +46,9 @@ class PhotoStyle:
 @dataclass
 class EnhanceSettings:
     recipe_version: int = 2
+    # Immutable v0.3.1 rendering contract. Missing fields in existing recipes resolve here.
+    engine_version: int = 1
+    raw_profile_version: int = 1
     exposure: float = 0.0
     brilliance: float = 0.0
     vibrance: float = 0.0
@@ -55,6 +58,8 @@ class EnhanceSettings:
     auto: dict[str, Any] | None = None
     # UI state for the Tone/Color pad; rendering only ever reads the slider values it produced.
     pad: dict[str, Any] | None = None
+    gradient: dict[str, Any] | None = None
+    selected_color: dict[str, float] | None = None
     contrast: float = 0.0
     highlights: float = 0.0
     shadows: float = 0.0
@@ -125,6 +130,9 @@ def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         raise ExportEnhanceError("settings must be an object")
     if settings.get("recipeVersion", 1) not in {1, 2}:
         raise ExportEnhanceError("Unsupported recipeVersion")
+    for key in ("engineVersion", "rawProfileVersion"):
+        if type(settings.get(key, 1)) is not int or settings.get(key, 1) != 1:
+            raise ExportEnhanceError(f"Unsupported {key}; update Photo Cull to open this edit")
     crop = settings.get("crop") or {}
     if not isinstance(crop, dict):
         raise ExportEnhanceError("crop must be an object")
@@ -155,6 +163,29 @@ def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
                "base": {key: _float_setting(pad["base"], key, 0, -1, 1) for key in editing.PAD_KEYS},
                "vectors": {"tone": directions("tone"), "colour": directions("colour")}}
     style_raw = settings.get("photoStyle", settings.get("photo_style", {}))
+    gradient = settings.get("gradient")
+    selected_color = settings.get("selectedColor")
+    if selected_color is not None:
+        if not isinstance(selected_color, dict):
+            raise ExportEnhanceError("selectedColor must be an object")
+        selected_color = {"center": _float_setting(selected_color, "center", 2 / 3, 0, 1),
+                          "range": _float_setting(selected_color, "range", .12, .02, .5),
+                          **{key: _float_setting(selected_color, key, 0, -1, 1) for key in ("hue", "saturation", "luminance")}}
+    if gradient is not None:
+        if not isinstance(gradient, dict):
+            raise ExportEnhanceError("gradient must be an object")
+        points = {}
+        for name, default_y in (("start", .15), ("end", .65)):
+            point = gradient.get(name, {"x": .5, "y": default_y})
+            if not isinstance(point, dict):
+                raise ExportEnhanceError(f"gradient.{name} must be a point")
+            points[name] = {axis: _float_setting(point, axis, .5 if axis == "x" else default_y, 0, 1) for axis in ("x", "y")}
+        if sum((points["start"][axis] - points["end"][axis]) ** 2 for axis in ("x", "y")) < 1e-6:
+            raise ExportEnhanceError("Gradient endpoints must be separated")
+        gradient = {**points, "enabled": gradient.get("enabled", True) is True, "invert": gradient.get("invert", False) is True,
+                    "feather": _float_setting(gradient, "feather", 1, .05, 1),
+                    **{key: _float_setting(gradient, key, 0, -2 if key == "exposure" else -1, 2 if key == "exposure" else 1)
+                       for key in ("exposure", "highlights", "temperature")}}
     style_raw = style_raw if isinstance(style_raw, dict) else {}
     preset = str(style_raw.get("preset", "standard")).lower()
     if preset not in STYLE_PRESETS:
@@ -190,6 +221,8 @@ def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
         crop=parsed_crop,
         auto=auto,
         pad=pad,
+        gradient=gradient,
+        selected_color=selected_color,
         contrast=_float_setting(settings, "contrast", 0.0, -1.0, 1.0),
         highlights=_float_setting(settings, "highlights", 0.0, -1.0, 1.0),
         shadows=_float_setting(settings, "shadows", 0.0, -1.0, 1.0),
@@ -216,6 +249,8 @@ def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
 def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
     return {
         "recipeVersion": settings.recipe_version,
+        "engineVersion": settings.engine_version,
+        "rawProfileVersion": settings.raw_profile_version,
         "exposure": settings.exposure,
         "brilliance": settings.brilliance,
         "vibrance": settings.vibrance,
@@ -224,6 +259,8 @@ def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
         "crop": settings.crop,
         "auto": settings.auto,
         "pad": settings.pad,
+        "gradient": settings.gradient,
+        "selectedColor": settings.selected_color,
         "contrast": settings.contrast,
         "highlights": settings.highlights,
         "shadows": settings.shadows,
@@ -247,6 +284,32 @@ def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
     }
 
 
+class CacheBudget:
+    """One resident-image budget shared by editor and export caches (not working buffers)."""
+    def __init__(self, max_bytes=384 * 1024 ** 2):
+        self.max_bytes = max_bytes
+        self.lock = threading.RLock()
+        self.loaders = []
+
+    def trim(self):
+        entries = [(loader, cache, key, value[0].nbytes if cache is loader._cache else value.nbytes)
+                   for loader in self.loaders for cache in (loader._cache, loader._scaled)
+                   for key, value in cache.items()]
+        total = sum(entry[3] for entry in entries)
+        # A single 48MP base can exceed the budget. Keep it usable, but retain no other images.
+        latest_full = max((entry for entry in entries if entry[1] is entry[0]._cache),
+                          key=lambda entry: entry[0]._used.get((id(entry[1]), entry[2]), 0), default=None)
+        oversized = latest_full if latest_full is not None and latest_full[3] > self.max_bytes else None
+        candidates = [entry for entry in entries if entry is not oversized]
+        candidates.sort(key=lambda entry: entry[0]._used.get((id(entry[1]), entry[2]), 0))
+        for loader, cache, key, size in candidates:
+            if total <= self.max_bytes:
+                break
+            cache.pop(key, None)
+            loader._used.pop((id(cache), key), None)
+            total -= size
+
+
 class ImageLoader:
     """Full-resolution decode cache plus a cache of downscaled copies for the editor.
 
@@ -254,13 +317,36 @@ class ImageLoader:
     decode, and requests for other (cached) photos are never blocked behind it.
     """
 
-    def __init__(self, capacity: int = 2, scaled_capacity: int = 8):
+    def __init__(self, capacity: int = 2, scaled_capacity: int = 8, budget: CacheBudget | None = None):
         self._cache = OrderedDict()
         self._scaled = OrderedDict()
         self._inflight: dict[tuple, Future] = {}
         self._capacity = capacity
         self._scaled_capacity = scaled_capacity
-        self._lock = threading.Lock()
+        self._budget = budget or CacheBudget()
+        self._lock = self._budget.lock
+        self._budget.loaders.append(self)
+        self._used = {}
+        self._dimensions = OrderedDict()
+
+    def source_size(self, row):
+        key = self._key(row)
+        with self._lock:
+            if key in self._dimensions:
+                self._dimensions.move_to_end(key)
+                return self._dimensions[key]
+        image = self.load(row)[0]
+        return image.shape[1], image.shape[0]
+
+    def _touch(self, cache, key):
+        cache.move_to_end(key)
+        self._used[(id(cache), key)] = time.monotonic_ns()
+
+    def _limit(self, cache, capacity):
+        while len(cache) > capacity:
+            key, _ = cache.popitem(last=False)
+            self._used.pop((id(cache), key), None)
+        self._budget.trim()
 
     @staticmethod
     def _key(row: Any) -> tuple:
@@ -273,13 +359,13 @@ class ImageLoader:
         key = (*self._key(row), max_edge)
         with self._lock:
             if key in self._scaled:
-                self._scaled.move_to_end(key)
+                self._touch(self._scaled, key)
                 return self._scaled[key]
         scaled = editing.resize_float(self.load(row)[0], max_edge)
         with self._lock:
             self._scaled[key] = scaled
-            while len(self._scaled) > self._scaled_capacity:
-                self._scaled.popitem(last=False)
+            self._touch(self._scaled, key)
+            self._limit(self._scaled, self._scaled_capacity)
         return scaled
 
     def load(self, row: Any, *, full_raw: bool = True) -> tuple[np.ndarray, bytes | None, str]:
@@ -288,7 +374,7 @@ class ImageLoader:
         key = self._key(row)
         with self._lock:
             if key in self._cache:
-                self._cache.move_to_end(key)
+                self._touch(self._cache, key)
                 return self._cache[key]
             pending = self._inflight.get(key)
             owner = pending is None
@@ -306,8 +392,12 @@ class ImageLoader:
         with self._lock:
             self._inflight.pop(key, None)
             self._cache[key] = result
-            while len(self._cache) > self._capacity or (sum(item[0].nbytes for item in self._cache.values()) > 384 * 1024 ** 2 and len(self._cache) > 1):
-                self._cache.popitem(last=False)
+            self._dimensions[key] = (result[0].shape[1], result[0].shape[0])
+            self._dimensions.move_to_end(key)
+            while len(self._dimensions) > 64:
+                self._dimensions.popitem(last=False)
+            self._touch(self._cache, key)
+            self._limit(self._cache, self._capacity)
         pending.set_result(result)
         return result
 
@@ -750,8 +840,11 @@ class JobQueue:
         self._prefetcher = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch")
         # Editor and preview requests use _loader; exports use their own cache so a batch export
         # never evicts the photos being edited.
-        self._loader = ImageLoader()
-        self._export_loader = ImageLoader(capacity=2, scaled_capacity=0)
+        budget = CacheBudget()
+        self._loader = ImageLoader(budget=budget)
+        self._export_loader = ImageLoader(capacity=2, scaled_capacity=0, budget=budget)
+        self._prefetch_lock = threading.Lock()
+        self._prefetch_tasks: OrderedDict[tuple, Future] = OrderedDict()
         self._color = ColorProcessor()
         self._masks = SemanticMaskProvider(self._loader)
         self._style = PhotographicStyleProcessor(self._masks)
@@ -767,7 +860,22 @@ class JobQueue:
                     self._loader.load_scaled(row, edge)
             except Exception:
                 pass  # The real request reports errors; a failed warm-up costs nothing.
-        self._prefetcher.submit(warm)
+        self._submit_prefetch(("editor", row["id"]), warm)
+
+    def _submit_prefetch(self, key, action):
+        # Keep only two queued requests plus the one already running. Obsolete pending work
+        # is cancelable; Python cannot interrupt an active rawpy decode.
+        with self._prefetch_lock:
+            for old in list(self._prefetch_tasks):
+                if self._prefetch_tasks[old].done():
+                    self._prefetch_tasks.pop(old)
+            if key in self._prefetch_tasks:
+                return
+            pending = [old for old, task in self._prefetch_tasks.items() if not task.running()]
+            for old in pending[:-1]:
+                if self._prefetch_tasks[old].cancel():
+                    self._prefetch_tasks.pop(old)
+            self._prefetch_tasks[key] = self._prefetcher.submit(action)
 
     def create(
         self,
@@ -822,7 +930,7 @@ class JobQueue:
         row = db.fetch_photo(job.selected_ids[index])
         settings = job.settings_by_photo.get(row["id"], job.settings) if row is not None else None
         if settings is not None and settings.recipe_version >= 2:
-            self._prefetcher.submit(lambda: self._export_loader.load(row))
+            self._submit_prefetch(("export", row["id"]), lambda: self._export_loader.load(row))
 
     def _run(self, job_id: str) -> None:
         job = self.get(job_id)
@@ -844,6 +952,8 @@ class JobQueue:
                 image, exif, _source = (self._export_loader.load(row) if settings.recipe_version >= 2 else self._export_loader.load_legacy(row))
                 image = self._color.apply(image, settings)
                 image = self._style.apply(image, settings, row)
+                image = editing.apply_selected_color(image, settings.selected_color)
+                image = editing.apply_gradient(image, settings.gradient)
                 image = editing.apply_geometry(image, settings.crop)
                 if settings.ai_denoise:
                     image, engine = self._denoise.apply_with_info(image, settings.ai_denoise_strength)
@@ -902,6 +1012,56 @@ def serialize_job(job: ExportJob) -> dict[str, Any]:
 queue = JobQueue()
 
 
+def render_detail(photo_id: str, settings: EnhanceSettings, region: dict, original: bool = False):
+    """Native-size output tile. Only process its source footprint, including resampling/filter halo.
+
+    V2 color/style operations are per-pixel. Bicubic needs a two-pixel source halo; sharpening
+    needs one output pixel. Keeping both makes internal tile edges agree with a full export.
+    Output resize and optional model stages are deliberately excluded (and rejected).
+    """
+    if settings.recipe_version != 2 or settings.ai_denoise or settings.upscale:
+        raise ExportEnhanceError("100% detail requires the current color engine with noise reduction and upscale off")
+    row = db.fetch_photo(photo_id)
+    if row is None:
+        raise ExportEnhanceError("Photo not found")
+    if not isinstance(region, dict):
+        raise ExportEnhanceError("region must be an object")
+    # Validate before decoding; clients cannot request a full 48MP processed frame.
+    values = {}
+    for key in ("x", "y", "width", "height"):
+        value = region.get(key)
+        if type(value) is not int or value < (1 if key in {"width", "height"} else 0):
+            raise ExportEnhanceError(f"region.{key} must be a positive size or nonnegative position")
+        values[key] = value
+    if values["width"] > 1536 or values["height"] > 1536:
+        raise ExportEnhanceError("Detail tiles must be at most 1536 pixels per edge")
+    source = queue._loader.load(row)[0]
+    h, w = source.shape[:2]
+    ow, oh, cx, cy, c, s = editing.geometry(w, h, settings.crop)
+    x, y = min(values["x"], ow - 1), min(values["y"], oh - 1)
+    tw, th = min(values["width"], ow - x), min(values["height"], oh - y)
+    left, top, right, bottom = max(0, x - 1), max(0, y - 1), min(ow, x + tw + 1), min(oh, y + th + 1)
+    def mapped(px, py):
+        return cx + c * (px - ow / 2) - s * (py - oh / 2), cy + s * (px - ow / 2) + c * (py - oh / 2)
+    corners = [mapped(px, py) for px in (left, right) for py in (top, bottom)]
+    sx, sy = max(0, math.floor(min(p[0] for p in corners)) - 4), max(0, math.floor(min(p[1] for p in corners)) - 4)
+    ex, ey = min(w, math.ceil(max(p[0] for p in corners)) + 4), min(h, math.ceil(max(p[1] for p in corners)) + 4)
+    image = source[sy:ey, sx:ex]
+    if not original:
+        image = queue._style.apply(queue._color.apply(image, settings), settings, row)
+        image = editing.apply_selected_color(image, settings.selected_color)
+        image = editing.apply_gradient(image, settings.gradient, (sx, sy), (w, h))
+    ox, oy = mapped(left, top)
+    affine = (c, -s, ox - sx, s, c, oy - sy)
+    image = np.stack([np.asarray(Image.fromarray(image[..., channel], "F").transform(
+        (right - left, bottom - top), Image.Transform.AFFINE, affine, Image.Resampling.BICUBIC))
+        for channel in range(3)], axis=-1)
+    image = np.clip(image, 0, 1)
+    if not original:
+        image = editing.sharpen_float(image, settings.sharpen)
+    return image[y - top:y - top + th, x - left:x - left + tw], (ow, oh, x, y)
+
+
 def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 1600) -> io.BytesIO:
     row = db.fetch_photo(photo_id)
     if row is None:
@@ -912,6 +1072,8 @@ def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 160
         image = editing.resize_float(queue._loader.load_legacy(row)[0], max_edge)
     image = queue._color.apply(image, settings)
     image = queue._style.apply(image, settings, row)
+    image = editing.apply_selected_color(image, settings.selected_color)
+    image = editing.apply_gradient(image, settings.gradient)
     image = editing.apply_geometry(image, settings.crop)
     engine = "Off"
     if settings.ai_denoise:

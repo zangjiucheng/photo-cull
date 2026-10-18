@@ -196,6 +196,10 @@ export interface StylePad {
 
 export interface ExportEnhanceSettings {
   recipeVersion: 1 | 2;
+  engineVersion: 1;
+  rawProfileVersion: 1;
+  gradient: LinearGradient | null;
+  selectedColor: { center: number; range: number; hue: number; saturation: number; luminance: number } | null;
   brilliance: number;
   vibrance: number;
   blackPoint: number;
@@ -219,6 +223,17 @@ export interface ExportEnhanceSettings {
   quality: number;
   resizeMaxEdge: number | null;
   photoStyle: PhotoStyle;
+}
+
+export interface LinearGradient {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  enabled: boolean;
+  invert: boolean;
+  feather: number;
+  exposure: number;
+  highlights: number;
+  temperature: number;
 }
 
 // v2 ids come from server/editing_presets.json; "muted" and "dramatic" also name legacy (v1) styles.

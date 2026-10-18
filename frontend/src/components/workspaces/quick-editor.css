@@ -134,7 +134,7 @@
 /* Hold-to-compare, status and full screen under the photo. */
 .quick-stage-tools {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   padding: 0 var(--space-3);
@@ -153,6 +153,53 @@
   color: var(--text);
 }
 .quick-stage-tools kbd { margin-left: var(--space-1); }
+
+.quick-detail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.quick-detail:active { cursor: grabbing; }
+.quick-detail canvas { flex: none; image-rendering: pixelated; }
+.quick-detail-status {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 95%;
+  padding: 4px 8px;
+  background: #000c;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: center;
+  pointer-events: none;
+}
+.quick-histogram { margin: 0; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.quick-histogram svg { display: block; width: 100%; height: 64px; }
+.quick-histogram figcaption { margin-top: 6px; color: var(--text-3); font-size: var(--fs-sm); }
+.quick-local-actions { display: flex; align-items: center; justify-content: space-between; }
+.quick-gradient-overlay { position: absolute; inset: 0; pointer-events: none; }
+.quick-gradient-overlay line { stroke: #fff; stroke-width: 1.5; stroke-dasharray: 5 4; filter: drop-shadow(0 1px 2px #000); }
+.quick-gradient-handle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border: 1px solid #fff; border-radius: 50%;
+  background: #000a; color: #fff;
+  pointer-events: auto; touch-action: none; cursor: move;
+}
+.quick-picking { cursor: crosshair; }
+.quick-color-swatches { display: flex; gap: 10px; margin: 14px 0; }
+.quick-color-swatches button { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #fffa; }
 
 /* Filmstrip: slim, current frame outlined in white. */
 .quick-filmstrip {

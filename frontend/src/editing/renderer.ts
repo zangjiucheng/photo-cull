@@ -5,6 +5,8 @@ export interface EditingBase {
   width: number;
   height: number;
   pixels: Float32Array;
+  sourceWidth?: number;
+  sourceHeight?: number;
 }
 export async function loadEditingBase(
   photoId: string,
@@ -23,7 +25,13 @@ export async function loadEditingBase(
   const pixels = new Float32Array(await response.arrayBuffer());
   if (!width || !height || pixels.length !== width * height * 3)
     throw new Error("Invalid editing image");
-  return { width, height, pixels };
+  return {
+    width,
+    height,
+    pixels,
+    sourceWidth: Number(response.headers.get("X-Source-Width")) || width,
+    sourceHeight: Number(response.headers.get("X-Source-Height")) || height,
+  };
 }
 
 const vertex = `attribute vec2 aPosition; varying vec2 vUv;
@@ -34,6 +42,30 @@ uniform vec4 uLight; uniform vec4 uColor; uniform vec3 uTone;
 uniform vec4 uStyleLight; uniform vec4 uStyleColor; uniform vec3 uStyleTone;
 uniform vec2 uSource; uniform vec2 uOutput; uniform vec2 uCenter; uniform vec2 uRotation;
 uniform float uPalette; uniform float uSharpen; uniform bool uOriginal; uniform bool uClipping;
+uniform vec4 uGradientPoints; uniform vec3 uGradientControls; uniform float uGradientFeather;
+uniform bool uGradientEnabled; uniform bool uGradientInvert; uniform bool uMaskOverlay;
+uniform bool uSelectedEnabled; uniform vec2 uSelectedBand; uniform vec3 uSelectedControls;
+vec3 selectedColor(vec3 rgb) {
+  float high=max(max(rgb.r,rgb.g),rgb.b), low=min(min(rgb.r,rgb.g),rgb.b), d=high-low;
+  float h=(high==rgb.r ? (rgb.g-rgb.b)/max(d,.000001) : high==rgb.g ? 2.+(rgb.b-rgb.r)/max(d,.000001) : 4.+(rgb.r-rgb.g)/max(d,.000001))/6.;
+  h=fract(h); float light=(high+low)*.5;
+  float saturation=d/max(1.-abs(2.*light-1.),.000001);
+  float distance=abs(fract(h-uSelectedBand.x+.5)-.5);
+  float weight=(1.-smoothstep(.5,1.,distance/uSelectedBand.y))*smoothstep(0.,.08,d);
+  if(weight<=0.) return rgb;
+  h=fract(h+uSelectedControls.x*weight/6.);
+  saturation=clamp(saturation*(1.+uSelectedControls.y*weight),0.,1.);
+  light=clamp(light+uSelectedControls.z*weight*.25,0.,1.);
+  float c=(1.-abs(2.*light-1.))*saturation, x=c*(1.-abs(mod(h*6.,2.)-1.));
+  vec3 outColor=h<1./6. ? vec3(c,x,0.) : h<2./6. ? vec3(x,c,0.) : h<3./6. ? vec3(0.,c,x) : h<4./6. ? vec3(0.,x,c) : h<5./6. ? vec3(x,0.,c) : vec3(c,0.,x);
+  return outColor+light-c*.5;
+}
+float gradientWeight(vec2 uv) {
+  vec2 d=uGradientPoints.zw-uGradientPoints.xy;
+  float t=dot(uv-uGradientPoints.xy,d)/max(dot(d,d),.000001);
+  float weight=1.-smoothstep(0.,1.,(t-.5)/uGradientFeather+.5);
+  return uGradientInvert ? 1.-weight : weight;
+}
 vec3 linearize(vec3 c){ return mix(c/12.92,pow((max(c,0.)+.055)/1.055,vec3(2.4)),step(vec3(.04045),c)); }
 vec3 encode(vec3 c){ return mix(c*12.92,1.055*pow(max(c,0.),vec3(1./2.4))-.055,step(vec3(.0031308),c)); }
 vec3 adjust(vec3 outColor, vec4 l, vec4 k, vec3 t) {
@@ -54,7 +86,13 @@ vec3 processed(vec2 uv) {
   vec3 src=texture2D(uImage,uv).rgb;
   if(uOriginal) return src;
   vec3 base=adjust(src,uLight,uColor,uTone);
-  return mix(base,adjust(base,uStyleLight,uStyleColor,uStyleTone),uPalette);
+  base=mix(base,adjust(base,uStyleLight,uStyleColor,uStyleTone),uPalette);
+  if(uSelectedEnabled) base=selectedColor(base);
+  if(uGradientEnabled) {
+    vec3 local=adjust(base,vec4(uGradientControls.x,0.,uGradientControls.y,0.),vec4(0.,0.,uGradientControls.z,0.),vec3(0.));
+    base=mix(base,local,gradientWeight(uv));
+  }
+  return base;
 }
 vec2 rotate(vec2 p){ return vec2(uRotation.x*p.x-uRotation.y*p.y,uRotation.y*p.x+uRotation.x*p.y); }
 void main(){
@@ -69,6 +107,7 @@ void main(){
     c=clamp(c+(c-blur)*uSharpen,0.,1.);
   }
   if(uClipping && !uOriginal){ if(max(max(c.r,c.g),c.b)>=.999) c=vec3(1.,.15,.12); else if(min(min(c.r,c.g),c.b)<=.001) c=vec3(.1,.35,1.); }
+  if(uMaskOverlay && uGradientEnabled && !uOriginal) c=mix(c,vec3(1.,.25,.15),gradientWeight(uv)*.4);
   gl_FragColor=vec4(c,1.);
 }`;
 
@@ -154,7 +193,17 @@ export class EditingRenderer {
       this.locations.set(name, this.gl.getUniformLocation(this.program, name));
     return this.locations.get(name)!;
   }
-  draw(settings: ExportEnhanceSettings, original = false, clipping = false) {
+  draw(
+    settings: ExportEnhanceSettings,
+    original = false,
+    clipping = false,
+    maskOverlay = false,
+  ) {
+    if (
+      (settings.engineVersion ?? 1) !== 1 ||
+      (settings.rawProfileVersion ?? 1) !== 1
+    )
+      throw new Error("This edit requires a newer version of Photo Cull.");
     const gl = this.gl,
       base = this.base,
       crop = geometry(base.width, base.height, settings.crop);
@@ -207,6 +256,42 @@ export class EditingRenderer {
     gl.uniform1f(this.location("uSharpen"), settings.sharpen);
     gl.uniform1i(this.location("uOriginal"), original ? 1 : 0);
     gl.uniform1i(this.location("uClipping"), clipping ? 1 : 0);
+    const gradient = settings.gradient;
+    gl.uniform1i(this.location("uGradientEnabled"), gradient?.enabled ? 1 : 0);
+    gl.uniform1i(this.location("uGradientInvert"), gradient?.invert ? 1 : 0);
+    gl.uniform1i(this.location("uMaskOverlay"), maskOverlay ? 1 : 0);
+    gl.uniform4f(
+      this.location("uGradientPoints"),
+      gradient?.start.x ?? 0.5,
+      gradient?.start.y ?? 0,
+      gradient?.end.x ?? 0.5,
+      gradient?.end.y ?? 1,
+    );
+    gl.uniform3f(
+      this.location("uGradientControls"),
+      gradient?.exposure ?? 0,
+      gradient?.highlights ?? 0,
+      gradient?.temperature ?? 0,
+    );
+    gl.uniform1f(this.location("uGradientFeather"), gradient?.feather ?? 1);
+    const selected = settings.selectedColor;
+    gl.uniform1i(
+      this.location("uSelectedEnabled"),
+      selected && (selected.hue || selected.saturation || selected.luminance)
+        ? 1
+        : 0,
+    );
+    gl.uniform2f(
+      this.location("uSelectedBand"),
+      selected?.center ?? 0,
+      selected?.range ?? 0.12,
+    );
+    gl.uniform3f(
+      this.location("uSelectedControls"),
+      selected?.hue ?? 0,
+      selected?.saturation ?? 0,
+      selected?.luminance ?? 0,
+    );
     gl.viewport(0, 0, crop.width, crop.height);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
@@ -217,5 +302,36 @@ export class EditingRenderer {
     if (this.buffer) gl.deleteBuffer(this.buffer);
     if (this.program) gl.deleteProgram(this.program);
     this.shaders.forEach((shader) => gl.deleteShader(shader));
+  }
+  histogram() {
+    const pixels = new Uint8Array(this.canvas.width * this.canvas.height * 4);
+    this.gl.readPixels(
+      0,
+      0,
+      this.canvas.width,
+      this.canvas.height,
+      this.gl.RGBA,
+      this.gl.UNSIGNED_BYTE,
+      pixels,
+    );
+    const bins = Array.from({ length: 4 }, () =>
+      new Array<number>(256).fill(0),
+    );
+    for (let i = 0; i < pixels.length; i += 4) {
+      bins[0][pixels[i]]++;
+      bins[1][pixels[i + 1]]++;
+      bins[2][pixels[i + 2]]++;
+      bins[3][
+        Math.round(
+          pixels[i] * 0.2126 + pixels[i + 1] * 0.7152 + pixels[i + 2] * 0.0722,
+        )
+      ]++;
+    }
+    return bins;
+  }
+  readPixel() {
+    const value = new Uint8Array(4);
+    this.gl.readPixels(0, 0, 1, 1, this.gl.RGBA, this.gl.UNSIGNED_BYTE, value);
+    return [value[0] / 255, value[1] / 255, value[2] / 255];
   }
 }

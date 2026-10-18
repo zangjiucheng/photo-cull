@@ -287,11 +287,29 @@ def editing_base(photo_id):
         return error_response("Photo not found", 404)
     try:
         image = export_enhance.queue._loader.load_scaled(photo, 1600)
+        source_width, source_height = export_enhance.queue._loader.source_size(photo)
     except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
         return error_response(str(exc), 400)
     return Response(image.astype("<f4").tobytes(), mimetype="application/octet-stream",
                     headers={"X-Image-Width": str(image.shape[1]), "X-Image-Height": str(image.shape[0]),
+                             "X-Source-Width": str(source_width), "X-Source-Height": str(source_height),
                              "Cache-Control": "no-store"})
+
+
+@bp.route("/photos/<photo_id>/editing-detail", methods=["POST"])
+def editing_detail(photo_id):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return error_response("Expected an editing detail request", 400)
+    try:
+        image, (ow, oh, x, y) = export_enhance.render_detail(photo_id,
+            export_enhance.parse_settings(data.get("settings")), data.get("region"), data.get("original") is True)
+    except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
+        return error_response(str(exc), 400)
+    return Response(image.astype("<f4").tobytes(), mimetype="application/octet-stream",
+        headers={"X-Image-Width": str(image.shape[1]), "X-Image-Height": str(image.shape[0]),
+                 "X-Output-Width": str(ow), "X-Output-Height": str(oh),
+                 "X-Region-X": str(x), "X-Region-Y": str(y), "Cache-Control": "no-store"})
 
 
 @bp.route("/photos/<photo_id>/auto-adjustments", methods=["GET"])

@@ -344,16 +344,70 @@ def test_image_loader_shares_inflight_decode_and_caches_scaled(tmp_path, monkeyp
     assert len(calls) == 1 and len(results) == 3 and all(r is results[0] for r in results)
     scaled = loader.load_scaled(row, 30)
     assert scaled.shape == (20, 30, 3) and loader.load_scaled(row, 30) is scaled
+    loader._cache.clear()  # Cached editor bases must not force another RAW decode for metadata.
+    assert loader.source_size(row) == (60, 40)
+    assert loader.load_scaled(row, 30) is scaled and len(calls) == 1
 
 
 def test_export_uses_its_own_loader_cache():
     assert export_enhance.queue._export_loader is not export_enhance.queue._loader
+    assert export_enhance.queue._export_loader._budget is export_enhance.queue._loader._budget
     assert export_enhance.queue._masks._loader is export_enhance.queue._loader
 
 
 def test_prefetch_warms_editor_caches(monkeypatch):
     calls = []
     monkeypatch.setattr(export_enhance.queue._loader, "load_scaled", lambda row, edge: calls.append(edge))
-    export_enhance.queue.prefetch({"path": "x"})
+    export_enhance.queue.prefetch({"id": "x", "path": "x"})
     export_enhance.queue._prefetcher.submit(lambda: None).result(timeout=5)
     assert calls == [1600, 512]
+
+
+def test_editor_and_export_share_resident_budget_with_one_oversized_exception(tmp_path, monkeypatch):
+    budget = export_enhance.CacheBudget(max_bytes=2400)
+    editor, batch = export_enhance.ImageLoader(budget=budget), export_enhance.ImageLoader(budget=budget)
+    rows = []
+    for name in ("a", "b", "c", "large"):
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        rows.append({"path": str(path), "orientation_override": None})
+    def decode(row):
+        edge = 30 if row["path"].endswith("large") else 10
+        return np.zeros((edge, edge, 3), np.float32), None, row["path"]
+    for loader in (editor, batch):
+        monkeypatch.setattr(loader, "_decode", decode)
+    editor.load(rows[0]); batch.load(rows[1]); editor.load(rows[0]); batch.load(rows[2])
+    assert len(editor._cache) == len(batch._cache) == 1
+    assert next(iter(batch._cache))[0].endswith("c")  # Globally least-recently-used b was evicted.
+    large = batch.load(rows[3])[0]
+    assert large.nbytes > budget.max_bytes
+    assert len(editor._cache) == 0 and len(batch._cache) == 1
+    small = batch.load_scaled(rows[3], 5)
+    assert small.shape == (5, 5, 3) and not batch._scaled
+    assert batch.load(rows[3])[0] is large
+    editor.load(rows[0])
+    assert not batch._cache  # A newly used small photo can replace an old oversized one.
+    assert len(editor._cache) == 1
+
+
+def test_prefetch_queue_cancels_obsolete_work():
+    import threading
+    jobs = export_enhance.JobQueue()
+    started, release = threading.Event(), threading.Event()
+    executed = []
+    def blocking():
+        started.set()
+        release.wait(5)
+    try:
+        jobs._submit_prefetch(("test", 0), blocking)
+        assert started.wait(2)
+        for i in range(1, 31):
+            jobs._submit_prefetch(("test", i), lambda i=i: executed.append(i))
+        assert len(jobs._prefetch_tasks) <= 3
+        release.set()
+        jobs._prefetcher.submit(lambda: None).result(timeout=5)
+        assert executed == [29, 30]
+    finally:
+        release.set()
+        jobs._prefetcher.shutdown(wait=True)
+        jobs._executor.shutdown(wait=True)

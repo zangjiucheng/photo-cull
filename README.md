@@ -26,9 +26,10 @@
 
 - **AI scoring and culling.** Every photo is scored for sharpness, exposure and clipping. Filter, sort, rate and queue the keepers.
 - **Near-duplicate groups.** Similar shots are grouped, with a suggested keeper in each group.
-- **Camera-accurate RAW base.** DJI DNGs are developed through the camera's own tone curve, so you start from the look of the in-camera JPEG.
+- **High-bit RAW base.** DJI DNGs use camera white balance and their embedded tone curve, with a tuned starting exposure.
 - **Tone/Color pad.** An Apple-style 2D pad that moves the real sliders, adapted to each photo. Fine-tune anything afterwards.
 - **18 styles.** Undertones, Moods and Black & White looks, inspired by Apple Photos, each with a strength slider.
+- **Finishing controls (development).** Native 100% detail, an edited-crop histogram, a manual local gradient, selective color and a neutral-gray white-balance picker. See [unreleased changes](docs/releases/unreleased.md).
 - **Clean export.** sRGB JPEG or 16-bit TIFF with ICC profile and capture metadata (no GPS). Originals are never touched.
 - **Local and fast.** Everything runs on your computer and updates itself from GitHub Releases.
 

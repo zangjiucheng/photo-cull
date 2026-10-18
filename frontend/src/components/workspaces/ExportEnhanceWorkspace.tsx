@@ -36,6 +36,14 @@ import {
   type EditingBase,
 } from "../../editing/renderer";
 import { Button } from "../ui/button";
+import { DetailView } from "../../editing/DetailView";
+import { Histogram } from "../../editing/Histogram";
+import { GradientOverlay, sourcePoint } from "../../editing/GradientOverlay";
+import {
+  hueOf,
+  neutralWhiteBalance,
+  sampleBase,
+} from "../../editing/colorPicker";
 import "./quick-editor.css";
 
 interface ExportEnhanceWorkspaceProps {
@@ -94,6 +102,7 @@ const labels: Record<SliderKey, string> = {
   sharpen: "Definition",
 };
 const groupLabels: Record<AdjustmentGroup, string> = {
+  local: "Local gradient",
   light: "Light",
   color: "Color",
   style: "Style",
@@ -206,8 +215,14 @@ function TonePad({
 }) {
   const move = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    const x = Math.max(
+      0,
+      Math.min(1, (event.clientX - rect.left) / rect.width),
+    );
+    const y = Math.max(
+      0,
+      Math.min(1, (event.clientY - rect.top) / rect.height),
+    );
     onChange(1 - y * 2, x * 2 - 1);
   };
   return (
@@ -292,7 +307,7 @@ function Slider({
       <span>
         <span>{label}</span>
         <output>
-          {max === 3
+          {label.toLowerCase().includes("exposure")
             ? `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`
             : Math.round(value * 100)}
         </output>
@@ -339,6 +354,7 @@ function PreviewCanvas({
   settings,
   original = false,
   clipping = false,
+  maskOverlay = false,
   onError,
   className = "",
 }: {
@@ -346,6 +362,7 @@ function PreviewCanvas({
   settings: ExportEnhanceSettings;
   original?: boolean;
   clipping?: boolean;
+  maskOverlay?: boolean;
   onError?: (message: string) => void;
   className?: string;
 }) {
@@ -381,7 +398,7 @@ function PreviewCanvas({
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => {
       try {
-        renderer.current?.draw(settings, original, clipping);
+        renderer.current?.draw(settings, original, clipping, maskOverlay);
       } catch (error) {
         onError?.(
           error instanceof Error ? error.message : "Preview unavailable",
@@ -389,7 +406,7 @@ function PreviewCanvas({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [base, settings, original, clipping, generation, onError]);
+  }, [base, settings, original, clipping, maskOverlay, generation, onError]);
   return (
     <canvas
       ref={canvas}
@@ -526,6 +543,16 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   });
   const [presetName, setPresetName] = useState("");
   const [notice, setNotice] = useState("");
+  const [detail, setDetail] = useState(false);
+  const [gradientHandles, setGradientHandles] = useState(false);
+  const [gradientMask, setGradientMask] = useState(false);
+  const [picker, setPicker] = useState<"color" | "whiteBalance" | null>(null);
+  const [detailCenter, setDetailCenter] = useState({ x: 0.5, y: 0.5 });
+  const detailAvailable =
+    !!base &&
+    settings.recipeVersion === 2 &&
+    !settings.aiDenoise &&
+    !settings.upscale;
   const areaRef = useRef<HTMLDivElement>(null);
   const [area, setArea] = useState({ width: 1, height: 1 });
   const onGpuError = useCallback((message: string) => setGpuError(message), []);
@@ -576,6 +603,11 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
     setGpuError("");
     setOriginal(false);
     setAutoBusy(false);
+    setDetail(false);
+    setGradientHandles(false);
+    setGradientMask(false);
+    setPicker(null);
+    setDetailCenter({ x: 0.5, y: 0.5 });
     loadEditingBase(photo.id, controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
@@ -599,7 +631,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         if (!controller.signal.aborted && value)
-          setPadVectors({ key: photoKey, vectors: value as StylePad["vectors"] });
+          setPadVectors({
+            key: photoKey,
+            vectors: value as StylePad["vectors"],
+          });
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -660,7 +695,10 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         if (event.shiftKey) props.onRedo();
         else props.onUndo();
       }
-      if (event.key === "Escape") props.onPreviewOpenChange(false);
+      if (event.key === "Escape") {
+        setPicker(null);
+        props.onPreviewOpenChange(false);
+      }
     };
     const keyup = (event: KeyboardEvent) => {
       if (event.key === "\\") setOriginal(false);
@@ -751,7 +789,82 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
   };
   const preview = photo ? (
     <div
-      className={`quick-image ${grid ? "show-grid" : ""}`}
+      className={`quick-image ${grid ? "show-grid" : ""} ${picker ? "quick-picking" : ""}`}
+      title={
+        picker
+          ? "Click a color in the photo"
+          : "Double click for native 100% detail"
+      }
+      onClick={(event) => {
+        if (!picker || !base) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const point = sourcePoint(
+          base.width,
+          base.height,
+          settings.crop,
+          (event.clientX - rect.left) / rect.width,
+          (event.clientY - rect.top) / rect.height,
+        );
+        const rgb = sampleBase(base, point);
+        try {
+          if (picker === "whiteBalance") {
+            const { temperature, tint, limited } = neutralWhiteBalance(rgb);
+            onSettingsChange({ ...settings, temperature, tint, auto: null });
+            setNotice(
+              limited
+                ? "White balance reached the slider limit. Choose a neutral gray surface."
+                : "Neutral white balance applied before style and local adjustments.",
+            );
+          } else {
+            const renderer = new EditingRenderer(
+              document.createElement("canvas"),
+              { width: 1, height: 1, pixels: new Float32Array(rgb) },
+            );
+            try {
+              renderer.draw({
+                ...settings,
+                crop: defaultSettings.crop,
+                gradient: null,
+                selectedColor: null,
+                sharpen: 0,
+              });
+              const center = hueOf(renderer.readPixel());
+              onSettingsChange({
+                ...settings,
+                selectedColor: {
+                  range: 0.12,
+                  hue: 0,
+                  saturation: 0,
+                  luminance: 0,
+                  ...settings.selectedColor,
+                  center,
+                },
+              });
+            } finally {
+              renderer.dispose();
+            }
+            setNotice(
+              "Color selected. Adjust hue, saturation or luminance below.",
+            );
+          }
+          setPicker(null);
+        } catch (error) {
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : "Unable to sample this color",
+          );
+        }
+      }}
+      onDoubleClick={(event) => {
+        if (!detailAvailable || picker) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        setDetailCenter({
+          x: (event.clientX - rect.left) / rect.width,
+          y: (event.clientY - rect.top) / rect.height,
+        });
+        setDetail(true);
+      }}
       style={{
         width: Math.max(1, frame.width * frameScale),
         height: Math.max(1, frame.height * frameScale),
@@ -763,6 +876,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
           settings={settings}
           original={original}
           clipping={clipping}
+          maskOverlay={gradientMask}
           onError={onGpuError}
         />
       ) : null}
@@ -786,6 +900,16 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
           <b />
           <b />
         </div>
+      ) : null}
+      {base && settings.gradient?.enabled && gradientHandles && !original ? (
+        <GradientOverlay
+          base={base}
+          crop={settings.crop}
+          gradient={settings.gradient}
+          onChange={(gradient) => onSettingsChange({ ...settings, gradient })}
+          onBegin={onBeginAdjustment}
+          onEnd={onEndAdjustment}
+        />
       ) : null}
     </div>
   ) : null;
@@ -849,9 +973,36 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
           {photo ? (
             <>
               <div className="quick-image-area" ref={areaRef}>
-                {preview}
+                {detail && detailAvailable && base ? (
+                  <DetailView
+                    key={photoKey}
+                    photoId={photo.id}
+                    base={base}
+                    settings={settings}
+                    original={original}
+                    clipping={clipping}
+                    initialCenter={detailCenter}
+                    onFit={() => setDetail(false)}
+                  />
+                ) : (
+                  preview
+                )}
               </div>
               <div className="quick-stage-tools">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-ghost ui-btn-sm"
+                  aria-pressed={detail && detailAvailable}
+                  disabled={!detailAvailable}
+                  title={
+                    detailAvailable
+                      ? "Native detail before output resize. Double click the photo to inspect a point."
+                      : "Turn off noise reduction and upscale to inspect native color detail"
+                  }
+                  onClick={() => setDetail(!detail)}
+                >
+                  {detail && detailAvailable ? "Fit" : "100%"}
+                </button>
                 <button
                   type="button"
                   className="ui-btn ui-btn-ghost ui-btn-sm"
@@ -922,6 +1073,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         </section>
         <aside className="quick-adjustments" aria-label="Photo adjustments">
           <fieldset disabled={!photo}>
+            {!legacy ? <Histogram base={base} settings={settings} /> : null}
             {legacy ? (
               <div className="quick-legacy">
                 <strong>Legacy edit preserved</strong>
@@ -962,7 +1114,9 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                       onBegin={onBeginAdjustment}
                       onEnd={onEndAdjustment}
                       onChange={(value) =>
-                        onSettingsChange(rebasePad(autoStrength(settings, value)))
+                        onSettingsChange(
+                          rebasePad(autoStrength(settings, value)),
+                        )
                       }
                     />
                   ) : null}
@@ -1027,6 +1181,22 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                 </details>
                 <details className="quick-section">
                   <summary>Light & color</summary>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!base}
+                    onClick={() => {
+                      setPicker(
+                        picker === "whiteBalance" ? null : "whiteBalance",
+                      );
+                      setDetail(false);
+                      setGradientHandles(false);
+                    }}
+                  >
+                    {picker === "whiteBalance"
+                      ? "Cancel neutral picker"
+                      : "Pick neutral gray"}
+                  </Button>
                   {(
                     [
                       "contrast",
@@ -1045,6 +1215,292 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                     />{" "}
                     Show clipping (red / blue)
                   </label>
+                </details>
+                <details className="quick-section">
+                  <summary>Selective color</summary>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!base || backendNeeded}
+                    onClick={() => {
+                      setPicker(picker === "color" ? null : "color");
+                      setDetail(false);
+                      setGradientHandles(false);
+                    }}
+                  >
+                    {picker === "color"
+                      ? "Cancel color picker"
+                      : "Pick color from photo"}
+                  </Button>
+                  <div className="quick-color-swatches" aria-label="Color band">
+                    {(
+                      [
+                        "Red",
+                        "Yellow",
+                        "Green",
+                        "Cyan",
+                        "Blue",
+                        "Purple",
+                      ] as const
+                    ).map((name, i) => (
+                      <button
+                        type="button"
+                        key={name}
+                        aria-label={`Select ${name.toLowerCase()} colors`}
+                        title={name}
+                        style={{ background: `hsl(${i * 60} 60% 55%)` }}
+                        onClick={() =>
+                          onSettingsChange({
+                            ...settings,
+                            selectedColor: {
+                              range: 0.12,
+                              hue: 0,
+                              saturation: 0,
+                              luminance: 0,
+                              ...settings.selectedColor,
+                              center: i / 6,
+                            },
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                  {settings.selectedColor ? (
+                    <>
+                      <p className="quick-hint">
+                        Selected hue:{" "}
+                        {Math.round(settings.selectedColor.center * 360)}°
+                      </p>
+                      {(
+                        ["hue", "saturation", "luminance", "range"] as const
+                      ).map((key) => (
+                        <Slider
+                          key={key}
+                          label={
+                            {
+                              hue: "Selected hue",
+                              saturation: "Selected saturation",
+                              luminance: "Selected luminance",
+                              range: "Color range",
+                            }[key]
+                          }
+                          value={settings.selectedColor![key]}
+                          min={key === "range" ? 0.02 : -1}
+                          max={key === "range" ? 0.5 : 1}
+                          reset={key === "range" ? 0.12 : 0}
+                          onBegin={onBeginAdjustment}
+                          onEnd={onEndAdjustment}
+                          onChange={(value) =>
+                            onSettingsChange({
+                              ...settings,
+                              selectedColor: {
+                                ...settings.selectedColor!,
+                                [key]: value,
+                              },
+                            })
+                          }
+                        />
+                      ))}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          onSettingsChange({ ...settings, selectedColor: null })
+                        }
+                      >
+                        Reset selected color
+                      </Button>
+                    </>
+                  ) : null}
+                  <p className="quick-hint">
+                    Changes every matching color, including sky and water.
+                    Low-chroma grays are protected.
+                  </p>
+                </details>
+                <details className="quick-section">
+                  <summary>Local gradient</summary>
+                  {settings.gradient ? (
+                    <>
+                      <div className="quick-local-actions">
+                        <label className="quick-check">
+                          <input
+                            type="checkbox"
+                            checked={settings.gradient.enabled}
+                            onChange={(event) =>
+                              onSettingsChange({
+                                ...settings,
+                                gradient: {
+                                  ...settings.gradient!,
+                                  enabled: event.target.checked,
+                                },
+                              })
+                            }
+                          />{" "}
+                          Enabled
+                        </label>
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-ghost ui-btn-sm"
+                          onClick={() =>
+                            onSettingsChange({ ...settings, gradient: null })
+                          }
+                        >
+                          Delete
+                        </button>
+                      </div>
+                      <label className="quick-check">
+                        <input
+                          type="checkbox"
+                          checked={gradientHandles}
+                          onChange={(event) => {
+                            setGradientHandles(event.target.checked);
+                            setDetail(false);
+                          }}
+                        />{" "}
+                        Show handles
+                      </label>
+                      <label className="quick-check">
+                        <input
+                          type="checkbox"
+                          checked={gradientMask}
+                          disabled={backendNeeded}
+                          onChange={(event) => {
+                            setGradientMask(event.target.checked);
+                            setDetail(false);
+                          }}
+                        />{" "}
+                        Show affected area
+                      </label>
+                      <label className="quick-check">
+                        <input
+                          type="checkbox"
+                          checked={settings.gradient.invert}
+                          onChange={(event) =>
+                            onSettingsChange({
+                              ...settings,
+                              gradient: {
+                                ...settings.gradient!,
+                                invert: event.target.checked,
+                              },
+                            })
+                          }
+                        />{" "}
+                        Invert
+                      </label>
+                      {(
+                        [
+                          "exposure",
+                          "highlights",
+                          "temperature",
+                          "feather",
+                        ] as const
+                      ).map((key) => (
+                        <Slider
+                          key={key}
+                          label={
+                            {
+                              exposure: "Local exposure",
+                              highlights: "Local highlights",
+                              temperature: "Local warmth",
+                              feather: "Feather",
+                            }[key]
+                          }
+                          value={settings.gradient![key]}
+                          min={
+                            key === "feather"
+                              ? 0.05
+                              : key === "exposure"
+                                ? -2
+                                : -1
+                          }
+                          max={key === "exposure" ? 2 : 1}
+                          reset={key === "feather" ? 1 : 0}
+                          onBegin={onBeginAdjustment}
+                          onEnd={onEndAdjustment}
+                          onChange={(value) =>
+                            onSettingsChange({
+                              ...settings,
+                              gradient: { ...settings.gradient!, [key]: value },
+                            })
+                          }
+                        />
+                      ))}
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-ghost ui-btn-sm"
+                        disabled={!base}
+                        onClick={() => {
+                          if (!base) return;
+                          onSettingsChange({
+                            ...settings,
+                            gradient: {
+                              ...settings.gradient!,
+                              start: sourcePoint(
+                                base.width,
+                                base.height,
+                                settings.crop,
+                                0.5,
+                                0.2,
+                              ),
+                              end: sourcePoint(
+                                base.width,
+                                base.height,
+                                settings.crop,
+                                0.5,
+                                0.7,
+                              ),
+                            },
+                          });
+                          setGradientHandles(true);
+                          setDetail(false);
+                        }}
+                      >
+                        Center handles in crop
+                      </button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!base}
+                      onClick={() => {
+                        if (!base) return;
+                        onSettingsChange({
+                          ...settings,
+                          gradient: {
+                            start: sourcePoint(
+                              base.width,
+                              base.height,
+                              settings.crop,
+                              0.5,
+                              0.2,
+                            ),
+                            end: sourcePoint(
+                              base.width,
+                              base.height,
+                              settings.crop,
+                              0.5,
+                              0.7,
+                            ),
+                            enabled: true,
+                            invert: false,
+                            feather: 1,
+                            exposure: -0.3,
+                            highlights: 0,
+                            temperature: 0,
+                          },
+                        });
+                        setGradientHandles(true);
+                        setDetail(false);
+                      }}
+                    >
+                      Add gradient
+                    </Button>
+                  )}
+                  <p className="quick-hint">
+                    Drag the filled and open points to set the transition. A
+                    gradient affects everything across that area.
+                  </p>
                 </details>
                 <details
                   className="quick-section"
@@ -1476,7 +1932,11 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
               <span role="alert">
                 {props.saveError} · Keep this window open.
               </span>{" "}
-              <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={props.onRetrySave}>
+              <button
+                type="button"
+                className="ui-btn ui-btn-ghost ui-btn-sm"
+                onClick={props.onRetrySave}
+              >
                 Retry save
               </button>
             </>
@@ -1500,7 +1960,11 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
         {running ? (
           <>
             <progress max={100} value={progress} />
-            <button type="button" className="ui-btn ui-btn-ghost ui-btn-sm" onClick={props.onCancel}>
+            <button
+              type="button"
+              className="ui-btn ui-btn-ghost ui-btn-sm"
+              onClick={props.onCancel}
+            >
               Cancel export
             </button>
           </>

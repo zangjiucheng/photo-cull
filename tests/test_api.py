@@ -583,6 +583,34 @@ def test_invalid_recipe_payload_returns_actionable_error(client, tmp_path):
     assert "Invalid" in response.get_json()["error"]
 
 
+def test_detail_endpoint_and_new_recipe_fields_persist(client, tmp_path):
+    import numpy as np
+    source = tmp_path / "source"
+    make_image(source / "a.png", "blue")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    settings = {"recipeVersion": 2, "engineVersion": 1, "rawProfileVersion": 1,
+        "gradient": {"exposure": -.5}, "selectedColor": {"center": 2 / 3, "luminance": -.3}}
+    saved = client.put(f"/api/workspaces/{workspace['id']}/export-enhance-settings", json={"settings_by_photo": {photo["id"]: settings}})
+    assert saved.status_code == 200
+    loaded = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["exportEnhanceSettings"][photo["id"]]
+    assert loaded["engineVersion"] == loaded["rawProfileVersion"] == 1
+    assert loaded["gradient"]["exposure"] == -.5 and loaded["selectedColor"]["luminance"] == -.3
+    base = client.get(f"/api/photos/{photo['id']}/editing-base")
+    assert base.headers["X-Source-Width"] == base.headers["X-Source-Height"] == "8"
+    payload = {"settings": loaded, "region": {"x": 2, "y": 3, "width": 4, "height": 3}}
+    detail = client.post(f"/api/photos/{photo['id']}/editing-detail", json=payload)
+    assert detail.status_code == 200
+    assert detail.headers["X-Image-Width"] == "4" and detail.headers["X-Image-Height"] == "3"
+    assert detail.headers["X-Region-X"] == "2" and detail.headers["Cache-Control"] == "no-store"
+    assert np.frombuffer(detail.data, dtype="<f4").size == 4 * 3 * 3
+    assert client.post(f"/api/photos/{photo['id']}/editing-detail", json={**payload, "region": {}}).status_code == 400
+    rejected = client.put(f"/api/workspaces/{workspace['id']}/export-enhance-settings", json={"settings_by_photo": {photo["id"]: {**settings, "engineVersion": 2}}})
+    assert rejected.status_code == 400
+    still_saved = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["exportEnhanceSettings"][photo["id"]]
+    assert still_saved == loaded
+
+
 def test_export_enhance_settings_are_persistent(client, tmp_path):
     source = tmp_path / "source"
     make_image(source / "a.jpg", "blue")
