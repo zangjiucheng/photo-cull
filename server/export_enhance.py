@@ -1,27 +1,29 @@
 from __future__ import annotations
 
 import importlib
+import math
+from collections import OrderedDict
 import base64
 import io
 import os
 import sys
-import tempfile
 import threading
 import time
 import traceback
 import urllib.request
+from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageCms
 
-from . import db, events, raw_pipeline
+from . import db, events, raw_pipeline, editing
 
 
-STYLE_PRESETS = {"standard", "bright", "dramatic", "warm", "cool", "muted"}
+STYLE_PRESETS = {"standard", "bright", "dramatic", "warm", "cool", "muted", "mono"}
 UPSCALE_SCALES = {2, 4}
 DENOISE_STRENGTHS = {"low", "medium", "high"}
 REALESRGAN_SOURCE_BASE = "https://raw.githubusercontent.com/ai-forever/Real-ESRGAN/main/RealESRGAN"
@@ -42,7 +44,14 @@ class PhotoStyle:
 
 @dataclass
 class EnhanceSettings:
+    recipe_version: int = 2
     exposure: float = 0.0
+    brilliance: float = 0.0
+    vibrance: float = 0.0
+    black_point: float = 0.0
+    dehaze: float = 0.0
+    crop: dict[str, float] = field(default_factory=lambda: {"x": 0, "y": 0, "width": 1, "height": 1, "angle": 0})
+    auto: dict[str, Any] | None = None
     contrast: float = 0.0
     highlights: float = 0.0
     shadows: float = 0.0
@@ -82,6 +91,7 @@ class ExportJob:
     current: str | None = None
     outputs: list[str] = field(default_factory=list)
     failures: list[ExportFailure] = field(default_factory=list)
+    processing_notes: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     cancel_requested: bool = False
@@ -92,11 +102,43 @@ def _float_setting(settings: dict[str, Any], key: str, default: float, low: floa
         value = float(settings.get(key, default))
     except (TypeError, ValueError):
         raise ExportEnhanceError(f"{key} must be a number")
+    if not math.isfinite(value):
+        raise ExportEnhanceError(f"{key} must be finite")
     return max(low, min(high, value))
 
 
 def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
+    try:
+        return _parse_settings(raw)
+    except ExportEnhanceError:
+        raise
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ExportEnhanceError("Invalid numeric or structured editing setting") from exc
+
+
+def _parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
     settings = raw or {}
+    if not isinstance(settings, dict):
+        raise ExportEnhanceError("settings must be an object")
+    if settings.get("recipeVersion", 1) not in {1, 2}:
+        raise ExportEnhanceError("Unsupported recipeVersion")
+    crop = settings.get("crop") or {}
+    if not isinstance(crop, dict):
+        raise ExportEnhanceError("crop must be an object")
+    width = _float_setting(crop, "width", 1, .05, 1)
+    height = _float_setting(crop, "height", 1, .05, 1)
+    parsed_crop = {"width": width, "height": height,
+                   "x": _float_setting(crop, "x", 0, 0, 1 - width),
+                   "y": _float_setting(crop, "y", 0, 0, 1 - height),
+                   "angle": _float_setting(crop, "angle", 0, -15, 15)}
+    auto = settings.get("auto")
+    if auto is not None:
+        if not isinstance(auto, dict) or not isinstance(auto.get("base"), dict) or not isinstance(auto.get("target"), dict):
+            raise ExportEnhanceError("auto must contain base and target controls")
+        keys = ("exposure", "brilliance", "highlights", "shadows", "vibrance", "temperature")
+        auto = {"strength": _float_setting(auto, "strength", 1, 0, 1),
+                **{group: {key: _float_setting(auto[group], key, 0, -3 if key == "exposure" else -1, 3 if key == "exposure" else 1)
+                           for key in keys} for group in ("base", "target")}}
     style_raw = settings.get("photoStyle", settings.get("photo_style", {}))
     style_raw = style_raw if isinstance(style_raw, dict) else {}
     preset = str(style_raw.get("preset", "standard")).lower()
@@ -124,7 +166,14 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
     if denoise_strength not in DENOISE_STRENGTHS:
         raise ExportEnhanceError("aiDenoiseStrength must be low, medium, or high")
     return EnhanceSettings(
+        recipe_version=2 if settings.get("recipeVersion") == 2 else 1,
         exposure=_float_setting(settings, "exposure", 0.0, -3.0, 3.0),
+        brilliance=_float_setting(settings, "brilliance", 0.0, -1.0, 1.0),
+        vibrance=_float_setting(settings, "vibrance", 0.0, -1.0, 1.0),
+        black_point=_float_setting(settings, "blackPoint", 0.0, -1.0, 1.0),
+        dehaze=_float_setting(settings, "dehaze", 0.0, -1.0, 1.0),
+        crop=parsed_crop,
+        auto=auto,
         contrast=_float_setting(settings, "contrast", 0.0, -1.0, 1.0),
         highlights=_float_setting(settings, "highlights", 0.0, -1.0, 1.0),
         shadows=_float_setting(settings, "shadows", 0.0, -1.0, 1.0),
@@ -150,7 +199,14 @@ def parse_settings(raw: dict[str, Any] | None) -> EnhanceSettings:
 
 def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
     return {
+        "recipeVersion": settings.recipe_version,
         "exposure": settings.exposure,
+        "brilliance": settings.brilliance,
+        "vibrance": settings.vibrance,
+        "blackPoint": settings.black_point,
+        "dehaze": settings.dehaze,
+        "crop": settings.crop,
+        "auto": settings.auto,
         "contrast": settings.contrast,
         "highlights": settings.highlights,
         "shadows": settings.shadows,
@@ -175,28 +231,76 @@ def serialize_settings(settings: EnhanceSettings) -> dict[str, Any]:
 
 
 class ImageLoader:
+    def __init__(self):
+        self._cache = OrderedDict()
+        self._lock = threading.Lock()
+
     def load(self, row: Any, *, full_raw: bool = True) -> tuple[np.ndarray, bytes | None, str]:
+        # The flag remains accepted for callers from older integrations. Editing
+        # always starts with the full source, never an embedded browsing JPEG.
+        source_path = row["path"]
+        stat = os.stat(source_path)
+        key = (source_path, stat.st_mtime_ns, stat.st_size, row["orientation_override"])
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            result = self._decode(row)
+            self._cache[key] = result
+            while len(self._cache) > 2 or (sum(item[0].nbytes for item in self._cache.values()) > 384 * 1024 ** 2 and len(self._cache) > 1):
+                self._cache.popitem(last=False)
+            return result
+
+    def _decode(self, row: Any) -> tuple[np.ndarray, bytes | None, str]:
         source_path = row["path"]
         exif = None
         try:
             with Image.open(source_path) as source:
-                exif = source.info.get("exif")
+                exif = source.getexif().tobytes()
         except Exception:
             exif = None
-        if full_raw and raw_pipeline.is_raw_image(source_path):
-            rgb = raw_pipeline.load_full_raw_image(source_path, row["orientation_override"])
-            arr = np.asarray(rgb, dtype=np.float32) / 255.0
+        if raw_pipeline.is_raw_image(source_path):
+            arr = editing.encode_srgb(raw_pipeline.load_full_raw_array(source_path, row["orientation_override"]))
             return arr, exif, source_path
 
-        path = raw_pipeline.display_path_for_row(row)
-        with Image.open(path) as image:
-            rgb = ImageOps.exif_transpose(image).convert("RGB")
+        with Image.open(source_path) as image:
+            oriented = ImageOps.exif_transpose(image)
+            profile = image.info.get("icc_profile")
+            if source_path.lower().endswith((".tif", ".tiff")):
+                import tifffile
+                with tifffile.TiffFile(source_path) as tif:
+                    data = tif.pages[0].asarray()
+                if data.dtype == np.uint16 and data.ndim == 3 and data.shape[2] == 3:
+                    if profile and profile[128:] != editing.SRGB_ICC[128:]:
+                        raise ExportEnhanceError("16-bit TIFF editing requires an untagged sRGB TIFF or a Photo Cull sRGB TIFF. Use the original RAW for other profiles.")
+                    arr = editing.orient_array(data.astype(np.float32) / 65535, image.getexif().get(274, 1))
+                    if row["orientation_override"]:
+                        arr = np.rot90(arr, -(row["orientation_override"] // 90))
+                    return np.ascontiguousarray(arr), exif, source_path
+            if profile:
+                rgb = ImageCms.profileToProfile(oriented, ImageCms.ImageCmsProfile(io.BytesIO(profile)), ImageCms.createProfile("sRGB"), outputMode="RGB")
+            else:
+                rgb = oriented.convert("RGB")
+            if row["orientation_override"]:
+                rgb = rgb.rotate(-row["orientation_override"], expand=True)
             arr = np.asarray(rgb, dtype=np.float32) / 255.0
         return arr, exif, source_path
+
+    def load_legacy(self, row: Any):
+        if raw_pipeline.is_raw_image(row["path"]):
+            rgb = raw_pipeline.load_full_raw_image(row["path"], row["orientation_override"])
+            return np.asarray(rgb, dtype=np.float32) / 255, None, row["path"]
+        with Image.open(row["path"]) as source:
+            exif = source.info.get("exif")
+        with Image.open(raw_pipeline.display_path_for_row(row)) as image:
+            rgb = ImageOps.exif_transpose(image).convert("RGB")
+            return np.asarray(rgb, dtype=np.float32) / 255, exif, row["path"]
 
 
 class ColorProcessor:
     def apply(self, image: np.ndarray, settings: EnhanceSettings) -> np.ndarray:
+        if settings.recipe_version >= 2:
+            return editing.apply_color(image, settings)
         out = np.clip(image.astype(np.float32), 0.0, 1.0)
         out = np.clip(out * (2.0 ** settings.exposure), 0.0, 1.0)
         if settings.contrast:
@@ -348,6 +452,8 @@ class PhotographicStyleProcessor:
         self._masks = masks or SemanticMaskProvider()
 
     def apply(self, image: np.ndarray, settings: EnhanceSettings, row: Any | None = None) -> np.ndarray:
+        if settings.recipe_version >= 2:
+            return editing.apply_style(image, settings.photo_style)
         style = settings.photo_style
         original = np.clip(image.astype(np.float32), 0.0, 1.0)
         if style.palette <= 0:
@@ -484,14 +590,19 @@ class AIDenoiseEngine:
     }
 
     def apply(self, image: np.ndarray, strength: str) -> np.ndarray:
+        return self.apply_with_info(image, strength)[0]
+
+    def apply_with_info(self, image: np.ndarray, strength: str) -> tuple[np.ndarray, str]:
         h, blend = self._strength.get(strength, self._strength["medium"])
         source = np.clip(image.astype(np.float32), 0.0, 1.0)
         uint = (source * 255.0 + 0.5).astype(np.uint8)
         denoised = self._opencv_denoise(uint, h)
+        engine = "OpenCV non-local means"
         if denoised is None:
             denoised = self._pil_denoise(uint, strength)
+            engine = "Pillow smoothing (OpenCV unavailable)"
         restored = np.asarray(denoised, dtype=np.float32) / 255.0
-        return np.clip(source * (1.0 - blend) + restored * blend, 0.0, 1.0).astype(np.float32)
+        return np.clip(source * (1.0 - blend) + restored * blend, 0.0, 1.0).astype(np.float32), engine
 
     def _opencv_denoise(self, uint: np.ndarray, h: float) -> np.ndarray | None:
         try:
@@ -527,27 +638,26 @@ class ExportWriter:
 
         out = np.clip(image, 0.0, 1.0)
         if settings.resize_max_edge:
-            pil = Image.fromarray((out * 255.0 + 0.5).astype(np.uint8), "RGB")
-            pil.thumbnail((settings.resize_max_edge, settings.resize_max_edge), Image.Resampling.LANCZOS)
-            out = np.asarray(pil, dtype=np.float32) / 255.0
-        if settings.sharpen:
-            pil = Image.fromarray((out * 255.0 + 0.5).astype(np.uint8), "RGB")
-            radius = 1.0
-            percent = int(60 + settings.sharpen * 90)
-            pil = pil.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=3))
-            out = np.asarray(pil, dtype=np.float32) / 255.0
+            out = editing.resize_float(out, settings.resize_max_edge)
+        out = editing.sharpen_float(out, settings.sharpen)
+        safe_exif = editing.clean_exif(exif, out.shape[1], out.shape[0])
 
         if settings.output_format == "jpeg":
             pil = Image.fromarray((out * 255.0 + 0.5).astype(np.uint8), "RGB")
-            save_kwargs = {"quality": settings.quality, "subsampling": 0, "optimize": True}
-            if exif:
-                save_kwargs["exif"] = exif
+            save_kwargs = {"quality": settings.quality, "subsampling": 0, "optimize": True,
+                           "icc_profile": editing.SRGB_ICC, "exif": safe_exif.tobytes()}
             pil.save(output_path, "JPEG", **save_kwargs)
         else:
             arr16 = (out * 65535.0 + 0.5).astype(np.uint16)
             import tifffile
 
-            tifffile.imwrite(output_path, arr16, photometric="rgb")
+            tags = [(34675, "B", len(editing.SRGB_ICC), editing.SRGB_ICC, False), (274, "H", 1, 1, False),
+                    (34664, "I", 1, 0, False)]
+            for tag in (271, 272, 306, 315, 33432):
+                if tag in safe_exif:
+                    tags.append((tag, "s", 0, str(safe_exif[tag]), False))
+            tifffile.imwrite(output_path, arr16, photometric="rgb", metadata=None, extratags=tags, software="Photo Cull")
+            editing.attach_tiff_capture(output_path, safe_exif)
         return str(output_path)
 
 
@@ -582,7 +692,7 @@ class JobQueue:
         if not rows:
             raise ExportEnhanceError("No selected photos were found")
         job = ExportJob(
-            id=f"enhance-{int(time.time() * 1000)}",
+            id=f"enhance-{uuid4().hex}",
             selected_ids=[row["id"] for row in rows],
             output_folder=output_folder,
             settings=settings,
@@ -626,11 +736,16 @@ class JobQueue:
             self._update(job, current=row["name"])
             try:
                 settings = job.settings_by_photo.get(photo_id, job.settings)
-                image, exif, _source = self._loader.load(row)
+                image, exif, _source = (self._loader.load(row) if settings.recipe_version >= 2 else self._loader.load_legacy(row))
                 image = self._color.apply(image, settings)
                 image = self._style.apply(image, settings, row)
+                image = editing.apply_geometry(image, settings.crop)
                 if settings.ai_denoise:
-                    image = self._denoise.apply(image, settings.ai_denoise_strength)
+                    image, engine = self._denoise.apply_with_info(image, settings.ai_denoise_strength)
+                    with self._lock:
+                        note = f"Noise reduction: {engine}"
+                        if note not in job.processing_notes:
+                            job.processing_notes.append(note)
                 if settings.upscale:
                     image = self._upscale.apply(image, settings.upscale_scale)
                 output = self._writer.write(image, row, job.output_folder, settings, exif)
@@ -673,6 +788,7 @@ def serialize_job(job: ExportJob) -> dict[str, Any]:
         "outputFolder": job.output_folder,
         "outputs": list(job.outputs),
         "failures": [failure.__dict__ for failure in job.failures],
+        "processingNotes": list(job.processing_notes),
         "createdAt": job.created_at,
         "updatedAt": job.updated_at,
     }
@@ -681,30 +797,26 @@ def serialize_job(job: ExportJob) -> dict[str, Any]:
 queue = JobQueue()
 
 
-def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 1600) -> str:
+def render_preview(photo_id: str, settings: EnhanceSettings, max_edge: int = 1600) -> io.BytesIO:
     row = db.fetch_photo(photo_id)
     if row is None:
         raise ExportEnhanceError("Photo not found")
-    image, _exif, _source = queue._loader.load(row, full_raw=False)
-    if max(image.shape[:2]) > max_edge:
-        pil = Image.fromarray((image * 255.0 + 0.5).astype(np.uint8), "RGB")
-        pil.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
-        image = np.asarray(pil, dtype=np.float32) / 255.0
+    image, _exif, _source = (queue._loader.load(row) if settings.recipe_version >= 2 else queue._loader.load_legacy(row))
+    image = editing.resize_float(image, max_edge)
     image = queue._color.apply(image, settings)
     image = queue._style.apply(image, settings, row)
+    image = editing.apply_geometry(image, settings.crop)
+    engine = "Off"
     if settings.ai_denoise:
-        image = queue._denoise.apply(image, settings.ai_denoise_strength)
+        image, engine = queue._denoise.apply_with_info(image, settings.ai_denoise_strength)
     if settings.upscale:
         image = queue._upscale.apply(image, settings.upscale_scale)
-    if settings.sharpen:
-        pil = Image.fromarray((image * 255.0 + 0.5).astype(np.uint8), "RGB")
-        pil = pil.filter(ImageFilter.UnsharpMask(radius=1.0, percent=int(60 + settings.sharpen * 90), threshold=3))
-        image = np.asarray(pil, dtype=np.float32) / 255.0
-    preview_dir = Path(tempfile.gettempdir()) / "ai-culling-enhance-previews"
-    preview_dir.mkdir(parents=True, exist_ok=True)
-    preview_path = preview_dir / f"{photo_id}-{int(time.time() * 1000)}.jpg"
-    Image.fromarray((np.clip(image, 0, 1) * 255.0 + 0.5).astype(np.uint8), "RGB").save(preview_path, "JPEG", quality=92)
-    return str(preview_path)
+    image = editing.sharpen_float(image, settings.sharpen)
+    preview = io.BytesIO()
+    Image.fromarray((np.clip(image, 0, 1) * 255.0 + 0.5).astype(np.uint8), "RGB").save(preview, "JPEG", quality=95, subsampling=0, icc_profile=editing.SRGB_ICC)
+    preview.seek(0)
+    preview.denoise_engine = engine
+    return preview
 
 
 def render_style_masks(photo_id: str, max_edge: int = 1024) -> dict[str, Any]:

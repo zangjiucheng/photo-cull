@@ -155,6 +155,29 @@ def load_full_raw_image(path: str, orientation_override: int | None = None) -> I
         raise InvalidRawImageError("File is not a valid DNG image") from exc
 
 
+def load_full_raw_array(path: str, orientation_override: int | None = None) -> np.ndarray:
+    """Editing base: camera WB, linear sRGB primaries, fixed exposure, 16-bit decode.
+
+    Browsing thumbnails intentionally use the separate fast JPEG path. Keep this
+    array floating point; display encoding and quantization belong at the edges.
+    LibRaw applies the camera orientation before the optional user rotation.
+    """
+    if not is_raw_image(path) or not os.path.isfile(path):
+        raise InvalidRawImageError("RAW file does not exist or is not a RAW image")
+    rawpy = _load_rawpy()
+    try:
+        with rawpy.imread(path) as raw:
+            rgb = raw.postprocess(output_bps=16, gamma=(1, 1), use_camera_wb=True,
+                                  no_auto_bright=True, output_color=rawpy.ColorSpace.sRGB)
+        linear = np.asarray(rgb, dtype=np.float32) / 65535.0
+        override = _normalize_orientation_override(orientation_override)
+        if override:
+            linear = np.rot90(linear, k=-(override // 90))
+        return np.ascontiguousarray(linear)
+    except Exception as exc:
+        raise InvalidRawImageError("File is not a valid DNG image") from exc
+
+
 def validate_raw_file(path: str) -> None:
     if not is_raw_image(path):
         return

@@ -549,6 +549,39 @@ def test_export_enhance_preview_renders_jpeg(client, tmp_path):
     assert response.headers["Content-Type"].startswith("image/jpeg")
 
 
+def test_editing_base_is_float_source_and_invalidates_when_source_changes(client, tmp_path):
+    import numpy as np
+    source = tmp_path / "source"
+    path = make_image(source / "a.png", "blue")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    response = client.get(f"/api/photos/{photo['id']}/editing-base")
+    assert response.status_code == 200
+    assert response.headers["X-Image-Width"] == "8"
+    assert response.headers["X-Image-Height"] == "8"
+    pixels = np.frombuffer(response.data, dtype="<f4").reshape(8, 8, 3)
+    np.testing.assert_array_equal(pixels[0, 0], [0, 0, 1])
+    make_image(path, "red")
+    newer = client.get(f"/api/photos/{photo['id']}/editing-base")
+    pixels = np.frombuffer(newer.data, dtype="<f4").reshape(8, 8, 3)
+    np.testing.assert_array_equal(pixels[0, 0], [1, 0, 0])
+    suggested = client.get(f"/api/photos/{photo['id']}/auto-adjustments")
+    assert suggested.status_code == 200
+    assert suggested.get_json()["temperature"] == 0
+    path.unlink()
+    assert client.get(f"/api/photos/{photo['id']}/editing-base").status_code == 400
+
+
+def test_invalid_recipe_payload_returns_actionable_error(client, tmp_path):
+    source = tmp_path / "source"
+    make_image(source / "a.png")
+    workspace = open_workspace(client, source)
+    photo = client.get(f"/api/library?workspace_id={workspace['id']}").get_json()["photos"][0]
+    response = client.post("/api/export-enhance/preview", json={"photo_id": photo["id"], "settings": {"quality": []}})
+    assert response.status_code == 400
+    assert "Invalid" in response.get_json()["error"]
+
+
 def test_export_enhance_settings_are_persistent(client, tmp_path):
     source = tmp_path / "source"
     make_image(source / "a.jpg", "blue")

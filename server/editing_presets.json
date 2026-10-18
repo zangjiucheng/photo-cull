@@ -1,0 +1,7 @@
+{
+  "standard": {"label": "Original", "exposure": 0, "brilliance": 0, "highlights": 0, "shadows": 0, "vibrance": 0, "temperature": 0, "contrast": 0, "saturation": 0},
+  "bright": {"label": "Natural", "exposure": 0.08, "brilliance": 0.16, "highlights": -0.1, "shadows": 0.08, "vibrance": 0.12, "temperature": 0, "contrast": 0.04, "saturation": 0},
+  "warm": {"label": "Warm sunset", "exposure": 0, "brilliance": 0.06, "highlights": -0.1, "shadows": 0, "vibrance": 0.08, "temperature": 0.18, "contrast": 0.04, "saturation": 0},
+  "cool": {"label": "Cool", "exposure": 0, "brilliance": 0.08, "highlights": -0.06, "shadows": 0.04, "vibrance": 0.06, "temperature": -0.14, "contrast": 0.06, "saturation": -0.04},
+  "mono": {"label": "Black & white", "exposure": 0, "brilliance": 0.1, "highlights": -0.1, "shadows": 0.04, "vibrance": 0, "temperature": 0, "contrast": 0.14, "saturation": -1}
+}

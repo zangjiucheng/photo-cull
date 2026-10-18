@@ -3,9 +3,10 @@ FROM node:20-slim AS web
 WORKDIR /app
 
 COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm ci
+RUN cd frontend && ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
 
 COPY frontend ./frontend
+COPY server/editing_presets.json ./server/editing_presets.json
 RUN cd frontend && npm run build
 
 FROM python:3.11-slim

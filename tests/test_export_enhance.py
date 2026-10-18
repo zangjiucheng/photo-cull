@@ -38,11 +38,13 @@ def fake_rawpy_for_export(monkeypatch):
         def extract_thumb(self):
             return SimpleNamespace(format="jpeg", data=thumb_buffer.getvalue())
 
-        def postprocess(self, **_kwargs):
-            return np.full((10, 20, 3), 128, dtype=np.uint8)
+        def postprocess(self, **kwargs):
+            return np.full((10, 20, 3), 32768 if kwargs.get("output_bps") == 16 else 128,
+                           dtype=np.uint16 if kwargs.get("output_bps") == 16 else np.uint8)
 
     module = SimpleNamespace(
         ThumbFormat=SimpleNamespace(JPEG="jpeg", BITMAP="bitmap"),
+        ColorSpace=SimpleNamespace(sRGB="sRGB"),
         imread=lambda _path: FakeRaw(),
     )
     monkeypatch.setattr(raw_pipeline.importlib.util, "find_spec", lambda name: object() if name == "rawpy" else None)
@@ -138,6 +140,7 @@ def test_photo_style_processor_skin_protection_reduces_shift():
     image[:, :4] = np.array([0.74, 0.48, 0.36], dtype=np.float32)
     image[:, 4:] = np.array([0.22, 0.44, 0.82], dtype=np.float32)
     settings = export_enhance.EnhanceSettings(
+        recipe_version=1,
         photo_style=export_enhance.PhotoStyle(preset="dramatic", tone=100, colour=100, palette=100)
     )
 

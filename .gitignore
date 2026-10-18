@@ -7,6 +7,7 @@ __pycache__/
 *.so
 .python-version
 .venv/
+.package-venv/
 venv/
 env/
 .pytest_cache/
@@ -41,3 +42,4 @@ static/dist/
 # Playwright CLI
 .playwright-cli
 output/
+frontend/qa/fixtures.json

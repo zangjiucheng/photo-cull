@@ -32,8 +32,23 @@ jobs:
           TAG=${GITHUB_REF_NAME#v}
           cd frontend && npm version "$TAG" --no-git-tag-version --allow-same-version
 
+      - name: Validate backend
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest
+
+      - name: Validate frontend
+        run: |
+          cd frontend
+          npm ci
+          npm test
+
       - name: Build DMG
         run: make package-dmg
+
+      - name: Generate checksums
+        working-directory: release
+        run: shasum -a 256 *.dmg > SHA256SUMS.txt
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
@@ -41,4 +56,5 @@ jobs:
           files: |
             release/*.dmg
             release/*.dmg.blockmap
+            release/SHA256SUMS.txt
           generate_release_notes: true

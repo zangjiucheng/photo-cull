@@ -167,12 +167,19 @@ export async function cancelExportEnhanceJob(jobId: string): Promise<ExportEnhan
   }, "Failed to cancel Enhance & Export job");
 }
 
-export async function renderExportEnhancePreview(photoId: string, settings: ExportEnhanceSettings): Promise<Blob> {
-  return requestBlob("/api/export-enhance/preview", {
+export async function renderExportEnhancePreview(photoId: string, settings: ExportEnhanceSettings, signal?: AbortSignal): Promise<Blob> {
+  return (await renderEditingPreview(photoId, settings, signal)).blob;
+}
+
+export async function renderEditingPreview(photoId: string, settings: ExportEnhanceSettings, signal?: AbortSignal) {
+  const response = await fetch("/api/export-enhance/preview", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ photo_id: photoId, settings })
-  }, "Failed to render enhance preview");
+  });
+  if (!response.ok) throw new Error(await parseError(response, "Failed to render enhance preview"));
+  return { blob: await response.blob(), denoiseEngine: response.headers.get("X-Denoise-Engine") ?? "" };
 }
 
 export async function fetchExportEnhanceStyleMasks(photoId: string, maxEdge = 1024): Promise<StyleMaskPayload> {

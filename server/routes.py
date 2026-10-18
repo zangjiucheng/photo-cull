@@ -5,7 +5,7 @@ import os
 from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from . import db, events, export_enhance, scoring, similarity, storage
+from . import db, events, export_enhance, scoring, similarity, storage, editing, raw_pipeline
 
 
 bp = Blueprint("api", __name__)
@@ -272,9 +272,38 @@ def export_enhance_preview():
     try:
         settings = export_enhance.parse_settings(data.get("settings"))
         preview_path = export_enhance.render_preview(str(photo_id), settings)
-    except (export_enhance.ExportEnhanceError, RuntimeError) as exc:
+    except (export_enhance.ExportEnhanceError, RuntimeError, raw_pipeline.InvalidRawImageError, OSError) as exc:
         return error_response(str(exc), 400)
-    return send_file(preview_path, mimetype="image/jpeg")
+    response = send_file(preview_path, mimetype="image/jpeg")
+    response.headers["X-Denoise-Engine"] = getattr(preview_path, "denoise_engine", "Off")
+    return response
+
+
+@bp.route("/photos/<photo_id>/editing-base", methods=["GET"])
+def editing_base(photo_id):
+    photo = db.fetch_photo(photo_id)
+    if photo is None:
+        return error_response("Photo not found", 404)
+    try:
+        image, _exif, _source = export_enhance.queue._loader.load(photo)
+    except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
+        return error_response(str(exc), 400)
+    image = editing.resize_float(image, 1600)
+    return Response(image.astype("<f4").tobytes(), mimetype="application/octet-stream",
+                    headers={"X-Image-Width": str(image.shape[1]), "X-Image-Height": str(image.shape[0]),
+                             "Cache-Control": "no-store"})
+
+
+@bp.route("/photos/<photo_id>/auto-adjustments", methods=["GET"])
+def auto_adjustments(photo_id):
+    photo = db.fetch_photo(photo_id)
+    if photo is None:
+        return error_response("Photo not found", 404)
+    try:
+        image, _exif, _source = export_enhance.queue._loader.load(photo)
+    except (export_enhance.ExportEnhanceError, raw_pipeline.InvalidRawImageError, OSError) as exc:
+        return error_response(str(exc), 400)
+    return jsonify(editing.auto_adjustments(editing.resize_float(image, 512)))
 
 
 @bp.route("/export-enhance/style-masks", methods=["POST"])

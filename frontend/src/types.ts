@@ -187,6 +187,13 @@ export interface AiRuntimeStatus {
 }
 
 export interface ExportEnhanceSettings {
+  recipeVersion: 1 | 2;
+  brilliance: number;
+  vibrance: number;
+  blackPoint: number;
+  dehaze: number;
+  crop: { x: number; y: number; width: number; height: number; angle: number };
+  auto: { base: Record<string, number>; target: Record<string, number>; strength: number } | null;
   exposure: number;
   contrast: number;
   highlights: number;
@@ -205,7 +212,7 @@ export interface ExportEnhanceSettings {
   photoStyle: PhotoStyle;
 }
 
-export type PhotoStylePreset = "standard" | "bright" | "dramatic" | "warm" | "cool" | "muted";
+export type PhotoStylePreset = "standard" | "bright" | "dramatic" | "warm" | "cool" | "muted" | "mono";
 
 export interface PhotoStyle {
   preset: PhotoStylePreset;
@@ -222,6 +229,7 @@ export interface StyleMaskPayload {
 }
 
 export interface ExportEnhanceJob {
+  processingNotes?: string[];
   id: string;
   status: "queued" | "running" | "done" | "cancelled" | "error" | string;
   total: number;

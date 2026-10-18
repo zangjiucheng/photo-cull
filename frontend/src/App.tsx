@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, fetchExportEnhanceStyleMasks, findSimilarPhotos, renderExportEnhancePreview, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -17,7 +17,9 @@ import { ShortcutHelpDialog } from "./shortcuts/ShortcutHelpDialog";
 import { shortcutRegistry } from "./shortcuts/registry";
 import type { ShortcutHandlers, ShortcutScope } from "./shortcuts/types";
 import { useShortcuts } from "./shortcuts/useShortcuts";
-import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, StyleMaskPayload, ViewMode, WorkspaceTab } from "./types";
+import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryFolder, Photo, RatingFilter, SimilarGroup, SimilarPayload, SortMode, StatusTone, ViewMode, WorkspaceTab } from "./types";
+
+import { cloneSettings, defaultSettings, pasteSettings, type AdjustmentGroup } from "./editing/recipe";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
 const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "debug"];
@@ -28,36 +30,8 @@ interface SimilarityProgress {
   detail: string;
 }
 
-const defaultExportEnhanceSettings: ExportEnhanceSettings = {
-  exposure: 0,
-  contrast: 0,
-  highlights: 0,
-  shadows: 0,
-  saturation: 0,
-  temperature: 0,
-  tint: 0,
-  aiDenoise: false,
-  aiDenoiseStrength: "medium",
-  upscale: false,
-  upscaleScale: 2,
-  sharpen: 0,
-  outputFormat: "jpeg",
-  quality: 92,
-  resizeMaxEdge: null,
-  photoStyle: {
-    preset: "standard",
-    tone: 0,
-    colour: 0,
-    palette: 100
-  }
-};
-
-function cloneExportEnhanceSettings(settings: ExportEnhanceSettings): ExportEnhanceSettings {
-  return {
-    ...settings,
-    photoStyle: { ...settings.photoStyle }
-  };
-}
+const defaultExportEnhanceSettings = defaultSettings;
+const cloneExportEnhanceSettings = cloneSettings;
 
 function formatFolderLabel(folder: LibraryFolder): string {
   return folder.path ? folder.path : "Root";
@@ -89,18 +63,21 @@ export default function App() {
   const [exportEnhanceUndoStacks, setExportEnhanceUndoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
   const exportEnhanceWorkspaceRef = useRef<string | null>(null);
   const skipNextEnhancePersistRef = useRef(false);
+  const pendingEnhanceSaveRef = useRef<{ id: string; settings: Record<string, ExportEnhanceSettings> } | null>(null);
+  const enhanceSaveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const [enhanceSaveState, setEnhanceSaveState] = useState<"saved" | "saving" | "failed">("saved");
+  const [enhanceSaveError, setEnhanceSaveError] = useState("");
+  const enhanceByPhotoRef = useRef(exportEnhanceSettingsByPhoto);
+  enhanceByPhotoRef.current = exportEnhanceSettingsByPhoto;
   const [exportEnhanceSelectedPhotoId, setExportEnhanceSelectedPhotoId] = useState<string | null>(null);
   const [exportEnhanceOutputFolder, setExportEnhanceOutputFolder] = useState("");
   const [exportEnhanceJob, setExportEnhanceJob] = useState<ExportEnhanceJob | null>(null);
   const [isStartingExportEnhance, setIsStartingExportEnhance] = useState(false);
-  const [renderedPreviewUrl, setRenderedPreviewUrl] = useState<string | null>(null);
-  const [isRenderingPreview, setIsRenderingPreview] = useState(false);
-  const [renderPreviewProgress, setRenderPreviewProgress] = useState(0);
-  const [renderPreviewStage, setRenderPreviewStage] = useState("");
-  const [previewError, setPreviewError] = useState("");
+  const [exportEnhanceRedoStacks, setExportEnhanceRedoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
+  const enhanceGestureRef = useRef<{ id: string; before: ExportEnhanceSettings } | null>(null);
+  const enhanceSettingsRef = useRef(exportEnhanceSettings);
+  enhanceSettingsRef.current = exportEnhanceSettings;
   const [isEnhancePreviewOpen, setIsEnhancePreviewOpen] = useState(false);
-  const [styleMasksByPhoto, setStyleMasksByPhoto] = useState<Record<string, StyleMaskPayload>>({});
-  const [isLoadingStyleMasks, setIsLoadingStyleMasks] = useState(false);
 
   const updateStatus = useCallback((text: string, tone: StatusTone = "") => {
     setStatusText(text);
@@ -174,9 +151,9 @@ export default function App() {
   const exportEnhanceCurrentPhotoId = exportEnhanceSelectedPhotoId ?? exportQueueList[0] ?? null;
   const canUndoExportEnhance = Boolean(exportEnhanceCurrentPhotoId && (exportEnhanceUndoStacks[exportEnhanceCurrentPhotoId]?.length ?? 0) > 0);
   useEffect(() => {
-    if (!activeWorkspaceId) return;
+    if (!activeWorkspaceId || library.loadedWorkspaceId !== activeWorkspaceId) return;
     setExportQueues((prev) => ({ ...prev, [activeWorkspaceId]: serverExportQueue }));
-  }, [activeWorkspaceId, serverExportQueue]);
+  }, [activeWorkspaceId, serverExportQueue, library.loadedWorkspaceId]);
 
   useEffect(() => {
     if (!activeWorkspaceId) {
@@ -188,27 +165,67 @@ export default function App() {
     if (exportEnhanceWorkspaceRef.current === activeWorkspaceId) {
       return;
     }
+    if (library.loadedWorkspaceId !== activeWorkspaceId) return;
     exportEnhanceWorkspaceRef.current = activeWorkspaceId;
     skipNextEnhancePersistRef.current = true;
-    setExportEnhanceSettingsByPhoto(serverExportEnhanceSettings);
-    const targetId = exportEnhanceSelectedPhotoId ?? serverExportQueue[0] ?? null;
-    setExportEnhanceSettings(cloneExportEnhanceSettings(targetId ? serverExportEnhanceSettings[targetId] ?? defaultExportEnhanceSettings : defaultExportEnhanceSettings));
-  }, [activeWorkspaceId, exportEnhanceSelectedPhotoId, serverExportEnhanceSettings, serverExportQueue]);
+    let recovered = serverExportEnhanceSettings;
+    try {
+      const draft = JSON.parse(localStorage.getItem(`photo-cull.pending-edits.${activeWorkspaceId}`) ?? "null");
+      if (draft && typeof draft === "object" && !Array.isArray(draft)) recovered = { ...recovered, ...draft };
+    } catch { /* A damaged local draft must not block opening the library. */ }
+    setExportEnhanceSettingsByPhoto(recovered);
+    const targetId = exportEnhanceSelectedPhotoId && serverExportQueue.includes(exportEnhanceSelectedPhotoId) ? exportEnhanceSelectedPhotoId : serverExportQueue[0] ?? null;
+    setExportEnhanceSelectedPhotoId(targetId);
+    setExportEnhanceUndoStacks({});
+    setExportEnhanceRedoStacks({});
+    setExportEnhanceSettings(cloneExportEnhanceSettings(targetId ? recovered[targetId] ?? defaultExportEnhanceSettings : defaultExportEnhanceSettings));
+  }, [activeWorkspaceId, exportEnhanceSelectedPhotoId, serverExportEnhanceSettings, serverExportQueue, library.loadedWorkspaceId]);
+
+  const flushEnhanceSave = useCallback(() => {
+    const pending = pendingEnhanceSaveRef.current;
+    if (!pending) return;
+    pendingEnhanceSaveRef.current = null;
+    const snapshot = JSON.stringify(pending.settings);
+    enhanceSaveChainRef.current = enhanceSaveChainRef.current.catch(() => undefined).then(async () => {
+      try {
+        await saveExportEnhanceSettings(pending.id, pending.settings);
+      } catch (error) {
+        if (exportEnhanceWorkspaceRef.current === pending.id) {
+          setEnhanceSaveState("failed");
+          setEnhanceSaveError(error instanceof Error ? error.message : "Unable to save edits");
+        }
+        return;
+      }
+      try {
+        const key = `photo-cull.pending-edits.${pending.id}`;
+        if (localStorage.getItem(key) === snapshot) localStorage.removeItem(key);
+      } catch { /* Database save succeeded; clearing a recovery draft is best effort. */ }
+      if (exportEnhanceWorkspaceRef.current === pending.id && JSON.stringify(enhanceByPhotoRef.current) === snapshot) {
+        setEnhanceSaveState("saved");
+        setEnhanceSaveError("");
+      }
+    });
+  }, [updateStatus]);
 
   useEffect(() => {
-    if (!activeWorkspaceId) return;
+    if (!activeWorkspaceId || exportEnhanceWorkspaceRef.current !== activeWorkspaceId || library.loadedWorkspaceId !== activeWorkspaceId) return;
     if (skipNextEnhancePersistRef.current) {
       skipNextEnhancePersistRef.current = false;
       return;
     }
-    const timer = window.setTimeout(() => {
-      void saveExportEnhanceSettings(activeWorkspaceId, exportEnhanceSettingsByPhoto)
-        .catch((err) => {
-          updateStatus(err instanceof Error ? err.message : "Failed to save Enhance & Export edits", "error");
-        });
-    }, 700);
+    pendingEnhanceSaveRef.current = { id: activeWorkspaceId, settings: exportEnhanceSettingsByPhoto };
+    setEnhanceSaveState("saving");
+    try { localStorage.setItem(`photo-cull.pending-edits.${activeWorkspaceId}`, JSON.stringify(exportEnhanceSettingsByPhoto)); }
+    catch { updateStatus("Local draft storage is full; keep the app open until edits save.", "warn"); }
+    const timer = window.setTimeout(flushEnhanceSave, 700);
     return () => window.clearTimeout(timer);
-  }, [activeWorkspaceId, exportEnhanceSettingsByPhoto, updateStatus]);
+  }, [activeWorkspaceId, exportEnhanceSettingsByPhoto, updateStatus, flushEnhanceSave, library.loadedWorkspaceId]);
+
+  useEffect(() => {
+    const flush = () => flushEnhanceSave();
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
+  }, [activeWorkspaceId, flushEnhanceSave]);
 
   const commitExportQueue = useCallback((ids: string[], statusMessage?: string) => {
     if (!activeWorkspaceId) return;
@@ -526,33 +543,26 @@ export default function App() {
     }
     setExportEnhanceSelectedPhotoId(photoId);
     setExportEnhanceSettings(cloneExportEnhanceSettings(exportEnhanceSettingsByPhoto[photoId] ?? defaultExportEnhanceSettings));
-    setRenderedPreviewStale();
   }, [exportEnhanceSelectedPhotoId, exportEnhanceSettings, exportEnhanceSettingsByPhoto]);
-
-  function setRenderedPreviewStale() {
-    setRenderedPreviewUrl((current) => {
-      if (current) window.URL.revokeObjectURL(current);
-      return null;
-    });
-  }
 
   function applyExportEnhanceSettings(nextSettings: ExportEnhanceSettings, pushUndo = true) {
     const targetId = exportEnhanceCurrentPhotoId;
     if (!targetId) return;
     const next = cloneExportEnhanceSettings(nextSettings);
+    enhanceSettingsRef.current = next;
     if (pushUndo) {
+      setExportEnhanceRedoStacks((current) => ({ ...current, [targetId]: [] }));
       setExportEnhanceUndoStacks((current) => ({
         ...current,
         [targetId]: [...(current[targetId] ?? []), cloneExportEnhanceSettings(exportEnhanceSettings)].slice(-50)
       }));
     }
     setExportEnhanceSettings(next);
-    setRenderedPreviewStale();
     setExportEnhanceSettingsByPhoto((current) => ({ ...current, [targetId]: next }));
   }
 
   function updateExportEnhanceSettings(nextSettings: ExportEnhanceSettings) {
-    applyExportEnhanceSettings(nextSettings, true);
+    applyExportEnhanceSettings(nextSettings, !enhanceGestureRef.current);
   }
 
   function undoExportEnhanceSettings() {
@@ -565,14 +575,55 @@ export default function App() {
       return;
     }
     setExportEnhanceUndoStacks((current) => ({ ...current, [targetId]: stack.slice(0, -1) }));
+    setExportEnhanceRedoStacks((current) => ({ ...current, [targetId]: [...(current[targetId] ?? []), cloneSettings(exportEnhanceSettings)] }));
     applyExportEnhanceSettings(previous, false);
     updateStatus("Undid last enhance adjustment.", "ok");
+  }
+
+  function beginEnhanceGesture() {
+    if (!exportEnhanceCurrentPhotoId || enhanceGestureRef.current) return;
+    enhanceGestureRef.current = { id: exportEnhanceCurrentPhotoId, before: cloneSettings(exportEnhanceSettings) };
+  }
+
+  function endEnhanceGesture() {
+    const gesture = enhanceGestureRef.current;
+    enhanceGestureRef.current = null;
+    if (!gesture || JSON.stringify(gesture.before) === JSON.stringify(enhanceSettingsRef.current)) return;
+    setExportEnhanceUndoStacks(current => ({ ...current, [gesture.id]: [...(current[gesture.id] ?? []), gesture.before].slice(-50) }));
+    setExportEnhanceRedoStacks(current => ({ ...current, [gesture.id]: [] }));
+  }
+
+  function redoExportEnhanceSettings() {
+    const id = exportEnhanceCurrentPhotoId;
+    if (!id) return;
+    const stack = exportEnhanceRedoStacks[id] ?? [];
+    if (!stack.length) return;
+    setExportEnhanceUndoStacks(current => ({ ...current, [id]: [...(current[id] ?? []), cloneSettings(exportEnhanceSettings)].slice(-50) }));
+    setExportEnhanceRedoStacks(current => ({ ...current, [id]: stack.slice(0, -1) }));
+    applyExportEnhanceSettings(stack[stack.length - 1], false);
+  }
+
+  function applyAdjustmentsToQueue(source: ExportEnhanceSettings, groups: AdjustmentGroup[]) {
+    const next = { ...exportEnhanceSettingsByPhoto };
+    const history = { ...exportEnhanceUndoStacks };
+    const redo = { ...exportEnhanceRedoStacks };
+    for (const id of exportQueueList) {
+      if (id === exportEnhanceCurrentPhotoId) continue;
+      const before = cloneSettings(next[id] ?? defaultSettings);
+      history[id] = [...(history[id] ?? []), before].slice(-50);
+      redo[id] = [];
+      next[id] = pasteSettings(before, source, groups);
+    }
+    setExportEnhanceSettingsByPhoto(next);
+    setExportEnhanceUndoStacks(history);
+    setExportEnhanceRedoStacks(redo);
+    updateStatus(`Applied adjustments to ${Math.max(0, exportQueueList.length - 1)} queued photos.`, "ok");
   }
 
   function resetExportEnhanceSettings() {
     const targetId = exportEnhanceCurrentPhotoId;
     if (!targetId) return;
-    applyExportEnhanceSettings(defaultExportEnhanceSettings, true);
+    applyExportEnhanceSettings(pasteSettings(defaultExportEnhanceSettings, exportEnhanceSettings, ["output"]), true);
     updateStatus("Reset enhance adjustments.", "ok");
   }
 
@@ -608,28 +659,6 @@ export default function App() {
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    if (activeTab !== "export-enhance" || !exportEnhanceSelectedPhotoId || styleMasksByPhoto[exportEnhanceSelectedPhotoId]) {
-      return;
-    }
-    let cancelled = false;
-    setIsLoadingStyleMasks(true);
-    fetchExportEnhanceStyleMasks(exportEnhanceSelectedPhotoId)
-      .then((payload) => {
-        if (cancelled) return;
-        setStyleMasksByPhoto((current) => ({ ...current, [payload.photoId]: payload }));
-      })
-      .catch((err) => {
-        if (!cancelled) updateStatus(err instanceof Error ? err.message : "Failed to load style masks", "warn");
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingStyleMasks(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, exportEnhanceSelectedPhotoId, styleMasksByPhoto, updateStatus]);
-
   async function onStartExportEnhance() {
     if (!exportQueueList.length) {
       updateStatus("Add photos to the export queue before Enhance & Export.", "warn");
@@ -646,10 +675,8 @@ export default function App() {
         selectedIds: exportQueueList,
         outputFolder: exportEnhanceOutputFolder,
         settings: exportEnhanceSettings,
-        settingsByPhoto: {
-          ...exportEnhanceSettingsByPhoto,
-          ...(exportEnhanceSelectedPhotoId ? { [exportEnhanceSelectedPhotoId]: exportEnhanceSettings } : {})
-        }
+        settingsByPhoto: Object.fromEntries(exportQueueList.map(id => [id,
+          id === exportEnhanceCurrentPhotoId ? exportEnhanceSettings : exportEnhanceSettingsByPhoto[id] ?? defaultExportEnhanceSettings]))
       });
       setExportEnhanceJob(job);
       updateStatus("Enhance & Export job started.", "ok");
@@ -669,65 +696,6 @@ export default function App() {
       updateStatus(err instanceof Error ? err.message : "Failed to cancel Enhance & Export", "error");
     }
   }
-
-  async function onRenderExportEnhancePreview(photoId: string) {
-    setIsRenderingPreview(true);
-    setRenderPreviewProgress(12);
-    setRenderPreviewStage("Preparing preview");
-    setPreviewError("");
-    updateStatus("Rendering enhance preview...", "busy");
-    const timer = window.setInterval(() => {
-      setRenderPreviewProgress((value) => {
-        if (value < 42) {
-          setRenderPreviewStage("Applying color adjustments");
-          return value + 6;
-        }
-        if (value < 76) {
-          setRenderPreviewStage(exportEnhanceSettings.aiDenoise ? "Running AI denoise" : exportEnhanceSettings.upscale ? "Running AI upscale" : "Rendering preview");
-          return value + 4;
-        }
-        if (value < 92) {
-          setRenderPreviewStage("Preparing image");
-          return value + 2;
-        }
-        return value;
-      });
-    }, 500);
-    try {
-      const blob = await renderExportEnhancePreview(photoId, exportEnhanceSettings);
-      const url = window.URL.createObjectURL(blob);
-      setRenderedPreviewUrl((current) => {
-        if (current) window.URL.revokeObjectURL(current);
-        return url;
-      });
-      setRenderPreviewProgress(100);
-      setRenderPreviewStage("Preview ready");
-      updateStatus("Enhance preview rendered.", "ok");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to render enhance preview";
-      setPreviewError(message);
-      updateStatus(message, "error");
-    } finally {
-      window.clearInterval(timer);
-      setIsRenderingPreview(false);
-    }
-  }
-
-  useEffect(() => {
-    setRenderedPreviewUrl((current) => {
-      if (current) window.URL.revokeObjectURL(current);
-      return null;
-    });
-    setPreviewError("");
-    setRenderPreviewProgress(0);
-    setRenderPreviewStage("");
-  }, [exportEnhanceSettings]);
-
-  useEffect(() => () => {
-    if (renderedPreviewUrl) {
-      window.URL.revokeObjectURL(renderedPreviewUrl);
-    }
-  }, [renderedPreviewUrl]);
 
   useEffect(() => {
     if (!exportEnhanceJob || !["queued", "running"].includes(exportEnhanceJob.status)) {
@@ -1247,23 +1215,28 @@ export default function App() {
         outputFolder={exportEnhanceOutputFolder}
         job={exportEnhanceJob}
         isStarting={isStartingExportEnhance}
-        renderedPreviewUrl={renderedPreviewUrl}
-        isRenderingPreview={isRenderingPreview}
-        renderPreviewProgress={renderPreviewProgress}
-        renderPreviewStage={renderPreviewStage}
-        previewError={previewError}
-        styleMasks={exportEnhanceSelectedPhotoId ? styleMasksByPhoto[exportEnhanceSelectedPhotoId] ?? null : null}
-        isLoadingStyleMasks={isLoadingStyleMasks}
         isPreviewOpen={isEnhancePreviewOpen}
         onPreviewOpenChange={setIsEnhancePreviewOpen}
         onSettingsChange={updateExportEnhanceSettings}
         canUndo={canUndoExportEnhance}
         onUndo={undoExportEnhanceSettings}
+        saveState={enhanceSaveState}
+        saveError={enhanceSaveError}
+        onRetrySave={() => {
+          if (!activeWorkspaceId) return;
+          pendingEnhanceSaveRef.current = { id: activeWorkspaceId, settings: exportEnhanceSettingsByPhoto };
+          setEnhanceSaveState("saving");
+          flushEnhanceSave();
+        }}
+        canRedo={Boolean(exportEnhanceCurrentPhotoId && exportEnhanceRedoStacks[exportEnhanceCurrentPhotoId]?.length)}
+        onRedo={redoExportEnhanceSettings}
+        onBeginAdjustment={beginEnhanceGesture}
+        onEndAdjustment={endEnhanceGesture}
+        onApplyToQueued={applyAdjustmentsToQueue}
         onReset={resetExportEnhanceSettings}
         onSelectPreviewPhoto={selectExportEnhancePhoto}
         onChooseFolder={() => void onChooseExportEnhanceFolder()}
         onOutputFolderChange={setExportEnhanceOutputFolder}
-        onRenderPreview={(photoId) => void onRenderExportEnhancePreview(photoId)}
         onStart={() => void onStartExportEnhance()}
         onCancel={() => void onCancelExportEnhance()}
         onClearQueue={clearExportQueue}

@@ -6,6 +6,8 @@ import type { ExportEnhanceSettings, LibraryFolder, LibraryPayload, Photo, Photo
 export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => void) {
   const [workspaces, setWorkspaces] = useState<PhotoWorkspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(null);
+  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
+  const libraryRequestRef = useRef(0);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
@@ -49,6 +51,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   const applyLibraryPayload = useCallback((data: LibraryPayload) => {
     const normalized = normalizeScores(data.photos);
     const nextWorkspaceId = data.activeWorkspace?.id ?? null;
+    setLoadedWorkspaceId(nextWorkspaceId);
 
     setWorkspaces(data.workspaces);
     setPhotos(normalized);
@@ -104,14 +107,15 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   }, [setActiveWorkspaceId, updateStatus]);
 
   const loadLibrary = useCallback(async (workspaceId = activeWorkspaceId) => {
+    const request = ++libraryRequestRef.current;
     setIsLibraryLoading(true);
     try {
-      applyLibraryPayload(await fetchWorkspaceLibrary(workspaceId));
+      const data = await fetchWorkspaceLibrary(workspaceId);
+      if (request === libraryRequestRef.current) applyLibraryPayload(data);
     } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Failed to load library", "error");
+      if (request === libraryRequestRef.current) updateStatus(err instanceof Error ? err.message : "Failed to load library", "error");
     } finally {
-      setIsLibraryReady(true);
-      setIsLibraryLoading(false);
+      if (request === libraryRequestRef.current) { setIsLibraryReady(true); setIsLibraryLoading(false); }
     }
   }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
@@ -126,15 +130,15 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
   }, [activeWorkspaceId, applyLibraryPayload, updateStatus]);
 
   const activateWorkspace = useCallback(async (workspaceId: string) => {
-    setActiveWorkspaceId(workspaceId);
+    const request = ++libraryRequestRef.current;
     setIsLibraryLoading(true);
     try {
-      applyLibraryPayload(await refreshLibrary(workspaceId));
+      const data = await refreshLibrary(workspaceId);
+      if (request === libraryRequestRef.current) applyLibraryPayload(data);
     } catch (err) {
-      updateStatus(err instanceof Error ? err.message : "Failed to sync workspace", "error");
+      if (request === libraryRequestRef.current) updateStatus(err instanceof Error ? err.message : "Failed to sync workspace", "error");
     } finally {
-      setIsLibraryReady(true);
-      setIsLibraryLoading(false);
+      if (request === libraryRequestRef.current) { setIsLibraryReady(true); setIsLibraryLoading(false); }
     }
   }, [applyLibraryPayload, setActiveWorkspaceId, updateStatus]);
 
@@ -150,7 +154,6 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
 
   const openFolderWorkspace = useCallback(async (rootPath: string) => {
     const workspace = await openWorkspace(rootPath);
-    setActiveWorkspaceId(workspace.id);
     await loadLibrary(workspace.id);
     return workspace;
   }, [loadLibrary, setActiveWorkspaceId]);
@@ -245,6 +248,7 @@ export function useLibrary(updateStatus: (text: string, tone?: StatusTone) => vo
     workspaces,
     activeWorkspace,
     activeWorkspaceId,
+    loadedWorkspaceId,
     setActiveWorkspaceId,
     photos,
     folders,
