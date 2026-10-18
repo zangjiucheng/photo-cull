@@ -7,7 +7,7 @@ from uuid import uuid4
 from flask import Blueprint, Response, abort, current_app, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from . import db, events, export_enhance, scoring, similarity, storage, editing, raw_pipeline
+from . import backup, db, events, export_enhance, scoring, similarity, storage, editing, raw_pipeline
 
 
 bp = Blueprint("api", __name__)
@@ -90,6 +90,49 @@ def create_workspace():
     except storage.InvalidWorkspaceError as exc:
         return error_response(str(exc), 400)
     return jsonify(workspace)
+
+
+@bp.route("/backup", methods=["POST"])
+def create_backup():
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(backup.create_backup(str(data.get("destination") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
+
+
+@bp.route("/backup/download", methods=["GET"])
+def download_backup():
+    # Browser mode has no save dialog on the server side; build the archive and stream it.
+    folder = os.path.join(os.path.dirname(db.get_config().db_path), "backups")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "photo-cull-backup.zip")
+    backup.create_backup(path)
+    return send_file(path, mimetype="application/zip", as_attachment=True, download_name="photo-cull-backup.zip")
+
+
+@bp.route("/backup/inspect", methods=["POST"])
+def inspect_backup():
+    try:
+        return jsonify(backup.inspect_backup(str((request.get_json(silent=True) or {}).get("path") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
+
+
+@bp.route("/backup/restore", methods=["POST"])
+def restore_backup():
+    try:
+        return jsonify(backup.restore_backup(str((request.get_json(silent=True) or {}).get("path") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
+
+
+@bp.route("/workspaces/<workspace_id>/relocate", methods=["POST"])
+def relocate_workspace(workspace_id):
+    try:
+        return jsonify(backup.relocate_workspace(workspace_id, str((request.get_json(silent=True) or {}).get("root_path") or "")))
+    except backup.BackupError as exc:
+        return error_response(str(exc), 400)
 
 
 @bp.route("/workspaces/<workspace_id>", methods=["DELETE"])

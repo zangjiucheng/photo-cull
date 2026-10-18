@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, fetchExportEnhanceJob, findSimilarPhotos, listExportEnhanceJobs, resumeExportEnhanceJob, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
+import { cancelExportEnhanceJob, createExportEnhanceJob, deletePhotos, relocateWorkspace, fetchExportEnhanceJob, findSimilarPhotos, listExportEnhanceJobs, resumeExportEnhanceJob, saveExportEnhanceSettings, saveExportQueue, updatePhotoOrientation, updatePhotoRating, updatePhotoScore } from "./api";
 import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
@@ -379,6 +379,20 @@ export default function App() {
       updateStatus(`Opened ${workspace.name}.`, "ok");
     } catch (err) {
       updateStatus(err instanceof Error ? err.message : "Failed to open folder", "error");
+    }
+  }
+
+  async function onRelocateWorkspace(workspaceId: string) {
+    try {
+      const selectedPath = window.aiCulling?.openFolder
+        ? await window.aiCulling.openFolder()
+        : window.prompt("Enter the folder's new path on this machine");
+      if (!selectedPath) return;
+      const workspace = await relocateWorkspace(workspaceId, selectedPath);
+      await library.loadLibrary();
+      updateStatus(`Reconnected ${workspace.name}.`, "ok");
+    } catch (err) {
+      updateStatus(err instanceof Error ? err.message : "Failed to reconnect the folder", "error");
     }
   }
 
@@ -1348,6 +1362,9 @@ export default function App() {
           }}
           onWorkspaceDelete={(workspaceId) => {
             void onDeleteWorkspace(workspaceId);
+          }}
+          onWorkspaceRelocate={(workspaceId) => {
+            void onRelocateWorkspace(workspaceId);
           }}
         />
         <ShortcutHelpDialog

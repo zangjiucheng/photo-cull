@@ -236,6 +236,8 @@ def row_to_workspace(row: sqlite3.Row) -> dict[str, Any]:
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
         "lastScannedAt": row["last_scanned_at"],
+        # False when the folder moved or its disk is not mounted; the app offers to reconnect it.
+        "folderFound": os.path.isdir(row["root_path"]),
     }
 
 
@@ -291,6 +293,10 @@ def upsert_workspace(workspace_id: str, name: str, root_path: str) -> sqlite3.Ro
     with connect() as conn:
         row = conn.execute("SELECT * FROM workspaces WHERE root_path = ?", (root_path,)).fetchone()
         if row is None:
+            # Ids derive from the first root path; a workspace relocated away from this path may
+            # still own the id, so pick a fresh one instead of colliding.
+            if conn.execute("SELECT 1 FROM workspaces WHERE id = ?", (workspace_id,)).fetchone():
+                workspace_id = f"{workspace_id}-{int(now * 1000) % 1000000:06d}"
             conn.execute(
                 """
                 INSERT INTO workspaces (id, name, root_path, created_at, updated_at, last_scanned_at)

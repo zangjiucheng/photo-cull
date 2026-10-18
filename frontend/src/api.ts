@@ -308,6 +308,12 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body)
 });
 
+/** Point a workspace at the folder its photos moved to; the backend checks a sample first. */
+export async function relocateWorkspace(workspaceId: string, rootPath: string): Promise<PhotoWorkspace> {
+  const payload = await requestJson<{ workspace: PhotoWorkspace }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/relocate`, jsonInit("POST", { root_path: rootPath }), "Failed to reconnect the folder");
+  return payload.workspace;
+}
+
 export async function listSnapshots(photoId: string): Promise<PhotoSnapshot[]> {
   const payload = await requestJson<{ snapshots: PhotoSnapshot[] }>(`/api/photos/${encodeURIComponent(photoId)}/snapshots`, undefined, "Failed to load versions");
   return payload.snapshots;

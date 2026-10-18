@@ -69,6 +69,9 @@ function configureApplicationMenu() {
             targetWindow?.webContents.send("save-workspace-file-request");
           },
         },
+        { type: "separator" },
+        { label: "Back Up Library...", click: () => void backupLibrary() },
+        { label: "Restore Library...", click: () => void restoreLibrary() },
         ...(process.platform === "darwin" ? [] : [{ type: "separator" }, { role: "quit", label: "Exit" }]),
       ],
     },
@@ -115,6 +118,80 @@ function configureApplicationMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function backendJson(pathname, body) {
+  const response = await fetch(`http://${backendHost}:${backendPort}${pathname}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+function describeBackup(manifest) {
+  const c = manifest.counts || {};
+  const when = manifest.createdAt ? new Date(manifest.createdAt * 1000).toLocaleString() : "an unknown date";
+  return [
+    `Made ${when} by version ${manifest.appVersion || "unknown"}.`,
+    `${c.workspaces ?? 0} workspaces, ${c.photos ?? 0} photos, ${c.recipes ?? 0} edits, ${c.presets ?? 0} presets, ${c.snapshots ?? 0} versions.`,
+    "Original photos are not part of a backup; workspaces point at their folders.",
+  ].join("\n");
+}
+
+// Library backups: a consistent copy of the database plus a manifest, never the photos.
+async function backupLibrary() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: "Back Up Library",
+    defaultPath: path.join(app.getPath("documents"), `Photo Cull Backup ${stamp}.zip`),
+    filters: [{ name: "Photo Cull backup", extensions: ["zip"] }],
+  });
+  if (result.canceled || !result.filePath) return;
+  try {
+    const manifest = await backendJson("/api/backup", { destination: result.filePath });
+    await dialog.showMessageBox(mainWindow, { type: "info", message: "Library backed up.", detail: `${describeBackup(manifest)}\n\nSaved to ${result.filePath}` });
+  } catch (error) {
+    dialog.showErrorBox("Backup failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function restoreLibrary() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Restore Library",
+    properties: ["openFile"],
+    filters: [{ name: "Photo Cull backup", extensions: ["zip"] }],
+  });
+  const file = result.filePaths[0];
+  if (result.canceled || !file) return;
+  try {
+    const manifest = await backendJson("/api/backup/inspect", { path: file });
+    const missing = manifest.missingFolders
+      ? `\n\n${manifest.missingFolders} workspace folder(s) are not on this computer; you can reconnect them from the start screen.`
+      : "";
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Restore", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "Replace the current library with this backup?",
+      detail: `${describeBackup(manifest)}${missing}\n\nThe current library is kept as a copy next to it.`,
+    });
+    if (response !== 0) return;
+    const restored = await backendJson("/api/backup/restore", { path: file });
+    mainWindow?.webContents.reload();
+    await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      message: "Library restored.",
+      detail: restored.previousLibrary ? `The previous library was saved as ${restored.previousLibrary}.` : "",
+    });
+  } catch (error) {
+    dialog.showErrorBox("Restore failed", error instanceof Error ? error.message : String(error));
+  }
 }
 
 function prepareDbPath() {
@@ -392,6 +469,7 @@ function startBackend() {
       UPLOAD_FOLDER: uploadFolder,
       AI_RUNTIME_MODEL_DIR: aiRuntimeModelDir(),
       FLASK_DEBUG: "0",
+      AI_CULLING_APP_VERSION: app.getVersion(),
       PYTHONUNBUFFERED: "1",
     },
     stdio: isPackaged && backendLogFd ? ["ignore", backendLogFd, backendLogFd] : "inherit",

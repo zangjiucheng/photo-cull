@@ -272,3 +272,18 @@
 .launcher-recent-delete:hover { color: var(--danger); }
 
 .launcher-empty { color: var(--text-3); font-size: var(--fs-sm); }
+
+/* A workspace whose folder moved or whose disk is not mounted. */
+.launcher-recent li.missing .launcher-recent-open strong { color: var(--text-2); }
+.launcher-recent li.missing .launcher-recent-open span { color: var(--danger); }
+
+.launcher-recent-locate {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.launcher-recent-locate:hover { background: var(--surface-2); }

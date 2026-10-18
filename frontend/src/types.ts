@@ -60,6 +60,8 @@ export interface PhotoWorkspace {
   createdAt: number;
   updatedAt: number;
   lastScannedAt: number | null;
+  /** False when the folder moved or its disk is not mounted. */
+  folderFound?: boolean;
 }
 
 export interface LibraryPayload {

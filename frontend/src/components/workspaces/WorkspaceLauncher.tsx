@@ -10,6 +10,7 @@ interface WorkspaceLauncherProps {
   onOpenWorkspaceFile: () => void;
   onWorkspaceChange: (workspaceId: string) => void;
   onWorkspaceDelete: (workspaceId: string) => void;
+  onWorkspaceRelocate: (workspaceId: string) => void;
 }
 
 export function WorkspaceLauncher({
@@ -20,7 +21,8 @@ export function WorkspaceLauncher({
   onOpenFolder,
   onOpenWorkspaceFile,
   onWorkspaceChange,
-  onWorkspaceDelete
+  onWorkspaceDelete,
+  onWorkspaceRelocate
 }: WorkspaceLauncherProps) {
   return (
     <main className="launcher">
@@ -49,11 +51,21 @@ export function WorkspaceLauncher({
           ) : workspaces.length ? (
             <ul>
               {workspaces.map((workspace) => (
-                <li key={workspace.id}>
+                <li key={workspace.id} className={workspace.folderFound === false ? "missing" : undefined}>
                   <button className="launcher-recent-open" onClick={() => onWorkspaceChange(workspace.id)}>
                     <strong>{workspace.name}</strong>
-                    <span>{workspace.rootPath}</span>
+                    <span>{workspace.folderFound === false ? `Folder not found: ${workspace.rootPath}` : workspace.rootPath}</span>
                   </button>
+                  {workspace.folderFound === false ? (
+                    <button
+                      className="launcher-recent-locate"
+                      type="button"
+                      onClick={() => onWorkspaceRelocate(workspace.id)}
+                      title="Choose where this folder is now"
+                    >
+                      Locate…
+                    </button>
+                  ) : null}
                   <button
                     className="launcher-recent-delete"
                     type="button"
