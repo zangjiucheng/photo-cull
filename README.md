@@ -20,7 +20,7 @@
   <a href="docs/getting-started.md">Docs</a>
 </p>
 
-[![Watch the 40-second film](site/assets/promo-readme.jpg)](https://zangjiucheng.github.io/photo-cull/#film)
+[![Watch the one-minute film](site/assets/promo-readme.jpg)](https://zangjiucheng.github.io/photo-cull/#film)
 
 ## Highlights
 
