@@ -52,8 +52,10 @@ def test_interrupted_export_resumes_without_rewriting_finished_photos(tmp_path, 
 
     monkeypatch.setattr(first._writer, "write", write_until_crash)
     job = first.create([row["id"] for row in rows], str(out), export_enhance.EnhanceSettings(recipe_version=2))
+    # Wait for a.jpg to be recorded as done, not just handed to the writer: on a slow runner the
+    # file write and database update can take longer than any fixed sleep.
     deadline = time.time() + 30
-    while db.fetch_export_job(job.id)[0]["status"] != "running" or len(written) < 1:
+    while not any(item["name"] == "a.jpg" and item["status"] == "done" for item in db.fetch_export_job(job.id)[1]):
         assert time.time() < deadline
         time.sleep(0.02)
     time.sleep(0.2)
