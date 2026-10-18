@@ -11,6 +11,9 @@ const DEFAULT_CHROME = {
   linux: "/usr/bin/google-chrome",
 };
 const LIMIT_MS = 4000;
+// Under software Direct3D (WARP, as in a VM without GPU passthrough) the single-pass shader took
+// ~1.4 s per redraw, enough for the GPU watchdog to reset the device; the two-pass one takes ~0.13 s.
+const REDRAW_LIMIT_MS = 600;
 
 async function main() {
   const bundle = await esbuild.build({
@@ -69,6 +72,7 @@ async function main() {
     if (errors.length) throw new Error(`Page errors: ${errors.join("; ")}`);
     if (result.lost) throw new Error("The WebGL context was lost while drawing the preview.");
     if (result.pixel.every((value) => value === 0)) throw new Error("The preview drew only black.");
+    if (result.redrawMs > REDRAW_LIMIT_MS) throw new Error(`A preview redraw took ${result.redrawMs.toFixed(0)} ms (limit ${REDRAW_LIMIT_MS} ms).`);
     if (result.firstDrawMs > LIMIT_MS) throw new Error(`The first preview draw took ${result.firstDrawMs.toFixed(0)} ms (limit ${LIMIT_MS} ms).`);
   } finally {
     await browser.close();
