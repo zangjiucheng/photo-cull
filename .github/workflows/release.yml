@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  # Nightly: a prerelease build of main every night (skipped when nothing changed), or on demand
+  # for any branch with `gh workflow run release.yml --ref <branch>`.
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
   # Dry run: pull requests that touch packaging build every installer without publishing.
   pull_request:
     paths:
@@ -17,7 +22,44 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      nightly: ${{ steps.pick.outputs.nightly }}
+      publish: ${{ steps.pick.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(node -p 'require("./frontend/package.json").version')
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              version=${GITHUB_REF_NAME#v}
+              nightly=false; [[ "$version" == *-nightly.* ]] && nightly=true
+              publish=true ;;
+            schedule|workflow_dispatch)
+              # Nightlies sort after the current release and before the next one: 0.3.1 -> 0.3.2-nightly.<UTC time>.
+              IFS=. read -r major minor patch <<< "${base%%-*}"
+              version="$major.$minor.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)"
+              nightly=true; publish=true
+              if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+                last=$(gh release list --limit 20 --json tagName,isPrerelease -q '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))][0].tagName')
+                if [ -n "$last" ] && [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$last" -q .sha)" = "$GITHUB_SHA" ]; then
+                  echo "main has not changed since $last"; publish=skip
+                fi
+              fi ;;
+            *)
+              version=""; nightly=false; publish=false ;;
+          esac
+          echo "version=$version nightly=$nightly publish=$publish"
+          { echo "version=$version"; echo "nightly=$nightly"; echo "publish=$publish"; } >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
+    if: needs.version.outputs.publish != 'skip'
     name: build (${{ matrix.name }})
     strategy:
       fail-fast: false
@@ -57,11 +99,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          TAG=${GITHUB_REF_NAME#v}
-          cd frontend && npm version "$TAG" --no-git-tag-version --allow-same-version
+      - name: Set version
+        if: needs.version.outputs.version != ''
+        run: cd frontend && npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Validate backend
         run: |
@@ -113,9 +153,12 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [version, build]
+    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -126,8 +169,30 @@ jobs:
         working-directory: dist
         run: sha256sum *.dmg *.zip *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt
 
+      - name: Write nightly notes
+        if: needs.version.outputs.nightly == 'true'
+        run: |
+          {
+            echo "Nightly build of \`${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}\` at ${GITHUB_SHA::7}, built $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            echo "Less tested than a release: back up your library first. Choose the Nightly channel in Settings to get these as updates."
+          } > notes.md
+
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.version.outputs.nightly == 'true' && format('Nightly {0}', env.VERSION) || format('v{0}', env.VERSION) }}
+          prerelease: ${{ needs.version.outputs.nightly == 'true' }}
+          make_latest: ${{ needs.version.outputs.nightly == 'true' && 'false' || 'true' }}
+          body_path: ${{ needs.version.outputs.nightly == 'true' && 'notes.md' || '' }}
+          generate_release_notes: ${{ needs.version.outputs.nightly != 'true' }}
           files: dist/*
-          generate_release_notes: true
+
+      - name: Keep the five newest nightlies
+        if: needs.version.outputs.nightly == 'true'
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease,createdAt \
+            -q '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
+            while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes; done

@@ -14,6 +14,9 @@ const electronBuilderBin = path.join(
 );
 
 fs.mkdirSync(electronCache, { recursive: true });
+const { writeBuildInfo, describeBuild } = require("../electron/build-info.cjs");
+const buildInfo = writeBuildInfo(repoRoot);
+console.log(`Packaging ${describeBuild(require("../package.json").version, buildInfo)}`);
 fs.mkdirSync(electronBuilderCache, { recursive: true });
 
 const result = spawnSync(electronBuilderBin, process.argv.slice(2), {

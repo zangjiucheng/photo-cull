@@ -61,6 +61,7 @@ Removing a workspace from the recent list, or removing photos from a workspace i
 - **Update** downloads the update for your platform and verifies it against `SHA256SUMS.txt`. Then choose **Restart Now** or **Install on Quit**.
   - macOS: the zip for your architecture replaces the app (the version inside is checked first; if replacing fails, the previous version is restored). This needs the app in a writable folder such as `/Applications`; when it runs from the DMG, the release page opens instead.
   - Windows: the new installer runs silently after the app quits and starts the app again.
+- **Settings → Updates** chooses the channel: **Stable** (releases only) or **Nightly** (a build of the latest code each night; less tested, so back up your library first). It also shows the exact version, commit and build time, with **Copy Version** for bug reports. A nightly user switching back to Stable moves on at the next stable release.
 - Set `AI_CULLING_DISABLE_UPDATES=1` in the app's environment to turn update checks off.
 - v0.2.0 and earlier have no updater; install v0.2.1 or later manually once.
 

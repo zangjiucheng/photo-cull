@@ -4,18 +4,20 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { compareVersions, normalizeAssetName, parseChecksums, selectUpdateAsset } = require("./update-utils.cjs");
+const { compareVersions, normalizeAssetName, parseChecksums, selectChannelRelease, selectUpdateAsset } = require("./update-utils.cjs");
 
 // Builds are not code signed, so Squirrel.Mac (electron-updater) cannot be used. The update package
 // is downloaded and checked against the published SHA256SUMS.txt, then installed once this process
 // exits: on macOS a small shell script swaps in the .app from the release zip; on Windows the NSIS
 // installer runs silently and relaunches the app.
 const releaseRepo = "zangjiucheng/photo-cull";
-const latestReleaseUrl = `https://api.github.com/repos/${releaseRepo}/releases/latest`;
+const releasesUrl = `https://api.github.com/repos/${releaseRepo}/releases?per_page=30`;
 const startupCheckDelayMs = 5000;
 const isWindows = process.platform === "win32";
 
 let getWindow = () => null;
+// "stable" or "nightly" (prerelease builds published by the Release workflow every night).
+let getChannel = () => "stable";
 let checking = false;
 let downloading = false;
 // Set once an update has been downloaded and extracted; installed on restart or on the next quit.
@@ -132,13 +134,17 @@ function runChecked(command, args) {
   return result.stdout;
 }
 
-async function fetchLatestRelease() {
-  const release = await fetchJson(latestReleaseUrl);
+async function fetchChannelRelease(channel) {
+  const release = selectChannelRelease(await fetchJson(releasesUrl), channel);
+  if (!release) {
+    throw new Error(`No ${channel} release is published yet.`);
+  }
   const version = String(release.tag_name || "").replace(/^v/, "");
   return {
     version,
     notes: String(release.body || "").trim(),
     url: release.html_url,
+    prerelease: Boolean(release.prerelease),
     asset: selectUpdateAsset(release.assets, process.platform, process.arch),
     checksums: (release.assets || []).find((asset) => asset.name === "SHA256SUMS.txt") || null,
   };
@@ -286,11 +292,15 @@ async function checkForUpdates({ manual = false } = {}) {
   let userStartedUpdate = false;
   try {
     const currentVersion = app.getVersion();
-    const release = await fetchLatestRelease();
-    writeUpdaterLog(`current=${currentVersion} latest=${release.version}`);
+    const channel = getChannel();
+    const release = await fetchChannelRelease(channel);
+    writeUpdaterLog(`channel=${channel} current=${currentVersion} latest=${release.version}`);
     if (compareVersions(release.version, currentVersion) <= 0) {
       if (manual) {
-        await showMessage({ type: "info", message: "You're up to date.", detail: `AI Photo Culling ${currentVersion} is the latest version.` });
+        const detail = channel === "stable" && compareVersions(currentVersion, release.version) > 0
+          ? `You have nightly ${currentVersion}; the Stable channel continues from the next stable release after it.`
+          : `AI Photo Culling ${currentVersion} is the latest ${channel} version.`;
+        await showMessage({ type: "info", message: "You're up to date.", detail });
       }
       return;
     }
@@ -306,7 +316,7 @@ async function checkForUpdates({ manual = false } = {}) {
       buttons: canInstall ? ["Update", "Later", "Skip This Version"] : ["Open Release Page", "Later", "Skip This Version"],
       defaultId: 0,
       cancelId: 1,
-      message: `AI Photo Culling ${release.version} is available.`,
+      message: `AI Photo Culling ${release.version} is available${release.prerelease ? " (nightly build)" : ""}.`,
       detail: [
         `You have ${currentVersion}.`,
         notes,
@@ -341,6 +351,7 @@ async function checkForUpdates({ manual = false } = {}) {
 
 function initUpdater(options) {
   getWindow = options.getWindow;
+  getChannel = options.getChannel || getChannel;
   if (!updatesSupported()) {
     return;
   }
@@ -353,4 +364,5 @@ function initUpdater(options) {
 module.exports = {
   checkForUpdates,
   initUpdater,
+  updatesSupported,
 };

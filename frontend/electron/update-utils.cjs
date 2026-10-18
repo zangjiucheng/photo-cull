@@ -35,6 +35,24 @@ function compareVersions(a, b) {
   return left.prerelease < right.prerelease ? -1 : 1;
 }
 
+// The release to offer on a channel. Stable follows GitHub's "latest" release; nightly takes the
+// newest of every published release, so a nightly user moves on to the next stable once it ships.
+function selectChannelRelease(releases, channel) {
+  let best = null;
+  for (const release of releases || []) {
+    if (release.draft || !parseVersion(release.tag_name)) {
+      continue;
+    }
+    if (channel !== "nightly" && release.prerelease) {
+      continue;
+    }
+    if (!best || compareVersions(release.tag_name, best.tag_name) > 0) {
+      best = release;
+    }
+  }
+  return best;
+}
+
 // GitHub rewrites spaces in uploaded asset names to dots, while shasum prints the local file name.
 function normalizeAssetName(name) {
   return String(name || "").trim().replace(/\s+/g, ".");
@@ -70,6 +88,7 @@ module.exports = {
   compareVersions,
   normalizeAssetName,
   parseChecksums,
+  selectChannelRelease,
   selectUpdateAsset,
   selectZipAsset,
 };

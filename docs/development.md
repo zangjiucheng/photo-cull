@@ -83,6 +83,18 @@ CI (`.github/workflows/ci.yml`) runs the backend tests, frontend tests, and a pr
 
 The release workflow (`.github/workflows/release.yml`) runs on `v*` tags. A matrix job builds each platform in parallel: it sets the app version from the tag, runs the tests, builds the macOS DMG and update zip or the Windows NSIS installer, and smoke-tests the bundled backend by starting it and calling its API. A final job collects every artifact, writes one `SHA256SUMS.txt`, and publishes the GitHub Release with generated notes. Pull requests that touch packaging run the same builds as a dry run without publishing. Installed apps pick up the new release through the in-app updater, which needs the platform's package and `SHA256SUMS.txt`.
 
+### Nightly builds
+
+The same workflow publishes a **nightly** prerelease of `main` every day at 07:00 UTC, unless `main` has not changed since the last one. To build any branch on demand (for example to try it on Windows without a local build):
+
+```bash
+gh workflow run release.yml --ref <branch>
+```
+
+Nightlies are versioned after the current release, e.g. `0.3.2-nightly.202610181530` after `0.3.1`, so they sort before the next real release. They are marked as prereleases, never become GitHub's "latest" release, and only the five newest are kept. Apps on the **Nightly** update channel (Settings → Updates) install them; Stable users never see them.
+
+Every package records the commit and build time in `electron/build-info.json` (written by `scripts/package-electron.cjs`); Settings and About show them, e.g. `0.3.1 (a1b2c3d, 2026-10-18 15:30 UTC)`.
+
 Builds are not code signed: no Apple Developer ID or notarization, and no Windows Authenticode certificate.
 
 ## Website

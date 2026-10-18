@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -14,7 +14,8 @@ const {
   describe: describePython,
   systemTar,
 } = require("./python-runtime.cjs");
-const { checkForUpdates, initUpdater } = require("./updater.cjs");
+const { checkForUpdates, initUpdater, updatesSupported } = require("./updater.cjs");
+const { describeBuild, readBuildInfo } = require("./build-info.cjs");
 
 const appName = "AI Photo Culling";
 app.setName(appName);
@@ -56,7 +57,7 @@ function configureApplicationMenu() {
     ...(process.platform === "darwin" ? [{
       label: appName,
       submenu: [
-        { role: "about", label: `About ${appName}` },
+        { label: `About ${appName}`, click: () => void showAbout() },
         { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
         { type: "separator" },
         { label: "Settings...", accelerator: "Cmd+,", click: openSettings },
@@ -130,6 +131,8 @@ function configureApplicationMenu() {
       label: "Help",
       submenu: [
         { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
+        { type: "separator" },
+        { label: `About ${appName}`, click: () => void showAbout() },
       ],
     }]),
   ];
@@ -152,6 +155,48 @@ function readSettings() {
   } catch {
     return { pythonPath: null };
   }
+}
+
+// A nightly build stays on nightlies until the user picks a channel.
+function updateChannel() {
+  const chosen = readSettings().updateChannel;
+  if (chosen === "stable" || chosen === "nightly") return chosen;
+  return app.getVersion().includes("-nightly") ? "nightly" : "stable";
+}
+
+let cachedBuildInfo = null;
+function buildInfo() {
+  cachedBuildInfo ||= readBuildInfo(path.resolve(__dirname, "..", ".."));
+  return cachedBuildInfo;
+}
+
+function versionLabel() {
+  return describeBuild(app.getVersion(), buildInfo());
+}
+
+async function showAbout() {
+  const options = {
+    type: "info",
+    buttons: ["OK", "Copy Version"],
+    defaultId: 0,
+    message: appName,
+    detail: `Version ${versionLabel()}\nUpdate channel: ${updateChannel()}`,
+  };
+  const { response } = await (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
+  if (response === 1) clipboard.writeText(versionLabel());
+}
+
+function updateSettings() {
+  const info = buildInfo();
+  return {
+    channel: updateChannel(),
+    version: app.getVersion(),
+    commit: info.commit,
+    dirty: Boolean(info.dirty),
+    builtAt: info.builtAt,
+    label: versionLabel(),
+    supported: updatesSupported(),
+  };
 }
 
 function writeSettings(updates) {
@@ -756,7 +801,7 @@ async function createWindow() {
 
   await win.loadURL(`http://${backendHost}:${backendPort}`);
   publishAiRuntimeStatus();
-  initUpdater({ getWindow: () => mainWindow });
+  initUpdater({ getWindow: () => mainWindow, getChannel: updateChannel });
 }
 
 ipcMain.handle("open-folder", async () => {
@@ -837,6 +882,19 @@ ipcMain.handle("ai-runtime-status", async () => aiRuntimePublicStatus());
 ipcMain.handle("install-ai-runtime", async () => installAiRuntime());
 
 ipcMain.handle("get-runtime-settings", async () => runtimeSettings());
+
+ipcMain.handle("get-update-settings", async () => updateSettings());
+
+ipcMain.handle("set-update-channel", async (_event, channel) => {
+  if (channel !== "stable" && channel !== "nightly") throw new Error(`Unknown update channel ${channel}`);
+  writeSettings({ updateChannel: channel });
+  return updateSettings();
+});
+
+ipcMain.handle("check-for-updates", async () => {
+  await checkForUpdates({ manual: true });
+  return updateSettings();
+});
 
 ipcMain.handle("check-python", async (_event, command) => checkPython(command || null));
 

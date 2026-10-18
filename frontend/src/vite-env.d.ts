@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { AiRuntimeStatus, PythonCheck, RuntimeSettings } from "./types";
+import type { AiRuntimeStatus, PythonCheck, RuntimeSettings, UpdateChannel, UpdateSettings } from "./types";
 
 declare global {
   interface Window {
@@ -18,6 +18,9 @@ declare global {
       checkPython: (command: string | null) => Promise<PythonCheck>;
       setRuntimePython: (command: string | null) => Promise<RuntimeSettings>;
       choosePython: () => Promise<string | null>;
+      getUpdateSettings: () => Promise<UpdateSettings>;
+      setUpdateChannel: (channel: UpdateChannel) => Promise<UpdateSettings>;
+      checkForUpdates: () => Promise<UpdateSettings>;
       onOpenSettingsRequest: (callback: () => void) => () => void;
     };
   }

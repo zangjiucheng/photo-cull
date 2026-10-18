@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { compareVersions, parseChecksums, selectUpdateAsset, selectZipAsset } = require("./update-utils.cjs");
+const { compareVersions, parseChecksums, selectChannelRelease, selectUpdateAsset, selectZipAsset } = require("./update-utils.cjs");
 
 describe("compareVersions", () => {
   it("orders semantic versions and ignores the tag prefix", () => {
@@ -19,6 +19,30 @@ describe("compareVersions", () => {
 
   it("never reports an update for unparseable versions", () => {
     expect(compareVersions("nightly", "0.2.0")).toBe(0);
+  });
+});
+
+describe("selectChannelRelease", () => {
+  const releases = [
+    { tag_name: "v0.3.2-nightly.202610190700", prerelease: true },
+    { tag_name: "v0.3.2-nightly.202610180700", prerelease: true },
+    { tag_name: "v0.3.1", prerelease: false },
+    { tag_name: "v0.4.0", prerelease: false, draft: true },
+  ];
+
+  it("offers stable users only full releases", () => {
+    expect(selectChannelRelease(releases, "stable").tag_name).toBe("v0.3.1");
+  });
+
+  it("offers nightly users the newest build, and the next stable once it ships", () => {
+    expect(selectChannelRelease(releases, "nightly").tag_name).toBe("v0.3.2-nightly.202610190700");
+    const shipped = [{ tag_name: "v0.3.2", prerelease: false }, ...releases];
+    expect(selectChannelRelease(shipped, "nightly").tag_name).toBe("v0.3.2");
+  });
+
+  it("orders nightlies by their timestamp", () => {
+    expect(compareVersions("0.3.2-nightly.202610190700", "0.3.2-nightly.202610182359")).toBeGreaterThan(0);
+    expect(compareVersions("0.3.2-nightly.202610190700", "0.3.1")).toBeGreaterThan(0);
   });
 });
 

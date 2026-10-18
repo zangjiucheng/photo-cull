@@ -198,6 +198,21 @@ export interface RuntimeSettings {
   installedWith: { command: string; version: string } | null;
 }
 
+export type UpdateChannel = "stable" | "nightly";
+
+export interface UpdateSettings {
+  channel: UpdateChannel;
+  version: string;
+  commit: string | null;
+  /** Built from a working tree with uncommitted changes. */
+  dirty: boolean;
+  builtAt: string | null;
+  /** "0.3.1 (a1b2c3d, 2026-10-18 15:30 UTC)" */
+  label: string;
+  /** False in development builds, which never update themselves. */
+  supported: boolean;
+}
+
 export interface PythonCheck {
   command: string | null;
   version: string | null;

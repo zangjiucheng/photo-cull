@@ -1,6 +1,7 @@
 import type { AiRuntimeStatus } from "../../types";
 import { Button } from "../ui/button";
 import { PythonSettings } from "./PythonSettings";
+import { UpdateSettings } from "./UpdateSettings";
 
 interface SettingsWorkspaceProps {
   aiRuntimeStatus: AiRuntimeStatus | null;
@@ -69,6 +70,8 @@ export function SettingsWorkspace({
       </section>
 
       <PythonSettings aiRuntimeStatus={aiRuntimeStatus} onReinstall={onInstallAiRuntime} />
+
+      <UpdateSettings />
 
       <section className="debug-section">
         <div className="debug-section-head">
