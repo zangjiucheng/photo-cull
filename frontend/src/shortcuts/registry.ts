@@ -1,3 +1,4 @@
+import { modLabel } from "../lib/platform";
 import type { ShortcutDefinition, ShortcutScope } from "./types";
 
 export const shortcutRegistry: ShortcutDefinition[] = [
@@ -8,8 +9,8 @@ export const shortcutRegistry: ShortcutDefinition[] = [
     id: `global.switchTab${index + 1}`,
     scope: "global" as const,
     key: String(index + 1),
-    metaKey: true,
-    label: `Cmd+${index + 1}`,
+    modKey: true,
+    label: `${modLabel}+${index + 1}`,
     description: `Switch to ${label}`,
     category: "Global" as const
   })),
@@ -29,9 +30,9 @@ export const shortcutRegistry: ShortcutDefinition[] = [
   { id: "lightbox.next", scope: "lightbox", key: "ArrowRight", label: "→", description: "Next similar photo", category: "Lightbox" },
 
   { id: "review.toggleQueue", scope: "review", key: "q", label: "Q", description: "Toggle export queue", category: "Review" },
-  { id: "review.zoomIn", scope: "review", key: "=", metaKey: true, label: "Cmd+=", description: "Zoom in", category: "Review", allowRepeat: true },
-  { id: "review.zoomOut", scope: "review", key: "-", metaKey: true, label: "Cmd+-", description: "Zoom out", category: "Review", allowRepeat: true },
-  { id: "review.resetZoom", scope: "review", key: "0", metaKey: true, label: "Cmd+0", description: "Reset zoom", category: "Review" }
+  { id: "review.zoomIn", scope: "review", key: "=", modKey: true, label: `${modLabel}+=`, description: "Zoom in", category: "Review", allowRepeat: true },
+  { id: "review.zoomOut", scope: "review", key: "-", modKey: true, label: `${modLabel}+-`, description: "Zoom out", category: "Review", allowRepeat: true },
+  { id: "review.resetZoom", scope: "review", key: "0", modKey: true, label: `${modLabel}+0`, description: "Reset zoom", category: "Review" }
 ];
 
 export function shortcutsForScopes(scopes: ShortcutScope[]): ShortcutDefinition[] {

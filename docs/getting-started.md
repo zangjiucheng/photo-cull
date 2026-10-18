@@ -1,20 +1,30 @@
 # Getting started
 
-AI Photo Culling runs locally on your Mac. Photos are indexed in place, edits are stored as recipes in a local database, and export never overwrites originals.
+AI Photo Culling runs locally on your Mac or Windows PC. Photos are indexed in place, edits are stored as recipes in a local database, and export never overwrites originals.
 
 ## Requirements
 
-- macOS on Apple Silicon (arm64). Intel Macs, Windows, and Linux don't have verified builds yet.
+- macOS on Apple Silicon (arm64), or Windows 10/11 (x64; Windows on ARM runs it through x64 emulation). Intel Macs and Linux don't have builds yet.
 - Nothing else for basic use: the Python backend for scoring, RAW editing, and export is bundled in the app.
 - Optional: a network connection to install the AI runtime (extra scoring models and CLIP similarity) from the **Debug** workspace.
 
 ## Install
 
-1. Download the `.dmg` from the [latest release](https://github.com/zangjiucheng/photo-cull/releases/latest). Each release also publishes `SHA256SUMS.txt`; you can check the download with `shasum -a 256 <file>.dmg`.
+Every release publishes the installers and a `SHA256SUMS.txt` you can check downloads against.
+
+### macOS
+
+1. Download the `.dmg` from the [latest release](https://github.com/zangjiucheng/photo-cull/releases/latest) (check it with `shasum -a 256 <file>.dmg`).
 2. Open the DMG and drag **AI Photo Culling.app** into **Applications**.
 3. Eject the DMG and launch the app from Applications. Running it from Applications (not from the DMG) is what lets in-app updates replace it later.
 
-## First launch and Gatekeeper
+### Windows
+
+1. Download `AI.Photo.Culling.Setup.<version>.exe` from the [latest release](https://github.com/zangjiucheng/photo-cull/releases/latest) (check it with `certutil -hashfile <file>.exe SHA256` in Command Prompt).
+2. Run it. The installer installs for the current user only, needs no administrator rights, and adds Start menu and desktop shortcuts.
+3. Uninstall from **Settings → Apps → Installed apps**.
+
+## First launch and Gatekeeper (macOS)
 
 Release builds are not signed with an Apple Developer ID and are not notarized, so macOS may refuse to open the app the first time ("cannot be opened", "Apple could not verify..." or "is damaged").
 
@@ -31,6 +41,10 @@ xattr -dr com.apple.quarantine "/Applications/AI Photo Culling.app"
 
 Only do this for a copy you downloaded from this repository's Releases page.
 
+## First launch and SmartScreen (Windows)
+
+The installer is not code signed yet, so Microsoft Defender SmartScreen may show "Windows protected your PC" the first time. Click **More info**, check that the file came from this repository's Releases page, then click **Run anyway**.
+
 ## First run
 
 1. On the launcher, click **Open Folder...** and choose a folder of photos (DJI DNG and other image formats). The folder becomes a workspace and appears under **Recent** next time. **Open Workspace File...** reopens a saved workspace file.
@@ -42,13 +56,14 @@ Removing a workspace from the recent list, or removing photos from a workspace i
 
 ## Updates
 
-- On every launch the app checks GitHub Releases for a newer version. You can also use **AI Photo Culling → Check for Updates...**.
+- On every launch the app checks GitHub Releases for a newer version. You can also check manually: **AI Photo Culling → Check for Updates...** on macOS, **Help → Check for Updates...** on Windows.
 - When an update is available you see its release notes and can choose **Update**, **Later**, or **Skip This Version**.
-- **Update** downloads the zip for your architecture, verifies it against `SHA256SUMS.txt`, and checks the version inside it. Then choose **Restart Now** or **Install on Quit**. If replacing the app fails, the previous version is restored.
-- In-place updates require the app to be in a writable folder such as `/Applications`. If it is running from the DMG, the release page opens instead.
+- **Update** downloads the update for your platform and verifies it against `SHA256SUMS.txt`. Then choose **Restart Now** or **Install on Quit**.
+  - macOS: the zip for your architecture replaces the app (the version inside is checked first; if replacing fails, the previous version is restored). This needs the app in a writable folder such as `/Applications`; when it runs from the DMG, the release page opens instead.
+  - Windows: the new installer runs silently after the app quits and starts the app again.
 - Set `AI_CULLING_DISABLE_UPDATES=1` in the app's environment to turn update checks off.
 - v0.2.0 and earlier have no updater; install v0.2.1 or later manually once.
 
 ## Your data
 
-Desktop data lives in `~/Library/Application Support/AI Photo Culling/`: the SQLite workspace database (ratings, scores, edit recipes), preview caches, and logs. Back up the database together with your photo folders. A workspace file saved with **File → Save Workspace File...** (`⌘S`) only stores folder references, not photos or edits. Updating the app keeps this data.
+Desktop data lives in `~/Library/Application Support/AI Photo Culling/` on macOS and `%APPDATA%\AI Photo Culling\` on Windows: the SQLite workspace database (ratings, scores, edit recipes), preview caches, and logs. Back up the database together with your photo folders. A workspace file saved with **File → Save Workspace File...** (`⌘S` / `Ctrl+S`) only stores folder references, not photos or edits. Updating the app keeps this data.

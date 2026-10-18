@@ -15,6 +15,7 @@ import type {
   StylePad,
 } from "../../types";
 import { renderEditingPreview } from "../../api";
+import { isMac, modPrefix, shiftModPrefix } from "../../lib/platform";
 import {
   adjustmentGroups,
   applyAuto,
@@ -646,6 +647,12 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
       if (event.key === "\\") {
         event.preventDefault();
         setOriginal(true);
+      }
+      // Ctrl+Y is the usual redo on Windows and Linux.
+      if (!isMac && event.ctrlKey && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        props.onRedo();
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
@@ -1485,7 +1492,7 @@ export function ExportEnhanceWorkspace(props: ExportEnhanceWorkspaceProps) {
                   {props.job.current ? ` · ${props.job.current}` : ""}
                 </>
               ) : (
-                " · ⌘Z Undo · ⇧⌘Z Redo"
+                ` · ${modPrefix}Z Undo · ${shiftModPrefix}Z Redo`
               )}
             </>
           )}

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isMac } from "../lib/platform";
 import type { ShortcutDefinition, ShortcutHandlers, ShortcutScope } from "./types";
 
 interface UseShortcutsOptions {
@@ -19,10 +20,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-function modifierMatches(event: KeyboardEvent, shortcut: ShortcutDefinition): boolean {
-  const allowsShiftAlias = Boolean(shortcut.metaKey) && (shortcut.key === "=" || shortcut.key === "-");
-  return Boolean(shortcut.metaKey) === event.metaKey
-    && Boolean(shortcut.ctrlKey) === event.ctrlKey
+type ModifierState = Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
+
+export function modifierMatches(event: ModifierState, shortcut: ShortcutDefinition, mac = isMac): boolean {
+  const allowsShiftAlias = Boolean(shortcut.modKey) && (shortcut.key === "=" || shortcut.key === "-");
+  const wantsMeta = Boolean(shortcut.modKey) && mac;
+  const wantsCtrl = Boolean(shortcut.ctrlKey) || (Boolean(shortcut.modKey) && !mac);
+  return wantsMeta === event.metaKey
+    && wantsCtrl === event.ctrlKey
     && Boolean(shortcut.altKey) === event.altKey
     && (Boolean(shortcut.shiftKey) === event.shiftKey || allowsShiftAlias);
 }
@@ -31,10 +36,10 @@ function keyMatches(event: KeyboardEvent, shortcut: ShortcutDefinition): boolean
   if (shortcut.key === "/" && shortcut.shiftKey && event.key === "?") {
     return true;
   }
-  if (shortcut.key === "=" && shortcut.metaKey && (event.key === "=" || event.key === "+")) {
+  if (shortcut.key === "=" && shortcut.modKey && (event.key === "=" || event.key === "+")) {
     return true;
   }
-  if (shortcut.key === "-" && shortcut.metaKey && (event.key === "-" || event.key === "_")) {
+  if (shortcut.key === "-" && shortcut.modKey && (event.key === "-" || event.key === "_")) {
     return true;
   }
   if (shortcut.key.length === 1) {

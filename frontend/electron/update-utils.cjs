@@ -51,6 +51,14 @@ function parseChecksums(text) {
   return checksums;
 }
 
+// macOS updates replace the .app from the release zip; Windows runs the NSIS installer silently.
+function selectUpdateAsset(assets, platform, arch) {
+  if (platform === "win32") {
+    return (assets || []).find((asset) => /setup.*\.exe$/i.test(asset.name || "")) || null;
+  }
+  return platform === "darwin" ? selectZipAsset(assets, arch) : null;
+}
+
 function selectZipAsset(assets, arch) {
   const zips = (assets || []).filter((asset) => /\.zip$/i.test(asset.name || ""));
   return zips.find((asset) => asset.name.includes(`-${arch}-`))
@@ -62,5 +70,6 @@ module.exports = {
   compareVersions,
   normalizeAssetName,
   parseChecksums,
+  selectUpdateAsset,
   selectZipAsset,
 };

@@ -7,7 +7,8 @@ export interface ShortcutDefinition {
   label: string;
   description: string;
   category: "Global" | "Similarity" | "Lightbox" | "Review";
-  metaKey?: boolean;
+  /** Command on macOS, Control elsewhere. */
+  modKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
   shiftKey?: boolean;

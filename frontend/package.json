@@ -14,7 +14,8 @@
     "package:dmg": "npm run build && npm run backend:build && node scripts/package-electron.cjs --mac dmg",
     "package:dir": "npm run build && npm run backend:build && node scripts/package-electron.cjs --dir",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "package:win": "npm run build && npm run backend:build && node scripts/package-electron.cjs --win nsis --x64"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -72,6 +73,22 @@
         "dmg",
         "zip"
       ]
+    },
+    "win": {
+      "icon": "icon-win.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "${productName} Setup ${version}.${ext}"
     }
   }
 }

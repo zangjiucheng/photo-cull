@@ -23,7 +23,7 @@ const backendEntry = process.env.BACKEND_ENTRY
   ? path.resolve(repoRoot, process.env.BACKEND_ENTRY)
   : path.join(repoRoot, "app.py");
 const runtimeSourcePath = isPackaged ? path.join(process.resourcesPath, "runtime-source") : repoRoot;
-const appIconPath = path.join(__dirname, "assets", "icon.png");
+const appIconPath = path.join(__dirname, "assets", process.platform === "win32" ? "icon-win.png" : "icon.png");
 let backendProcess = null;
 let backendLogFd = null;
 let mainWindow = null;
@@ -69,6 +69,7 @@ function configureApplicationMenu() {
             targetWindow?.webContents.send("save-workspace-file-request");
           },
         },
+        ...(process.platform === "darwin" ? [] : [{ type: "separator" }, { role: "quit", label: "Exit" }]),
       ],
     },
     {
@@ -104,6 +105,13 @@ function configureApplicationMenu() {
         { role: "close" },
       ],
     },
+    // macOS keeps update checks in the app menu; elsewhere they live under Help.
+    ...(process.platform === "darwin" ? [] : [{
+      label: "Help",
+      submenu: [
+        { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
+      ],
+    }]),
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

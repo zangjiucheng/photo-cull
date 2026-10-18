@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { compareVersions, parseChecksums, selectZipAsset } = require("./update-utils.cjs");
+const { compareVersions, parseChecksums, selectUpdateAsset, selectZipAsset } = require("./update-utils.cjs");
 
 describe("compareVersions", () => {
   it("orders semantic versions and ignores the tag prefix", () => {
@@ -44,5 +44,24 @@ describe("selectZipAsset", () => {
 
   it("returns null when no matching zip was published", () => {
     expect(selectZipAsset([{ name: "AI.Photo.Culling-0.2.0-arm64.dmg" }], "arm64")).toBeNull();
+  });
+});
+
+describe("selectUpdateAsset", () => {
+  const assets = [
+    { name: "AI.Photo.Culling-0.4.0-arm64.dmg" },
+    { name: "AI.Photo.Culling-0.4.0-arm64-mac.zip" },
+    { name: "AI.Photo.Culling.Setup.0.4.0.exe" },
+    { name: "AI.Photo.Culling.Setup.0.4.0.exe.blockmap" },
+  ];
+
+  it("uses the NSIS installer on Windows and the zip on macOS", () => {
+    expect(selectUpdateAsset(assets, "win32", "x64")?.name).toBe("AI.Photo.Culling.Setup.0.4.0.exe");
+    expect(selectUpdateAsset(assets, "darwin", "arm64")?.name).toBe("AI.Photo.Culling-0.4.0-arm64-mac.zip");
+  });
+
+  it("has nothing to offer on other platforms or without a package", () => {
+    expect(selectUpdateAsset(assets, "linux", "x64")).toBeNull();
+    expect(selectUpdateAsset([{ name: "AI.Photo.Culling-0.3.1-arm64-mac.zip" }], "win32", "x64")).toBeNull();
   });
 });

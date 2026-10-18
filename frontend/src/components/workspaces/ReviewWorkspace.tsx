@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { isMac } from "../../lib/platform";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { shortcutRegistry } from "../../shortcuts/registry";
 import type { ShortcutHandlers } from "../../shortcuts/types";
@@ -240,7 +241,7 @@ export function ReviewWorkspace({ activePhoto, folderPhotos, ratings, exportQueu
                 <span><kbd>H</kbd><kbd>L</kbd> prev / next</span>
                 <span><kbd>Q</kbd> queue</span>
                 <span><kbd>Space</kbd> enlarge</span>
-                <span><kbd>⌘</kbd><kbd>+</kbd><kbd>−</kbd> zoom</span>
+                <span><kbd>{isMac ? "⌘" : "Ctrl"}</kbd><kbd>+</kbd><kbd>−</kbd> zoom</span>
               </div>
             </div>
           </>

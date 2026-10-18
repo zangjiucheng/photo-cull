@@ -6,8 +6,8 @@ The app is an Electron shell (`frontend/electron`) around a React + TypeScript +
 
 - Python **3.11** (verified)
 - Node.js **24** and npm (used by CI)
-- macOS for the desktop app and packaging; the first `npm ci` downloads Electron
-- `libraw` from Homebrew is installed in the release workflow before building
+- macOS or Windows for the desktop app and packaging (each platform builds its own installer); the first `npm ci` downloads Electron
+- `libraw` from Homebrew is installed in the macOS release build
 
 ## Setup
 
@@ -62,6 +62,15 @@ make package PYTHON=python3.11       # DMG + update zip (what the release workfl
 make package-dir PYTHON=python3.11   # unpacked app for local smoke tests
 ```
 
+On Windows (Git Bash or PowerShell), build the NSIS installer with npm directly:
+
+```bash
+python -m venv .package-venv
+.package-venv/Scripts/python.exe -m pip install -r requirements-package.txt
+cd frontend
+PYTHON="$PWD/../.package-venv/Scripts/python.exe" npm run package:win
+```
+
 Packaging creates a separate `.package-venv`, bundles the backend with PyInstaller, and builds the app with electron-builder. Output goes to `release/`. `make clean` removes build artifacts.
 
 ## Release
@@ -70,9 +79,11 @@ Packaging creates a separate `.package-venv`, bundles the backend with PyInstall
 2. Add release notes in `docs/releases/vX.Y.Z.md`.
 3. Push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
-The release workflow (`.github/workflows/release.yml`) runs on `v*` tags on macOS. It sets the app version from the tag, runs the backend and frontend tests, builds the DMG and the update zip, writes `SHA256SUMS.txt`, and uploads them to a GitHub Release with generated notes. Installed apps (v0.2.1 and later) pick up the new release through the in-app updater, which needs the zip and `SHA256SUMS.txt` to be present.
+CI (`.github/workflows/ci.yml`) runs the backend tests, frontend tests, and a production build in a matrix on Ubuntu, macOS, and Windows for every push to `main` and every pull request.
 
-Builds are not Developer ID signed or notarized.
+The release workflow (`.github/workflows/release.yml`) runs on `v*` tags. A matrix job builds each platform in parallel: it sets the app version from the tag, runs the tests, builds the macOS DMG and update zip or the Windows NSIS installer, and smoke-tests the bundled backend by starting it and calling its API. A final job collects every artifact, writes one `SHA256SUMS.txt`, and publishes the GitHub Release with generated notes. Pull requests that touch packaging run the same builds as a dry run without publishing. Installed apps pick up the new release through the in-app updater, which needs the platform's package and `SHA256SUMS.txt`.
+
+Builds are not code signed: no Apple Developer ID or notarization, and no Windows Authenticode certificate.
 
 ## Website
 

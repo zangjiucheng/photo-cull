@@ -19,6 +19,8 @@ fs.mkdirSync(electronBuilderCache, { recursive: true });
 const result = spawnSync(electronBuilderBin, process.argv.slice(2), {
   cwd: frontendRoot,
   stdio: "inherit",
+  // Node refuses to spawn .cmd files without a shell on Windows.
+  shell: process.platform === "win32",
   env: {
     ...process.env,
     ELECTRON_CACHE: electronCache,
@@ -27,4 +29,7 @@ const result = spawnSync(electronBuilderBin, process.argv.slice(2), {
   },
 });
 
-process.exit(result.status || 0);
+if (result.error) {
+  throw result.error;
+}
+process.exit(result.status ?? 1);

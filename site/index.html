@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI Photo Culling</title>
-  <meta name="description" content="A local macOS app for culling and RAW-editing DJI drone photos: AI scoring, similar-photo groups, a quick RAW editor with a Tone/Color pad, and JPEG or 16-bit TIFF export.">
+  <meta name="description" content="A local macOS and Windows app for culling and RAW-editing DJI drone photos: AI scoring, similar-photo groups, a quick RAW editor with a Tone/Color pad, and JPEG or 16-bit TIFF export.">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#000000">
   <meta property="og:title" content="AI Photo Culling">
-  <meta property="og:description" content="Cull, edit, and export DJI drone RAWs in one local macOS app.">
+  <meta property="og:description" content="Cull, edit, and export DJI drone RAWs in one local app for macOS and Windows.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://zangjiucheng.github.io/photo-cull/assets/editor.webp">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
@@ -41,12 +41,12 @@
       <div class="wrap">
         <img class="hero-icon" src="assets/icon.svg" alt="AI Photo Culling app icon" width="88" height="88">
         <h1>AI Photo Culling</h1>
-        <p class="lede">Cull, edit, and export your DJI drone RAWs in one local Mac app.<br class="br-wide"> Score, compare, hit Auto, drag a few sliders, export.</p>
+        <p class="lede">Cull, edit, and export your DJI drone RAWs in one local app for macOS and Windows.<br class="br-wide"> Score, compare, hit Auto, drag a few sliders, export.</p>
         <div class="actions">
-          <a class="btn btn-primary" href="https://github.com/zangjiucheng/photo-cull/releases/latest">Download for macOS (Apple Silicon)</a>
+          <a class="btn btn-primary" href="https://github.com/zangjiucheng/photo-cull/releases/latest">Download for macOS &amp; Windows</a>
           <a class="btn" href="https://github.com/zangjiucheng/photo-cull">View on GitHub</a>
         </div>
-        <p class="fineprint">arm64 DMG · Python backend bundled · updates in place from GitHub Releases</p>
+        <p class="fineprint">macOS (Apple Silicon) DMG · Windows (x64) installer · updates in place from GitHub Releases</p>
       </div>
       <figure class="wrap shot shot-hero">
         <img src="assets/editor.webp" width="1440" height="900" fetchpriority="high" decoding="async"
@@ -143,7 +143,7 @@
             <li>Contrast, Black point, Dehaze, Saturation, Tint, Definition, clipping overlay</li>
             <li>18 Apple Photos-style looks: Undertones, Moods and Black &amp; White, with strength</li>
             <li>Crop to Original, 1:1, 4:3, 3:2, 16:9, 9:16; straighten ±15°</li>
-            <li>Hold <kbd>\</kbd> for the original, <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd>, autosave</li>
+            <li>Hold <kbd>\</kbd> for the original, <kbd>⌘Z</kbd> / <kbd>Ctrl+Z</kbd> undo, autosave</li>
           </ul>
         </div>
       </div>
@@ -164,17 +164,18 @@
         <div class="cols">
           <div>
             <h3>1. Download</h3>
-            <p>Grab the DMG from the <a href="https://github.com/zangjiucheng/photo-cull/releases/latest">latest release</a> and drag <strong>AI Photo Culling.app</strong> into Applications. Apple Silicon only for now. Each release publishes <code>SHA256SUMS.txt</code>.</p>
+            <p>Get the latest build from the <a href="https://github.com/zangjiucheng/photo-cull/releases/latest">releases page</a>. On macOS (Apple Silicon), drag <strong>AI Photo Culling.app</strong> from the DMG into Applications. On Windows 10/11 (x64), run <strong>AI Photo Culling Setup.exe</strong>; it installs for your user without admin rights. Each release publishes <code>SHA256SUMS.txt</code>.</p>
           </div>
           <div>
             <h3>2. Allow it to open</h3>
-            <p>The app isn't signed with a Developer ID or notarized, so Gatekeeper blocks the first launch. Open it once, then go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong>. If macOS says the app is damaged, run:</p>
+            <p>Builds aren't code signed yet. On macOS, open the app once, then go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong>. If macOS says the app is damaged, run:</p>
             <pre><code>xattr -dr com.apple.quarantine \
   "/Applications/AI Photo Culling.app"</code></pre>
+            <p>On Windows, if SmartScreen says "Windows protected your PC", click <strong>More info → Run anyway</strong>.</p>
           </div>
           <div>
             <h3>3. Stay current</h3>
-            <p>The app checks GitHub Releases on launch, or via <strong>Check for Updates...</strong>. Updates are verified against <code>SHA256SUMS.txt</code> and swapped in on restart or quit. Keep the app in <code>/Applications</code> for this to work. <code>AI_CULLING_DISABLE_UPDATES=1</code> turns it off.</p>
+            <p>The app checks GitHub Releases on launch, or via <strong>Check for Updates...</strong> (in the app menu on macOS, under Help on Windows). Updates are verified against <code>SHA256SUMS.txt</code> and installed on restart or quit. On macOS keep the app in <code>/Applications</code> for this to work. <code>AI_CULLING_DISABLE_UPDATES=1</code> turns it off.</p>
           </div>
         </div>
       </div>
