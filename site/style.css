@@ -190,3 +190,4 @@ pre {
   .cols > div { border-bottom: 0; padding-right: 28px; }
   .cols > div + div { border-left: 1px solid var(--line); padding-left: 28px; }
 }
+.fineprint a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }

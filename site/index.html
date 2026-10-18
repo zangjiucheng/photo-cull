@@ -43,10 +43,10 @@
         <h1>AI Photo Culling</h1>
         <p class="lede">Cull, edit, and export your DJI drone RAWs in one local app for macOS and Windows.<br class="br-wide"> Score, compare, hit Auto, drag a few sliders, export.</p>
         <div class="actions">
-          <a class="btn btn-primary" href="https://github.com/zangjiucheng/photo-cull/releases/latest">Download for macOS &amp; Windows</a>
+          <a class="btn btn-primary" id="download" href="https://github.com/zangjiucheng/photo-cull/releases/latest">Download for macOS &amp; Windows</a>
           <a class="btn" href="https://github.com/zangjiucheng/photo-cull">View on GitHub</a>
         </div>
-        <p class="fineprint">macOS (Apple Silicon) DMG · Windows (x64) installer · updates in place from GitHub Releases</p>
+        <p class="fineprint" id="download-note">macOS (Apple Silicon) DMG · Windows (x64) installer · updates in place from GitHub Releases</p>
       </div>
       <figure class="wrap shot shot-hero">
         <img src="assets/editor.webp" width="1440" height="900" fetchpriority="high" decoding="async"
@@ -203,5 +203,60 @@
       <a href="https://github.com/zangjiucheng/photo-cull">github.com/zangjiucheng/photo-cull</a>
     </div>
   </footer>
+  <script>
+    // Recommend the download for this computer. Without JavaScript, or on other platforms, the button
+    // keeps pointing at the releases page, which lists every build.
+    (() => {
+      const repo = "zangjiucheng/photo-cull";
+      const releases = `https://github.com/${repo}/releases/latest`;
+      const ua = navigator.userAgent;
+      const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+      // iPadOS reports itself as a Mac; a touch screen gives it away.
+      const mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(platform) && navigator.maxTouchPoints > 1);
+      const os = mobile ? null : /Win/i.test(platform) ? "windows" : /Mac/i.test(platform) ? "mac" : null;
+      if (!os) return;
+
+      const builds = {
+        mac: { label: "macOS", detail: "Apple Silicon · DMG", match: /arm64\.dmg$/i },
+        windows: { label: "Windows", detail: "Windows 10/11 (x64) · installer", match: /Setup.*\.exe$/i },
+      };
+      const other = os === "mac" ? "windows" : "mac";
+      const button = document.getElementById("download");
+      const note = document.getElementById("download-note");
+      button.textContent = `Download for ${builds[os].label}`;
+
+      const render = (version, assets) => {
+        const find = (key) => assets.find((asset) => builds[key].match.test(asset.name));
+        const mine = find(os), theirs = find(other);
+        if (mine) button.href = mine.browser_download_url;
+        note.textContent = `${version ? version + " · " : ""}${builds[os].detail} · `;
+        const link = document.createElement("a");
+        link.href = theirs ? theirs.browser_download_url : releases;
+        link.textContent = `Download for ${builds[other].label}`;
+        note.append(link, " · ");
+        const all = document.createElement("a");
+        all.href = releases;
+        all.textContent = "All downloads";
+        note.append(all);
+      };
+      render("", []);
+      fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { Accept: "application/vnd.github+json" } })
+        .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+        .then((release) => render(release.tag_name, release.assets || []))
+        .catch(() => {});
+
+      // Chromium can tell an Intel Mac apart; the macOS build needs Apple Silicon.
+      if (os === "mac" && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        navigator.userAgentData.getHighEntropyValues(["architecture"]).then((values) => {
+          if (values.architecture === "x86") {
+            const warn = document.createElement("p");
+            warn.className = "fineprint";
+            warn.textContent = "This Mac has an Intel processor; the macOS build needs Apple Silicon (M1 or later).";
+            note.after(warn);
+          }
+        }).catch(() => {});
+      }
+    })();
+  </script>
 </body>
 </html>
