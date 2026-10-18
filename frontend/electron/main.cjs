@@ -564,11 +564,19 @@ function checkPython(command) {
   }
 }
 
-function findAvailablePort(host) {
+// The UI is served by the backend, so its port is part of the page's origin and with it of
+// localStorage (export folders, unsaved-edit recovery). Prefer the same port every launch and only
+// fall back to a random one when it is taken.
+const preferredBackendPort = 47615;
+
+function findAvailablePort(host, preferred = 0) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
-    server.on("error", reject);
-    server.listen(0, host, () => {
+    server.on("error", (error) => {
+      if (preferred) findAvailablePort(host).then(resolve, reject);
+      else reject(error);
+    });
+    server.listen(preferred, host, () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : null;
       server.close(() => {
@@ -843,7 +851,7 @@ app.on("child-process-gone", (_event, details) => {
 async function createWindow() {
   configureApplicationMenu();
   if (isPackaged && !configuredBackendPort) {
-    backendPort = await findAvailablePort(backendHost);
+    backendPort = await findAvailablePort(backendHost, preferredBackendPort);
   }
   startBackend();
   await waitForPort(backendHost, backendPort);
@@ -953,6 +961,14 @@ ipcMain.handle("install-ai-runtime", async () => installAiRuntime());
 ipcMain.handle("get-runtime-settings", async () => runtimeSettings());
 
 ipcMain.handle("get-update-settings", async () => updateSettings());
+
+// Kept in settings.json rather than localStorage so it survives a change of backend port.
+ipcMain.handle("get-onboarding-done", async () => Boolean(readSettings().onboardingDone));
+
+ipcMain.handle("set-onboarding-done", async () => {
+  writeSettings({ onboardingDone: true });
+  return true;
+});
 
 ipcMain.handle("set-update-channel", async (_event, channel) => {
   if (channel !== "stable" && channel !== "nightly") throw new Error(`Unknown update channel ${channel}`);

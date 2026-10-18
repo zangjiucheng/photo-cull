@@ -23,6 +23,7 @@ Library recovery (`feat/library-recovery`):
 - Windows: the backend no longer opens a console window next to the app.
 - Windows: the AI runtime works on PCs without the Visual C++ Redistributable (torch failed with WinError 126 loading c10.dll); the app ships Microsoft's runtime DLLs and places them next to torch, repairing existing installs. The install check now imports torch.
 - Enhance & Export no longer crashes when the export queue is empty.
+- The welcome guide shows only once, and export folders and unsaved-edit recovery survive a restart: the backend keeps the same local port between launches (it used to pick a new one, which reset the page's local storage).
 - Similarity no longer keeps showing "CLIP unavailable" from cached groups after the AI runtime is installed; without the runtime the message says how to get CLIP.
 - The Debug tab is now **Settings** (`⌘,` / `Ctrl+,`), where you can pick a custom Python for the AI runtime and reinstall it.
 

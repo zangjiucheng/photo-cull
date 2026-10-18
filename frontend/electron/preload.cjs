@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld("aiCulling", {
   setRuntimePython: (command) => ipcRenderer.invoke("set-runtime-python", command),
   choosePython: () => ipcRenderer.invoke("choose-python"),
   getUpdateSettings: () => ipcRenderer.invoke("get-update-settings"),
+  getOnboardingDone: () => ipcRenderer.invoke("get-onboarding-done"),
+  setOnboardingDone: () => ipcRenderer.invoke("set-onboarding-done"),
   setUpdateChannel: (channel) => ipcRenderer.invoke("set-update-channel", channel),
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
   onOpenOnboardingRequest: (callback) => {

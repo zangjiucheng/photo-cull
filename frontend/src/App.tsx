@@ -68,7 +68,7 @@ export default function App() {
   const [isInspectorPreviewOpen, setIsInspectorPreviewOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
-  const [isOnboardingOpen, setIsOnboardingOpen] = useState(onboardingPending);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [exportEnhanceSettings, setExportEnhanceSettings] = useState<ExportEnhanceSettings>(defaultExportEnhanceSettings);
   const [exportEnhanceSettingsByPhoto, setExportEnhanceSettingsByPhoto] = useState<Record<string, ExportEnhanceSettings>>({});
   const [exportEnhanceUndoStacks, setExportEnhanceUndoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
@@ -499,6 +499,11 @@ export default function App() {
 
   useEffect(() => window.aiCulling?.onOpenSettingsRequest?.(() => setActiveTab("settings")), []);
   useEffect(() => window.aiCulling?.onOpenOnboardingRequest?.(() => setIsOnboardingOpen(true)), []);
+  useEffect(() => {
+    void onboardingPending().then((pending) => {
+      if (pending) setIsOnboardingOpen(true);
+    });
+  }, []);
 
   async function onRevealWorkspaceFolder() {
     if (!activeWorkspace) {

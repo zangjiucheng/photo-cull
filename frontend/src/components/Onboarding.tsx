@@ -9,20 +9,33 @@ import { Button } from "./ui/button";
 
 const STORAGE_KEY = "photo-cull.onboarding.v1";
 
-/** True until the welcome guide has been finished or skipped on this computer. */
-export function onboardingPending(): boolean {
+/**
+ * True until the welcome guide has been finished or skipped on this computer. The desktop app keeps
+ * this in its settings file: localStorage belongs to the page's origin, which includes the backend's
+ * port, so it alone could forget and show the guide again.
+ */
+export async function onboardingPending(): Promise<boolean> {
   try {
-    return localStorage.getItem(STORAGE_KEY) !== "done";
+    if (localStorage.getItem(STORAGE_KEY) === "done") return false;
   } catch {
-    return false;
+    // Fall through to the desktop setting.
   }
+  if (window.aiCulling?.getOnboardingDone) {
+    try {
+      return !(await window.aiCulling.getOnboardingDone());
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 function markOnboardingDone() {
+  void window.aiCulling?.setOnboardingDone?.().catch(() => undefined);
   try {
     localStorage.setItem(STORAGE_KEY, "done");
   } catch {
-    // Without storage the guide simply shows again next time.
+    // The desktop setting above still records it.
   }
 }
 
