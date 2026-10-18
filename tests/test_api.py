@@ -490,6 +490,29 @@ def test_similar_detection_reuses_cached_result(client, tmp_path, monkeypatch):
     assert calls["count"] == 2
 
 
+def test_similar_cache_is_recomputed_when_clip_becomes_available(client, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    make_image(source / "a.jpg", "blue")
+    make_image(source / "b.jpg", "blue")
+    workspace = open_workspace(client, source)
+    similarity.clear_similarity_cache()
+    url = f"/api/photos/similar?workspace_id={workspace['id']}&include_clip=1&scope=library"
+
+    monkeypatch.setattr(similarity, "clip_available", lambda: False)
+    similarity._load_clip_model.cache_clear()
+    before = client.get(url).get_json()
+    assert before["stages"]["clip"]["status"] == f"unavailable: {similarity.CLIP_MISSING}"
+    assert client.get(url).get_json()["cache"]["hit"] is True
+
+    # The AI runtime is installed: the result computed without CLIP is no longer reused.
+    monkeypatch.setattr(similarity, "clip_available", lambda: True)
+    monkeypatch.setattr(similarity, "clip_matches", lambda candidates: ([], "ready:numpy"))
+    after = client.get(url).get_json()
+    assert after["cache"] == {"hit": False, "source": "computed"}
+    assert after["stages"]["clip"]["status"] == "ready:numpy"
+    similarity._load_clip_model.cache_clear()
+
+
 def test_invalid_score_and_missing_photo(client):
     bad_score = client.patch("/api/photos/missing/score", json={"manual_score": 120})
     assert bad_score.status_code == 400

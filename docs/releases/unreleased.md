@@ -21,6 +21,7 @@ Library recovery (`feat/library-recovery`):
 - Nightly builds (prereleases every night, or on demand per branch) and an update channel choice in Settings; Settings and About show the version with its commit and build time.
 - A first-run welcome guide with screenshots that explains the workflow and offers the optional AI runtime install.
 - Windows: the backend no longer opens a console window next to the app.
+- Similarity no longer keeps showing "CLIP unavailable" from cached groups after the AI runtime is installed; without the runtime the message says how to get CLIP.
 - The Debug tab is now **Settings** (`⌘,` / `Ctrl+,`), where you can pick a custom Python for the AI runtime and reinstall it.
 
 Real high-ISO night, 48MP, extended desktop/memory, optional-model and user aesthetic acceptance remain open under PER-367.

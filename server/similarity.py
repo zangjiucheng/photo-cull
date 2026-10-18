@@ -247,10 +247,17 @@ def phash_matches(candidates: list[PhotoCandidate]) -> list[dict]:
     return matches
 
 
+CLIP_MISSING = "needs the AI runtime (Settings > Install AI Runtime)"
+
+
+def clip_available() -> bool:
+    return importlib.util.find_spec("open_clip") is not None
+
+
 @lru_cache(maxsize=1)
 def _load_clip_model():
-    if importlib.util.find_spec("open_clip") is None:
-        return None, None, "open-clip-torch is not installed"
+    if not clip_available():
+        return None, None, CLIP_MISSING
 
     import open_clip
     import torch
@@ -410,9 +417,13 @@ def find_similar_groups(
 ) -> dict:
     rows = _candidate_rows(workspace_id=workspace_id, folder_path=folder_path)
     rows_signature = _rows_signature(rows)
+    # Groups found without CLIP must not be served once the AI runtime is installed (or vice versa),
+    # so whether CLIP can run is part of the cache identity.
+    use_clip = bool(include_clip) and clip_available()
     signature = _signature_digest((
         "similar-v1",
         bool(include_clip),
+        use_clip,
         PHASH_EXACT_DISTANCE,
         PHASH_REVIEW_DISTANCE,
         CLIP_HIGH_SIMILARITY,
@@ -424,6 +435,7 @@ def find_similar_groups(
         workspace_id,
         folder_path,
         bool(include_clip),
+        use_clip,
         signature,
     )
     cached = _cache_get(cache_key)
