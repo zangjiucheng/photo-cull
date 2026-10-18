@@ -130,14 +130,22 @@ function configureApplicationMenu() {
     ...(process.platform === "darwin" ? [] : [{
       label: "Help",
       submenu: [
+        { label: "Welcome Guide", click: openOnboarding },
         { label: "Check for Updates...", click: () => checkForUpdates({ manual: true }) },
         { type: "separator" },
         { label: `About ${appName}`, click: () => void showAbout() },
       ],
     }]),
   ];
+  if (process.platform === "darwin") {
+    template.push({ role: "help", submenu: [{ label: "Welcome Guide", click: openOnboarding }] });
+  }
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function openOnboarding() {
+  (BrowserWindow.getFocusedWindow() || mainWindow)?.webContents.send("open-onboarding-request");
 }
 
 function openSettings() {
@@ -393,6 +401,7 @@ function runLogged(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd || runtimeSourcePath,
+      windowsHide: true,
       env: {
         ...process.env,
         PATH: runtimeSearchPath(),
@@ -584,6 +593,9 @@ function startBackend() {
   const args = shouldUseAiRuntime ? [path.join(runtimeSourcePath, "app.py")] : hasPackagedBackend ? [] : [backendEntry];
   backendLogFd = isPackaged ? fs.openSync(logPath, "a") : null;
   backendProcess = spawn(command, args, {
+    // The backend (PyInstaller exe or venv python.exe) is a console program; without this Windows
+    // opens a terminal window next to the app.
+    windowsHide: true,
     cwd: shouldUseAiRuntime ? runtimeSourcePath : repoRoot,
     env: {
       ...process.env,

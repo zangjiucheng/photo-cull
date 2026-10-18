@@ -4,6 +4,7 @@ import { FolderNavigator } from "./components/library/FolderNavigator";
 import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
 import { SettingsWorkspace } from "./components/workspaces/SettingsWorkspace";
+import { Onboarding, onboardingPending } from "./components/Onboarding";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportEnhanceWorkspace } from "./components/workspaces/ExportEnhanceWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
@@ -58,6 +59,7 @@ export default function App() {
   const [isInspectorPreviewOpen, setIsInspectorPreviewOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(onboardingPending);
   const [exportEnhanceSettings, setExportEnhanceSettings] = useState<ExportEnhanceSettings>(defaultExportEnhanceSettings);
   const [exportEnhanceSettingsByPhoto, setExportEnhanceSettingsByPhoto] = useState<Record<string, ExportEnhanceSettings>>({});
   const [exportEnhanceUndoStacks, setExportEnhanceUndoStacks] = useState<Record<string, ExportEnhanceSettings[]>>({});
@@ -487,6 +489,7 @@ export default function App() {
   }, [onSaveWorkspaceFile]);
 
   useEffect(() => window.aiCulling?.onOpenSettingsRequest?.(() => setActiveTab("settings")), []);
+  useEffect(() => window.aiCulling?.onOpenOnboardingRequest?.(() => setIsOnboardingOpen(true)), []);
 
   async function onRevealWorkspaceFolder() {
     if (!activeWorkspace) {
@@ -1362,6 +1365,7 @@ export default function App() {
         isRefreshing={isRefreshing}
         onRefresh={() => void onRefresh()}
         onInstallAiRuntime={() => void onInstallAiRuntime()}
+        onShowOnboarding={() => setIsOnboardingOpen(true)}
       />
     );
   }
@@ -1425,6 +1429,12 @@ export default function App() {
           scopes={shortcutHelpScopes}
           onClose={() => setIsShortcutHelpOpen(false)}
         />
+        <Onboarding
+          open={isOnboardingOpen}
+          aiRuntimeStatus={aiRuntimeStatus}
+          onInstallAiRuntime={() => void onInstallAiRuntime()}
+          onClose={() => setIsOnboardingOpen(false)}
+        />
       </>
     );
   }
@@ -1480,6 +1490,12 @@ export default function App() {
         open={isShortcutHelpOpen}
         scopes={shortcutHelpScopes}
         onClose={() => setIsShortcutHelpOpen(false)}
+      />
+      <Onboarding
+        open={isOnboardingOpen}
+        aiRuntimeStatus={aiRuntimeStatus}
+        onInstallAiRuntime={() => void onInstallAiRuntime()}
+        onClose={() => setIsOnboardingOpen(false)}
       />
     </>
   );

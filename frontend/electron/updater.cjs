@@ -127,7 +127,7 @@ async function downloadFile(url, targetPath, onProgress) {
 }
 
 function runChecked(command, args) {
-  const result = spawnSync(command, args, { encoding: "utf8" });
+  const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout || "").trim()}`);
   }

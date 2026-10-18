@@ -22,6 +22,7 @@ declare global {
       setUpdateChannel: (channel: UpdateChannel) => Promise<UpdateSettings>;
       checkForUpdates: () => Promise<UpdateSettings>;
       onOpenSettingsRequest: (callback: () => void) => () => void;
+      onOpenOnboardingRequest: (callback: () => void) => () => void;
     };
   }
 }

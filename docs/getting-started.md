@@ -54,6 +54,10 @@ The installer is not code signed yet, so Microsoft Defender SmartScreen may show
 
 Removing a workspace from the recent list, or removing photos from a workspace in Similarity, never deletes files on disk. **Restore Removed** brings removed photos back.
 
+## Welcome guide
+
+The first time you open the app, a short guide walks through browsing, review, similarity and editing, explains what the optional AI runtime adds, and lets you start installing it right there. Open it again any time from **Help → Welcome Guide** or the **Welcome Guide** button in Settings.
+
 ## Updates
 
 - On every launch the app checks GitHub Releases for a newer version. You can also check manually: **AI Photo Culling → Check for Updates...** on macOS, **Help → Check for Updates...** on Windows.

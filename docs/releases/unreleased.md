@@ -19,6 +19,8 @@ Library recovery (`feat/library-recovery`):
 - Same-scene exposure matching to a reference photo, previewed before applying, capped at ±1 EV, highlight-aware, skipping night/silhouette mismatches.
 - AI runtime finds Python 3.10–3.13 more reliably (Windows py launcher, python.org and Homebrew installs) and downloads a verified private Python 3.12 when none is installed.
 - Nightly builds (prereleases every night, or on demand per branch) and an update channel choice in Settings; Settings and About show the version with its commit and build time.
+- A first-run welcome guide with screenshots that explains the workflow and offers the optional AI runtime install.
+- Windows: the backend no longer opens a console window next to the app.
 - The Debug tab is now **Settings** (`⌘,` / `Ctrl+,`), where you can pick a custom Python for the AI runtime and reinstall it.
 
 Real high-ISO night, 48MP, extended desktop/memory, optional-model and user aesthetic acceptance remain open under PER-367.

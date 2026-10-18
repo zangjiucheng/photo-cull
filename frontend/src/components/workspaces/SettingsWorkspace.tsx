@@ -8,13 +8,15 @@ interface SettingsWorkspaceProps {
   isRefreshing: boolean;
   onRefresh: () => void;
   onInstallAiRuntime: () => void;
+  onShowOnboarding: () => void;
 }
 
 export function SettingsWorkspace({
   aiRuntimeStatus,
   isRefreshing,
   onRefresh,
-  onInstallAiRuntime
+  onInstallAiRuntime,
+  onShowOnboarding
 }: SettingsWorkspaceProps) {
   const isError = aiRuntimeStatus?.state === "error";
   const runtimeMessage = aiRuntimeStatus
@@ -34,6 +36,9 @@ export function SettingsWorkspace({
         <div className="debug-section-head">
           <h2>AI Runtime</h2>
           <div className="debug-actions">
+            <Button variant="ghost" size="sm" onClick={onShowOnboarding}>
+              Welcome Guide
+            </Button>
             <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>
               {isRefreshing ? "Refreshing" : "Refresh"}
             </Button>

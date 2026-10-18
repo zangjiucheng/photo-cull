@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld("aiCulling", {
   getUpdateSettings: () => ipcRenderer.invoke("get-update-settings"),
   setUpdateChannel: (channel) => ipcRenderer.invoke("set-update-channel", channel),
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  onOpenOnboardingRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("open-onboarding-request", listener);
+    return () => ipcRenderer.removeListener("open-onboarding-request", listener);
+  },
   onOpenSettingsRequest: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("open-settings-request", listener);
