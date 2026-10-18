@@ -784,6 +784,30 @@ function workspaceFileDefaultName(name) {
   return `${safeName}.aiculling`;
 }
 
+// Renderer errors and GPU/renderer crashes go to renderer.log, so a blank window leaves a trace.
+function writeRendererLog(message) {
+  try {
+    fs.appendFileSync(path.join(app.getPath("userData"), "renderer.log"), `[${new Date().toISOString()}] ${message}\n`);
+  } catch {
+    // Logging must never break the app.
+  }
+}
+
+function watchRenderer(win) {
+  writeRendererLog(`start ${versionLabel()} ${process.platform}-${process.arch} electron ${process.versions.electron}`);
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) writeRendererLog(`${level === 3 ? "error" : "warn"} ${message} (${sourceId}:${line})`);
+  });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    writeRendererLog(`renderer gone: ${details.reason} (exit ${details.exitCode})`);
+    if (details.reason !== "clean-exit" && !win.isDestroyed()) win.webContents.reload();
+  });
+}
+
+app.on("child-process-gone", (_event, details) => {
+  if (details.type === "GPU") writeRendererLog(`GPU process gone: ${details.reason} (exit ${details.exitCode})`);
+});
+
 async function createWindow() {
   configureApplicationMenu();
   if (isPackaged && !configuredBackendPort) {
@@ -810,6 +834,7 @@ async function createWindow() {
     },
   });
   mainWindow = win;
+  watchRenderer(win);
 
   await win.loadURL(`http://${backendHost}:${backendPort}`);
   publishAiRuntimeStatus();

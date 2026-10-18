@@ -36,14 +36,35 @@ export async function loadEditingBase(
 
 const vertex = `attribute vec2 aPosition; varying vec2 vUv;
 void main(){ vUv=vec2(aPosition.x*.5+.5,.5-aPosition.y*.5); gl_Position=vec4(aPosition,0.,1.); }`;
-const fragment = `precision highp float;
-varying vec2 vUv; uniform sampler2D uImage;
+// Shared by both passes: output-to-source mapping, the gradient mask and the clipping/mask overlays.
+const finishing = `precision highp float;
+varying vec2 vUv;
+uniform vec2 uSource; uniform vec2 uOutput; uniform vec2 uCenter; uniform vec2 uRotation;
+uniform bool uOriginal; uniform bool uClipping; uniform bool uMaskOverlay;
+uniform vec4 uGradientPoints; uniform float uGradientFeather; uniform bool uGradientEnabled; uniform bool uGradientInvert;
+float gradientWeight(vec2 uv) {
+  vec2 d=uGradientPoints.zw-uGradientPoints.xy;
+  float t=dot(uv-uGradientPoints.xy,d)/max(dot(d,d),.000001);
+  float weight=1.-smoothstep(0.,1.,(t-.5)/uGradientFeather+.5);
+  return uGradientInvert ? 1.-weight : weight;
+}
+vec2 rotate(vec2 p){ return vec2(uRotation.x*p.x-uRotation.y*p.y,uRotation.y*p.x+uRotation.x*p.y); }
+vec2 sourceUv(){ return (uCenter+rotate((vUv-.5)*uOutput))/uSource; }
+vec3 finish(vec3 c, vec2 uv){
+  if(uOriginal) return c;
+  if(uClipping){ if(max(max(c.r,c.g),c.b)>=.999) c=vec3(1.,.15,.12); else if(min(min(c.r,c.g),c.b)<=.001) c=vec3(.1,.35,1.); }
+  if(uMaskOverlay && uGradientEnabled) c=mix(c,vec3(1.,.25,.15),gradientWeight(uv)*.4);
+  return c;
+}
+`;
+// Pass 1: develop each pixel. Sharpening needs its neighbours, so it is a second pass over this
+// result: evaluating the whole pipeline nine times per pixel in one shader made the program so
+// large that Direct3D's compiler (ANGLE on Windows) could stall the GPU and black out the window.
+const fragment = `${finishing}
+uniform sampler2D uImage; uniform bool uFinish;
 uniform vec4 uLight; uniform vec4 uColor; uniform vec3 uTone;
 uniform vec4 uStyleLight; uniform vec4 uStyleColor; uniform vec3 uStyleTone;
-uniform vec2 uSource; uniform vec2 uOutput; uniform vec2 uCenter; uniform vec2 uRotation;
-uniform float uPalette; uniform float uSharpen; uniform bool uOriginal; uniform bool uClipping;
-uniform vec4 uGradientPoints; uniform vec3 uGradientControls; uniform float uGradientFeather;
-uniform bool uGradientEnabled; uniform bool uGradientInvert; uniform bool uMaskOverlay;
+uniform float uPalette; uniform vec3 uGradientControls;
 uniform bool uSelectedEnabled; uniform vec2 uSelectedBand; uniform vec3 uSelectedControls;
 vec3 selectedColor(vec3 rgb) {
   float high=max(max(rgb.r,rgb.g),rgb.b), low=min(min(rgb.r,rgb.g),rgb.b), d=high-low;
@@ -59,12 +80,6 @@ vec3 selectedColor(vec3 rgb) {
   float c=(1.-abs(2.*light-1.))*saturation, x=c*(1.-abs(mod(h*6.,2.)-1.));
   vec3 outColor=h<1./6. ? vec3(c,x,0.) : h<2./6. ? vec3(x,c,0.) : h<3./6. ? vec3(0.,c,x) : h<4./6. ? vec3(0.,x,c) : h<5./6. ? vec3(x,0.,c) : vec3(c,0.,x);
   return outColor+light-c*.5;
-}
-float gradientWeight(vec2 uv) {
-  vec2 d=uGradientPoints.zw-uGradientPoints.xy;
-  float t=dot(uv-uGradientPoints.xy,d)/max(dot(d,d),.000001);
-  float weight=1.-smoothstep(0.,1.,(t-.5)/uGradientFeather+.5);
-  return uGradientInvert ? 1.-weight : weight;
 }
 vec3 linearize(vec3 c){ return mix(c/12.92,pow((max(c,0.)+.055)/1.055,vec3(2.4)),step(vec3(.04045),c)); }
 vec3 encode(vec3 c){ return mix(c*12.92,1.055*pow(max(c,0.),vec3(1./2.4))-.055,step(vec3(.0031308),c)); }
@@ -94,30 +109,63 @@ vec3 processed(vec2 uv) {
   }
   return base;
 }
-vec2 rotate(vec2 p){ return vec2(uRotation.x*p.x-uRotation.y*p.y,uRotation.y*p.x+uRotation.x*p.y); }
 void main(){
-  vec2 uv=(uCenter+rotate((vUv-.5)*uOutput))/uSource;
+  vec2 uv=sourceUv();
   vec3 c=processed(uv);
-  if(uSharpen>0. && !uOriginal){
-    vec3 blur=vec3(0.);
-    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
-      float weight=(x==0?2.:1.)*(y==0?2.:1.);
-      blur+=processed(uv+rotate(vec2(float(x),float(y)))/uSource)*weight/16.;
-    }
-    c=clamp(c+(c-blur)*uSharpen,0.,1.);
-  }
-  if(uClipping && !uOriginal){ if(max(max(c.r,c.g),c.b)>=.999) c=vec3(1.,.15,.12); else if(min(min(c.r,c.g),c.b)<=.001) c=vec3(.1,.35,1.); }
-  if(uMaskOverlay && uGradientEnabled && !uOriginal) c=mix(c,vec3(1.,.25,.15),gradientWeight(uv)*.4);
-  gl_FragColor=vec4(c,1.);
+  gl_FragColor=vec4(uFinish ? finish(c,uv) : c,1.);
 }`;
+// Pass 2: 3x3 unsharp mask over pass 1. The canvas is the crop at source resolution, so one output
+// pixel is one source pixel along the rotated axes, as in the export pipeline.
+const sharpenFragment = `${finishing}
+uniform sampler2D uProcessed; uniform float uSharpen;
+vec3 tap(vec2 t, float x, float y){ return texture2D(uProcessed,t+vec2(x,y)/uOutput).rgb; }
+void main(){
+  vec2 t=vec2(vUv.x,1.-vUv.y);
+  vec3 c=tap(t,0.,0.);
+  vec3 blur=(tap(t,-1.,-1.)+tap(t,1.,-1.)+tap(t,-1.,1.)+tap(t,1.,1.)
+    +2.*(tap(t,0.,-1.)+tap(t,-1.,0.)+tap(t,1.,0.)+tap(t,0.,1.))+4.*c)/16.;
+  c=clamp(c+(c-blur)*uSharpen,0.,1.);
+  gl_FragColor=vec4(finish(c,sourceUv()),1.);
+}`;
+
+function compileProgram(gl: WebGLRenderingContext, sources: [string, string], shaders: WebGLShader[]) {
+  const program = gl.createProgram()!;
+  for (const [type, source] of [
+    [gl.VERTEX_SHADER, sources[0]],
+    [gl.FRAGMENT_SHADER, sources[1]],
+  ] as const) {
+    const shader = gl.createShader(type)!;
+    shaders.push(shader);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      gl.deleteProgram(program);
+      throw new Error(gl.getShaderInfoLog(shader) || "Shader compilation failed");
+    }
+    gl.attachShader(program, shader);
+  }
+  // Both passes share one quad buffer, so pin the attribute to the same slot.
+  gl.bindAttribLocation(program, 0, "aPosition");
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    gl.deleteProgram(program);
+    throw new Error("Preview program failed");
+  }
+  return program;
+}
 
 export class EditingRenderer {
   private gl: WebGLRenderingContext;
-  private program: WebGLProgram;
+  private program!: WebGLProgram;
+  private sharpenProgram!: WebGLProgram;
   private shaders: WebGLShader[] = [];
-  private texture: WebGLTexture;
-  private buffer: WebGLBuffer;
-  private locations = new Map<string, WebGLUniformLocation | null>();
+  private texture!: WebGLTexture;
+  private buffer!: WebGLBuffer;
+  // Pass-1 result when sharpening; created on first use and resized with the crop.
+  private processedTexture: WebGLTexture | null = null;
+  private framebuffer: WebGLFramebuffer | null = null;
+  private processedSize = { width: 0, height: 0 };
+  private locations = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
   constructor(
     private canvas: HTMLCanvasElement,
     private base: EditingBase,
@@ -130,26 +178,12 @@ export class EditingRenderer {
     if (!gl || !gl.getExtension("OES_texture_float"))
       throw new Error("Live preview unavailable; using rendered preview.");
     this.gl = gl;
-    this.program = gl.createProgram()!;
-    for (const [type, source] of [
-      [gl.VERTEX_SHADER, vertex],
-      [gl.FRAGMENT_SHADER, fragment],
-    ] as const) {
-      const shader = gl.createShader(type)!;
-      this.shaders.push(shader);
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        const error = gl.getShaderInfoLog(shader);
-        this.dispose();
-        throw new Error(error || "Shader compilation failed");
-      }
-      gl.attachShader(this.program, shader);
-    }
-    gl.linkProgram(this.program);
-    if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
+    try {
+      this.program = compileProgram(gl, [vertex, fragment], this.shaders);
+      this.sharpenProgram = compileProgram(gl, [vertex, sharpenFragment], this.shaders);
+    } catch (error) {
       this.dispose();
-      throw new Error("Preview program failed");
+      throw error;
     }
     gl.useProgram(this.program);
     this.buffer = gl.createBuffer()!;
@@ -159,9 +193,8 @@ export class EditingRenderer {
       new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
       gl.STATIC_DRAW,
     );
-    const position = gl.getAttribLocation(this.program, "aPosition");
-    gl.enableVertexAttribArray(position);
-    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     this.texture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     const filter = gl.getExtension("OES_texture_float_linear")
@@ -189,9 +222,38 @@ export class EditingRenderer {
     }
   }
   private location(name: string) {
-    if (!this.locations.has(name))
-      this.locations.set(name, this.gl.getUniformLocation(this.program, name));
-    return this.locations.get(name)!;
+    const program = this.gl.getParameter(this.gl.CURRENT_PROGRAM) as WebGLProgram;
+    let table = this.locations.get(program);
+    if (!table) this.locations.set(program, (table = new Map()));
+    if (!table.has(name)) table.set(name, this.gl.getUniformLocation(program, name));
+    return table.get(name)!;
+  }
+  private processedTarget(width: number, height: number) {
+    const gl = this.gl;
+    if (!this.framebuffer) {
+      this.processedTexture = gl.createTexture();
+      this.framebuffer = gl.createFramebuffer();
+    }
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.processedTexture);
+    if (this.processedSize.width !== width || this.processedSize.height !== height) {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+      // Float keeps pass 1 exact (8 bits would round 0.998 up to a "clipped" 1.0); not every GPU can
+      // render to float, so fall back to 8 bits there.
+      const types = gl.getExtension("WEBGL_color_buffer_float") ? [gl.FLOAT, gl.UNSIGNED_BYTE] : [gl.UNSIGNED_BYTE];
+      for (const type of types) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, type, null);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.processedTexture, 0);
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) break;
+      }
+      this.processedSize = { width, height };
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    return this.framebuffer;
   }
   draw(
     settings: ExportEnhanceSettings,
@@ -214,8 +276,12 @@ export class EditingRenderer {
       this.canvas.width = crop.width;
       this.canvas.height = crop.height;
     }
+    const sharpen = settings.sharpen > 0 && !original;
     gl.useProgram(this.program);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    gl.uniform1i(this.location("uImage"), 0);
+    gl.uniform1i(this.location("uFinish"), sharpen ? 0 : 1);
     const controls = (prefix: string, s: Partial<ExportEnhanceSettings>) => {
       gl.uniform4f(
         this.location(`${prefix}Light`),
@@ -248,32 +314,35 @@ export class EditingRenderer {
       temperature:
         style.temperature + (settings.photoStyle.colour / 100) * 0.12,
     });
-    gl.uniform2f(this.location("uSource"), base.width, base.height);
-    gl.uniform2f(this.location("uOutput"), crop.width, crop.height);
-    gl.uniform2f(this.location("uCenter"), crop.cx, crop.cy);
-    gl.uniform2f(this.location("uRotation"), crop.c, crop.s);
     gl.uniform1f(this.location("uPalette"), settings.photoStyle.palette / 100);
-    gl.uniform1f(this.location("uSharpen"), settings.sharpen);
-    gl.uniform1i(this.location("uOriginal"), original ? 1 : 0);
-    gl.uniform1i(this.location("uClipping"), clipping ? 1 : 0);
     const gradient = settings.gradient;
-    gl.uniform1i(this.location("uGradientEnabled"), gradient?.enabled ? 1 : 0);
-    gl.uniform1i(this.location("uGradientInvert"), gradient?.invert ? 1 : 0);
-    gl.uniform1i(this.location("uMaskOverlay"), maskOverlay ? 1 : 0);
-    gl.uniform4f(
-      this.location("uGradientPoints"),
-      gradient?.start.x ?? 0.5,
-      gradient?.start.y ?? 0,
-      gradient?.end.x ?? 0.5,
-      gradient?.end.y ?? 1,
-    );
+    // Uniforms both passes read (declared in the shared finishing code).
+    const shared = () => {
+      gl.uniform2f(this.location("uSource"), base.width, base.height);
+      gl.uniform2f(this.location("uOutput"), crop.width, crop.height);
+      gl.uniform2f(this.location("uCenter"), crop.cx, crop.cy);
+      gl.uniform2f(this.location("uRotation"), crop.c, crop.s);
+      gl.uniform1i(this.location("uOriginal"), original ? 1 : 0);
+      gl.uniform1i(this.location("uClipping"), clipping ? 1 : 0);
+      gl.uniform1i(this.location("uGradientEnabled"), gradient?.enabled ? 1 : 0);
+      gl.uniform1i(this.location("uGradientInvert"), gradient?.invert ? 1 : 0);
+      gl.uniform1i(this.location("uMaskOverlay"), maskOverlay ? 1 : 0);
+      gl.uniform4f(
+        this.location("uGradientPoints"),
+        gradient?.start.x ?? 0.5,
+        gradient?.start.y ?? 0,
+        gradient?.end.x ?? 0.5,
+        gradient?.end.y ?? 1,
+      );
+      gl.uniform1f(this.location("uGradientFeather"), gradient?.feather ?? 1);
+    };
+    shared();
     gl.uniform3f(
       this.location("uGradientControls"),
       gradient?.exposure ?? 0,
       gradient?.highlights ?? 0,
       gradient?.temperature ?? 0,
     );
-    gl.uniform1f(this.location("uGradientFeather"), gradient?.feather ?? 1);
     const selected = settings.selectedColor;
     gl.uniform1i(
       this.location("uSelectedEnabled"),
@@ -293,6 +362,21 @@ export class EditingRenderer {
       selected?.luminance ?? 0,
     );
     gl.viewport(0, 0, crop.width, crop.height);
+    if (!sharpen) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.processedTarget(crop.width, crop.height));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(this.sharpenProgram);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.processedTexture);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(this.location("uProcessed"), 1);
+    gl.uniform1f(this.location("uSharpen"), settings.sharpen);
+    shared();
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   dispose() {
@@ -301,6 +385,9 @@ export class EditingRenderer {
     if (this.texture) gl.deleteTexture(this.texture);
     if (this.buffer) gl.deleteBuffer(this.buffer);
     if (this.program) gl.deleteProgram(this.program);
+    if (this.sharpenProgram) gl.deleteProgram(this.sharpenProgram);
+    if (this.processedTexture) gl.deleteTexture(this.processedTexture);
+    if (this.framebuffer) gl.deleteFramebuffer(this.framebuffer);
     this.shaders.forEach((shader) => gl.deleteShader(shader));
   }
   histogram() {

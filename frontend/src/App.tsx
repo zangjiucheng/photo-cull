@@ -5,6 +5,7 @@ import { InspectorPanel } from "./components/library/InspectorPanel";
 import { BrowseWorkspace } from "./components/workspaces/BrowseWorkspace";
 import { SettingsWorkspace } from "./components/workspaces/SettingsWorkspace";
 import { Onboarding, onboardingPending } from "./components/Onboarding";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DuplicatesWorkspace } from "./components/workspaces/DuplicatesWorkspace";
 import { ExportEnhanceWorkspace } from "./components/workspaces/ExportEnhanceWorkspace";
 import { ReviewWorkspace } from "./components/workspaces/ReviewWorkspace";
@@ -23,6 +24,14 @@ import type { AiRuntimeStatus, ExportEnhanceJob, ExportEnhanceSettings, LibraryF
 import { cloneSettings, defaultSettings, pasteSettings, rebasePad, type AdjustmentGroup } from "./editing/recipe";
 
 const NEW_WORKSPACE_FROM_FOLDER_VALUE = "__new_workspace_from_folder__";
+const WORKSPACE_LABELS: Record<WorkspaceTab, string> = {
+  browse: "Browse",
+  review: "Review",
+  duplicates: "Similarity",
+  "export-enhance": "Enhance & Export",
+  stats: "Stats",
+  settings: "Settings",
+};
 const WORKSPACE_TABS: WorkspaceTab[] = ["browse", "review", "duplicates", "export-enhance", "stats", "settings"];
 
 interface SimilarityProgress {
@@ -1484,7 +1493,9 @@ export default function App() {
           />
         )}
       >
-        {workspace}
+        <ErrorBoundary key={activeTab} label={WORKSPACE_LABELS[activeTab]}>
+          {workspace}
+        </ErrorBoundary>
       </WorkspaceShell>
       <ShortcutHelpDialog
         open={isShortcutHelpOpen}
