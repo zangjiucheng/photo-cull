@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import sqlite3
 import tempfile
 import time
@@ -150,18 +149,11 @@ def restore_backup(path: str) -> dict[str, Any]:
             safety = f"{os.path.splitext(current)[0]}.before-restore-{time.strftime('%Y%m%d-%H%M%S')}.db"
             with closing(db.connect()) as source, _open(safety) as target:
                 source.backup(target)
-        staged = current + ".restoring"
-        shutil.copyfile(extracted, staged)
-        # On Windows a background thread may hold the database open for a moment; retry briefly.
-        for attempt in range(10):
-            try:
-                os.replace(staged, current)
-                break
-            except PermissionError:
-                if attempt == 9:
-                    os.remove(staged)
-                    raise BackupError("The library is busy; wait for scanning or export to finish and try again")
-                time.sleep(0.2)
+        # Copy the backup into the live database through SQLite itself rather than swapping the
+        # file: other threads may hold connections (Windows refuses to replace an open file),
+        # and the backup API handles locking so they simply see the restored data.
+        with _open(extracted) as source, closing(db.connect()) as target:
+            source.backup(target)
     # Older backups are upgraded in place to the current schema.
     db.init_db()
     db.mark_interrupted_export_jobs()
